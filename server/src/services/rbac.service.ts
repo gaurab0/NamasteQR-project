@@ -2894,7 +2894,7 @@ export class RBACService {
 
     for (let i = 0; i < defaults.length; i++) {
       const d = defaults[i];
-      const tableId = `tbl-${slugify(d.table_number)}-${i + 1}`;
+      const tableId = `tbl-${slugify(businessId)}-${slugify(d.table_number)}-${i + 1}`;
       const t: RestaurantTable = {
         id: tableId,
         business_id: businessId,
@@ -2909,6 +2909,37 @@ export class RBACService {
         created_at: now,
         updated_at: now,
       };
+
+      try {
+        await db.ensureBusiness(businessId);
+        await prisma.restaurantTable.upsert({
+          where: { id: t.id },
+          create: {
+            id: t.id,
+            business_id: businessId,
+            table_number: t.table_number,
+            floor: t.floor || null,
+            building: t.building || null,
+            capacity: t.capacity || 4,
+            status: t.status || 'ACTIVE',
+            qr_code_url: t.qr_code_url || null,
+            last_scanned_at: null,
+            current_session_id: null,
+            created_at: now,
+            updated_at: now,
+          },
+          update: {
+            table_number: t.table_number,
+            floor: t.floor || null,
+            building: t.building || null,
+            capacity: t.capacity || 4,
+            status: t.status || 'ACTIVE',
+            updated_at: now,
+          },
+        });
+      } catch (e: any) {
+        console.warn('Prisma seedDefaultTables notice:', e.message);
+      }
 
       const payload = {
         ...t,
@@ -4855,7 +4886,7 @@ export class RBACService {
     user: { id: string; role?: string; email?: string }
   ) {
     const role = this.normalizeRole(user.role);
-    if (role !== 'OWNER' && role !== 'ADMIN') {
+    if (!isBusinessOwnerRole(role)) {
       throw new Error('Only Business Owners and Administrators can provision new franchise branches.');
     }
 
