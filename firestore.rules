@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Businesses / Tenants
+    match /businesses/{businessId} {
+      allow read, write: if true;
+
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
+    }
+    match /tenants/{tenantId} {
+      allow read, write: if true;
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Phone Verifications
+    match /phone_verifications/{verificationId} {
+      allow read, write: if true;
+    }
+
+    // OTP Verifications
+    match /otp_verifications/{otpId} {
+      allow read, write: if true;
+    }
+
+    // Password Reset Tokens
+    match /password_reset_tokens/{tokenId} {
+      allow read, write: if true;
+    }
+
+    // Sessions
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    // Audit logs
+    match /audit_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    // Fallback for all other collections and subcollections
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

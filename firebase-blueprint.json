@@ -1,0 +1,336 @@
+{
+  "entities": {
+    "Tenant": {
+      "title": "Tenant",
+      "description": "Represents a business tenant such as a Restaurant, Hotel, Resort, Cafe, or Bar.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier of the business" },
+        "name": { "type": "string", "description": "Business trade name" },
+        "type": { "type": "string", "enum": ["RESTAURANT", "HOTEL", "RESORT", "CAFE", "BAR"], "description": "Type of business operation" },
+        "slug": { "type": "string", "description": "URL-friendly unique slug" },
+        "status": { "type": "string", "enum": ["ACTIVE", "PENDING_VERIFICATION", "SUSPENDED"], "description": "Account status" },
+        "tagline": { "type": "string", "description": "Cuisine description or hospitality tagline" },
+        "location": { "type": "string", "description": "Dining area, street address or seating location" },
+        "kitchen_hours": { "type": "string", "description": "Kitchen and service operating hours" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "parent_business_id": { "type": "string", "description": "Flagship or parent franchise business ID" },
+        "owner_uid": { "type": "string", "description": "Owner account user ID that owns this franchise branch" },
+        "branch_code": { "type": "string", "description": "Short branch identification code (e.g. DT-01, AP-02)" },
+        "currency": { "type": "string", "description": "Currency code used by this branch" },
+        "tax_rate": { "type": "number", "description": "Default branch sales tax percentage" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation ISO timestamp" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last updated ISO timestamp" }
+      },
+      "required": ["id", "name", "type", "slug", "status", "created_at", "updated_at"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Represents an authenticated user account belonging to a business tenant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID" },
+        "business_id": { "type": "string", "description": "Tenant ID reference" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "password_hash": { "type": "string", "description": "Bcrypt hashed password" },
+        "role": { 
+          "type": "string", 
+          "enum": [
+            "SUPER_ADMIN", 
+            "RESTAURANT_OWNER", 
+            "HOTEL_OWNER", 
+            "RESTAURANT_MANAGER", 
+            "HOTEL_MANAGER", 
+            "FRONT_DESK", 
+            "KITCHEN_STAFF", 
+            "WAITER", 
+            "CASHIER", 
+            "HOUSEKEEPING", 
+            "STAFF", 
+            "CUSTOMER"
+          ],
+          "description": "System or business role" 
+        },
+        "is_active": { "type": "boolean", "description": "Account active flag" },
+        "phone_verified": { "type": "boolean", "description": "WhatsApp phone verification flag" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Registration ISO timestamp" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last updated ISO timestamp" }
+      },
+      "required": ["id", "business_id", "email", "password_hash", "role", "is_active", "phone_verified", "created_at", "updated_at"]
+    },
+    "PhoneVerification": {
+      "title": "PhoneVerification",
+      "description": "Stores user WhatsApp phone numbers and verification timestamps.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique verification record ID" },
+        "user_id": { "type": "string", "description": "User ID reference" },
+        "phone_country_code": { "type": "string", "description": "Dialing country code (e.g. +977, +1)" },
+        "phone_number": { "type": "string", "description": "Local phone number" },
+        "phone_e164": { "type": "string", "description": "Full E.164 phone string" },
+        "is_verified": { "type": "boolean", "description": "Verification state" },
+        "verified_at": { "type": "string", "format": "date-time", "description": "Verification timestamp" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Record creation timestamp" }
+      },
+      "required": ["id", "user_id", "phone_country_code", "phone_number", "phone_e164", "is_verified", "created_at"]
+    },
+    "OtpVerification": {
+      "title": "OtpVerification",
+      "description": "Hashed 6-digit WhatsApp OTP verification tokens with rate-limiting counters.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique OTP entry ID" },
+        "user_id": { "type": "string", "description": "User ID reference" },
+        "phone_e164": { "type": "string", "description": "Target WhatsApp phone number" },
+        "otp_hash": { "type": "string", "description": "Bcrypt hashed 6-digit OTP" },
+        "purpose": { "type": "string", "enum": ["SIGNUP_VERIFICATION", "LOGIN_2FA", "PASSWORD_RESET", "PHONE_UPDATE"], "description": "OTP reason" },
+        "attempt_count": { "type": "number", "description": "Number of failed verification attempts" },
+        "expires_at": { "type": "string", "format": "date-time", "description": "OTP expiration timestamp" },
+        "verified_at": { "type": "string", "format": "date-time", "description": "OTP success verification timestamp" },
+        "raw_otp_dev": { "type": "string", "description": "Optional dev preview code for sandbox test environments" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Generation timestamp" }
+      },
+      "required": ["id", "user_id", "phone_e164", "otp_hash", "purpose", "attempt_count", "expires_at", "created_at"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "User authentication tokens and session state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Session UUID" },
+        "user_id": { "type": "string", "description": "User ID reference" },
+        "token_hash": { "type": "string", "description": "SHA-256 hashed JWT token" },
+        "ip_address": { "type": "string", "description": "Client IP address" },
+        "user_agent": { "type": "string", "description": "Client browser user agent" },
+        "expires_at": { "type": "string", "format": "date-time", "description": "Session expiration timestamp" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Session creation timestamp" }
+      },
+      "required": ["id", "user_id", "token_hash", "expires_at", "created_at"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System activity logs for security and tracking, scoped per business tenant.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audit log ID" },
+        "user_id": { "type": "string", "description": "User reference" },
+        "account_name": { "type": "string", "description": "Business or user account name" },
+        "business_name": { "type": "string", "description": "Business name" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "status": { "type": "string", "enum": ["ONLINE", "OFFLINE", "PENDING", "FAILED"], "description": "Activity status" },
+        "event_type": { "type": "string", "description": "Action performed (e.g. ACCOUNT_CREATED, LOGIN_SUCCESS)" },
+        "ip_address": { "type": "string", "description": "Source IP address" },
+        "user_agent": { "type": "string", "description": "User agent string" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Event timestamp" }
+      },
+      "required": ["id", "event_type", "created_at"]
+    },
+    "Menu": {
+      "title": "Menu",
+      "description": "Menu items for restaurants, cafes, and bar venues. Restricted by RBAC: Only Managers can create, edit price, or delete items; Staff have read-only access for ordering.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique menu item ID" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "name": { "type": "string", "description": "Item name" },
+        "category": { "type": "string", "description": "Category (Appetizer, Main, Drink, etc.)" },
+        "price": { "type": "number", "description": "Item unit price" },
+        "currency": { "type": "string", "description": "Currency code (USD, NPR, etc.)" },
+        "description": { "type": "string", "description": "Description of ingredients" },
+        "is_available": { "type": "boolean", "description": "Availability state" },
+        "preparation_time_mins": { "type": "number", "description": "Preparation duration in minutes" },
+        "created_by": { "type": "string", "description": "User ID of creator (Manager)" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["id", "business_id", "name", "category", "price", "is_available", "created_at", "updated_at"]
+    },
+    "CheckIn": {
+      "title": "CheckIn",
+      "description": "Guest and table/room check-in records. Restricted by RBAC: Both Managers and Staff can create check-ins and check-outs; only Managers can delete records or modify tariffs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique check-in ID" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "guest_name": { "type": "string", "description": "Full name of the guest" },
+        "guest_phone": { "type": "string", "description": "Guest contact number" },
+        "guest_email": { "type": "string", "description": "Guest email" },
+        "room_or_table_number": { "type": "string", "description": "Room number or Table assignment" },
+        "check_in_date": { "type": "string", "format": "date-time", "description": "Check-in time" },
+        "check_out_date": { "type": "string", "format": "date-time", "description": "Check-out time" },
+        "status": { "type": "string", "enum": ["CHECKED_IN", "CHECKED_OUT", "RESERVED", "CANCELLED"], "description": "Occupancy status" },
+        "total_amount": { "type": "number", "description": "Total bill amount" },
+        "deposit_paid": { "type": "number", "description": "Deposit advance amount" },
+        "notes": { "type": "string", "description": "Special guest instructions" },
+        "handled_by_user_id": { "type": "string", "description": "Staff or manager user ID" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["id", "business_id", "guest_name", "room_or_table_number", "check_in_date", "status", "created_at", "updated_at"]
+    },
+    "Table": {
+      "title": "Table",
+      "description": "Restaurant tables and dining areas with associated QR ordering codes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique table ID" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "table_number": { "type": "string", "description": "Table identifier / name" },
+        "floor": { "type": "string", "description": "Floor designation (e.g. Ground Floor, Rooftop)" },
+        "building": { "type": "string", "description": "Building or Section" },
+        "capacity": { "type": "number", "description": "Seating capacity" },
+        "status": { "type": "string", "enum": ["ACTIVE", "OCCUPIED", "RESERVED", "INACTIVE"], "description": "Table status" },
+        "qr_code_url": { "type": "string", "description": "URL encoded in the table QR code" },
+        "last_scanned_at": { "type": "string", "format": "date-time", "description": "Last QR scan timestamp" },
+        "current_session_id": { "type": "string", "description": "Active dining session identifier" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["id", "business_id", "table_number", "capacity", "status", "qr_code_url", "created_at", "updated_at"]
+    },
+    "TableOrder": {
+      "title": "TableOrder",
+      "description": "Customer digital orders placed directly via table QR code scans, storing dish names, prices, customer details, special instructions, table info, and timestamps.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique order ID" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "table_id": { "type": "string", "description": "Table reference ID" },
+        "table_number": { "type": "string", "description": "Table number display" },
+        "floor": { "type": "string", "description": "Floor designation" },
+        "building": { "type": "string", "description": "Building or Section" },
+        "customer_name": { "type": "string", "description": "Customer or guest name" },
+        "customer_phone": { "type": "string", "description": "Customer contact number" },
+        "order_notes": { "type": "string", "description": "Special order instructions from customer" },
+        "items": { "type": "array", "description": "Ordered dish items with dish name, price, quantity, special instructions, and station" },
+        "total_amount": { "type": "number", "description": "Total order amount" },
+        "currency": { "type": "string", "description": "Currency code" },
+        "status": { "type": "string", "enum": ["RECEIVED", "PREPARING", "READY", "SERVED", "COMPLETED", "CANCELLED"], "description": "Order fulfillment status" },
+        "ready_at": { "type": "string", "format": "date-time", "description": "Timestamp when all items were prepared" },
+        "served_at": { "type": "string", "format": "date-time", "description": "Timestamp when items were served to table" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Order placement timestamp" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["id", "business_id", "table_id", "table_number", "customer_name", "items", "total_amount", "currency", "status", "created_at", "updated_at"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Completed point-of-sale receipt and billing transactions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique sale invoice ID" },
+        "invoice_number": { "type": "string", "description": "Human-readable invoice receipt number" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "customer_name": { "type": "string", "description": "Guest or customer name" },
+        "sale_type": { "type": "string", "enum": ["DINE_IN", "TAKEAWAY", "DELIVERY", "ROOM_SERVICE", "QUICK_POS"], "description": "Order type" },
+        "items": { "type": "array", "description": "List of sold line items" },
+        "subtotal": { "type": "number", "description": "Pre-tax subtotal amount" },
+        "total_amount": { "type": "number", "description": "Final billed amount" },
+        "currency": { "type": "string", "description": "Transaction currency code" },
+        "payment_method": { "type": "string", "enum": ["CASH", "UPI_QR", "CARD", "ONLINE", "ROOM_BILL", "SPLIT"], "description": "Payment method used" },
+        "payment_status": { "type": "string", "enum": ["PAID", "REFUNDED", "CANCELLED"], "description": "Payment settlement status" },
+        "created_at": { "type": "string", "format": "date-time", "description": "Transaction creation timestamp" },
+        "date_string": { "type": "string", "description": "Date formatted as YYYY-MM-DD" }
+      },
+      "required": ["id", "invoice_number", "business_id", "customer_name", "sale_type", "items", "subtotal", "total_amount", "currency", "payment_method", "payment_status", "created_at", "date_string"]
+    },
+    "TaxSettings": {
+      "title": "TaxSettings",
+      "description": "Business tax, VAT, and service charge configuration.",
+      "type": "object",
+      "properties": {
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "tax_enabled": { "type": "boolean", "description": "Whether taxes are applied at checkout" },
+        "currency": { "type": "string", "description": "Default currency code" },
+        "currency_symbol": { "type": "string", "description": "Currency symbol display" },
+        "rates": { "type": "array", "description": "List of configured tax rates (VAT, GST, Service Charge)" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last updated timestamp" }
+      },
+      "required": ["business_id", "tax_enabled", "currency", "currency_symbol", "rates", "updated_at"]
+    },
+    "GLAccount": {
+      "title": "GLAccount",
+      "description": "General Ledger account and ERP mapping entity for owner accounting integration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique account ID" },
+        "business_id": { "type": "string", "description": "Business tenant ID" },
+        "account_number": { "type": "string", "description": "General Ledger code (e.g., 4010, 1010)" },
+        "account_name": { "type": "string", "description": "Descriptive accounting ledger name" },
+        "category": { "type": "string", "enum": ["REVENUE", "TAX_LIABILITY", "ASSET", "EXPENSE", "LIABILITY", "EQUITY"], "description": "Accounting category" },
+        "mapping_key": { "type": "string", "description": "System functional mapping key (e.g., FOOD_SALES, VAT_COLLECTED)" },
+        "description": { "type": "string", "description": "Ledger purpose and scope notes" },
+        "is_active": { "type": "boolean", "description": "Whether this GL account is actively used" },
+        "updated_at": { "type": "string", "format": "date-time", "description": "Last update ISO timestamp" }
+      },
+      "required": ["id", "business_id", "account_number", "account_name", "category", "is_active"]
+    }
+  },
+  "firestore": {
+    "/businesses/{businessId}": {
+      "schema": { "$ref": "#/entities/Tenant" },
+      "description": "Business tenant profile document in Firestore."
+    },
+    "/businesses/{businessId}/menus/{menuId}": {
+      "schema": { "$ref": "#/entities/Menu" },
+      "description": "Menu items belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/menu_categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Menu" },
+      "description": "Menu categories belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/tables/{tableId}": {
+      "schema": { "$ref": "#/entities/Table" },
+      "description": "Dining tables and QR code configurations belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/table_orders/{orderId}": {
+      "schema": { "$ref": "#/entities/TableOrder" },
+      "description": "Customer table orders belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/Sale" },
+      "description": "Point-of-sale receipt records belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/tax_settings/{configId}": {
+      "schema": { "$ref": "#/entities/TaxSettings" },
+      "description": "Tax and VAT billing settings belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/gl_accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/GLAccount" },
+      "description": "General Ledger account links and financial mappings belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/check_ins/{checkInId}": {
+      "schema": { "$ref": "#/entities/CheckIn" },
+      "description": "Guest and room check-in logs belonging directly to the specific business in Firestore."
+    },
+    "/businesses/{businessId}/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Staff member accounts belonging directly to the specific business in Firestore."
+    },
+    "/tenants/{tenantId}": {
+      "schema": { "$ref": "#/entities/Tenant" },
+      "description": "Business tenant profile document."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User authentication profile."
+    },
+    "/phone_verifications/{verificationId}": {
+      "schema": { "$ref": "#/entities/PhoneVerification" },
+      "description": "Phone verification registry."
+    },
+    "/otp_verifications/{otpId}": {
+      "schema": { "$ref": "#/entities/OtpVerification" },
+      "description": "Hashed 6-digit WhatsApp OTP records."
+    },
+    "/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/Session" },
+      "description": "Active user sessions."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Security audit trail logs."
+    }
+  }
+}

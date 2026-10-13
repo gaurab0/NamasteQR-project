@@ -1,0 +1,8 @@
+{
+  "firestore": {
+    "databaseId": "ai-studio-remixremixservef-9ef5ae6f-16f7-43ef-8a7c-e5046035320b",
+    "rules": "firestore.rules",
+    "edition": "ENTERPRISE",
+    "dataAccessMode": "FIRESTORE_NATIVE"
+  }
+}
