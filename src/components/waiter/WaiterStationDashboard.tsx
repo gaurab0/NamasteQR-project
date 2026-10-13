@@ -3,6 +3,7 @@ import { collection, onSnapshot, doc, updateDoc} from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { RestaurantTable, AppRole } from '../../types/rbac';
 import { rbacService } from '../../services/rbac.service';
+import { socketService } from '../../services/socket.service';
 import { KitchenDisplaySystem } from '../kds/KitchenDisplaySystem';
 import { CheckCircle2, Users, Building2, AlertCircle, RefreshCw, Layers } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -56,6 +57,24 @@ export const WaiterStationDashboard: React.FC<WaiterStationDashboardProps> = ({
     });
 
     return () => unsubscribe();
+  }, [businessId]);
+
+  // Socket.io Real-time WebSocket Subscription for instant table updates
+  useEffect(() => {
+    if (!businessId) return;
+    socketService.joinBusiness(businessId);
+    const unsub = socketService.subscribeToTables((tableUpdate) => {
+      setTables((prev) => {
+        const idx = prev.findIndex((t) => t.id === tableUpdate.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], ...tableUpdate };
+          return updated;
+        }
+        return [...prev, tableUpdate];
+      });
+    });
+    return () => unsub();
   }, [businessId]);
 
   const buildingList = useMemo(() => {

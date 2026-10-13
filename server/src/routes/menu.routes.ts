@@ -1,16 +1,5 @@
 import { Router, Response } from 'express';
-import { 
-  firestoreDb, 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where 
-} from '../config/firebase';
+import { prisma } from '../lib/prisma';
 import { authenticate, optionalAuthenticate, requireResourceAccess, AuthenticatedRequest } from '../middleware/auth.middleware';
 import { db } from '../services/db.service';
 import { MenuItem, MenuCategory, FoodType, MenuStatus, MenuItemVariant } from '../types/rbac.types';
@@ -19,19 +8,6 @@ import { generateMenuDocId, generateCategoryDocId } from '../utils/id.utils';
 const router = Router();
 
 const DEFAULT_BIZ_ID = 'maya-forest-resort';
-
-/**
- * Strips undefined values so Firestore does not throw unsupported field value errors
- */
-function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) {
-      result[k] = v;
-    }
-  }
-  return result;
-}
 
 /**
  * Robust helper to resolve the business ID from query, header, body, or authenticated user
@@ -72,23 +48,22 @@ async function resolveBusinessId(req: AuthenticatedRequest): Promise<string> {
 router.get('/categories', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await resolveBusinessId(req);
-    const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'menu_categories'));
-    const categories: MenuCategory[] = [];
-
-    snap.forEach((d) => {
-      const data = d.data();
-      categories.push({
-        id: d.id,
-        business_id: data.business_id || businessId,
-        name: data.name,
-        order: typeof data.order === 'number' ? data.order : undefined,
-        created_at: new Date(data.created_at || Date.now()),
-        updated_at: new Date(data.updated_at || Date.now()),
-      });
+    const dbCats = await prisma.menuCategory.findMany({
+      where: { business_id: businessId },
+      orderBy: { order: 'asc' },
     });
 
-    const bizSnap = await getDoc(doc(firestoreDb, 'businesses', businessId));
-    const catOrder = bizSnap.exists() ? (bizSnap.data()?.menu_theme_config?.categoryOrder || []) : [];
+    const categories: MenuCategory[] = dbCats.map((c) => ({
+      id: c.id,
+      business_id: c.business_id,
+      name: c.name,
+      order: c.order,
+      created_at: c.created_at,
+      updated_at: c.updated_at,
+    }));
+
+    const biz = await prisma.business.findUnique({ where: { id: businessId } });
+    const catOrder = (biz?.menu_theme_config as any)?.categoryOrder || [];
 
     categories.sort((a, b) => {
       if (Array.isArray(catOrder) && catOrder.length > 0) {
@@ -117,7 +92,7 @@ router.get('/categories', optionalAuthenticate, async (req: AuthenticatedRequest
 
 /**
  * POST /api/menus/categories
- * Creates a new category using category name slug as document ID
+ * Creates a new category
  */
 router.post('/categories', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -132,18 +107,16 @@ router.post('/categories', authenticate, requireResourceAccess('menus', 'write')
     }
 
     const catId = generateCategoryDocId(name.trim());
-    const newCategory: MenuCategory = {
-      id: catId,
-      business_id: businessId,
-      name: name.trim(),
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', newCategory.id), {
-      ...newCategory,
-      created_at: newCategory.created_at.toISOString(),
-      updated_at: newCategory.updated_at.toISOString(),
+    const newCategory = await prisma.menuCategory.upsert({
+      where: { id: catId },
+      create: {
+        id: catId,
+        business_id: businessId,
+        name: name.trim(),
+      },
+      update: {
+        name: name.trim(),
+      },
     });
 
     return res.status(201).json({
@@ -176,27 +149,27 @@ router.put('/categories/reorder', authenticate, requireResourceAccess('menus', '
       });
     }
 
-    // 1. Update individual category documents with order index
-    const updatePromises = order.map((catId: string, idx: number) => {
-      const docRef = doc(firestoreDb, 'businesses', businessId, 'menu_categories', catId);
-      return updateDoc(docRef, {
-        order: idx,
-        updated_at: new Date().toISOString(),
-      }).catch((e) => console.warn('Reorder note for category ' + catId + ':', e.message));
-    });
+    await Promise.all(
+      order.map((catId: string, idx: number) =>
+        prisma.menuCategory
+          .update({
+            where: { id: catId },
+            data: { order: idx },
+          })
+          .catch(() => {})
+      )
+    );
 
-    await Promise.all(updatePromises);
-
-    // 2. Update business doc menu_theme_config.categoryOrder for instant customer real-time sync
-    const bizRef = doc(firestoreDb, 'businesses', businessId);
-    const bizSnap = await getDoc(bizRef);
-    if (bizSnap.exists()) {
-      const bizData = bizSnap.data();
-      const existingThemeConfig = bizData.menu_theme_config || {};
-      await updateDoc(bizRef, {
-        menu_theme_config: {
-          ...existingThemeConfig,
-          categoryOrder: order,
+    const biz = await prisma.business.findUnique({ where: { id: businessId } });
+    if (biz) {
+      const existingThemeConfig = (biz.menu_theme_config as any) || {};
+      await prisma.business.update({
+        where: { id: businessId },
+        data: {
+          menu_theme_config: {
+            ...existingThemeConfig,
+            categoryOrder: order,
+          },
         },
       });
     }
@@ -220,7 +193,6 @@ router.put('/categories/reorder', authenticate, requireResourceAccess('menus', '
  */
 router.put('/categories/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = await resolveBusinessId(req);
     const categoryId = req.params.id;
     const { name } = req.body;
 
@@ -231,14 +203,14 @@ router.put('/categories/:id', authenticate, requireResourceAccess('menus', 'writ
       });
     }
 
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId);
-    await updateDoc(docRef, {
-      name: name.trim(),
-      updated_at: new Date().toISOString(),
+    const updated = await prisma.menuCategory.update({
+      where: { id: categoryId },
+      data: { name: name.trim() },
     });
 
     return res.json({
       success: true,
+      data: updated,
       message: 'Category updated successfully',
     });
   } catch (err: any) {
@@ -256,9 +228,8 @@ router.put('/categories/:id', authenticate, requireResourceAccess('menus', 'writ
  */
 router.delete('/categories/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = await resolveBusinessId(req);
     const categoryId = req.params.id;
-    await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId));
+    await prisma.menuCategory.delete({ where: { id: categoryId } });
 
     return res.json({
       success: true,
@@ -289,23 +260,20 @@ router.get('/', optionalAuthenticate, async (req: AuthenticatedRequest, res: Res
     const statusFilter = req.query.status as string;
     const searchQuery = (req.query.search as string)?.toLowerCase();
 
-    const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'menus'));
-    const items: MenuItem[] = [];
+    const dbItems = await prisma.menuItem.findMany({
+      where: { business_id: businessId },
+      orderBy: { order_index: 'asc' },
+    });
 
-    snapshot.forEach((docSnap) => {
-      const d = docSnap.data();
-      const itemStatus: MenuStatus = d.status || (d.is_available === false ? 'unavailable' : 'available');
-      const additionalCats = Array.isArray(d.additional_categories) 
-        ? d.additional_categories.filter((c: any) => typeof c === 'string' && c.trim().length > 0)
-        : [];
-
-      items.push({
-        id: docSnap.id,
-        business_id: d.business_id || businessId,
+    const items: MenuItem[] = dbItems.map((d) => {
+      const itemStatus: MenuStatus = (d.status as MenuStatus) || (d.is_available === false ? 'unavailable' : 'available');
+      return {
+        id: d.id,
+        business_id: d.business_id,
         name: d.name,
         category: d.category || 'General',
-        additional_categories: additionalCats,
-        category_id: d.category_id || null,
+        additional_categories: d.additional_categories || [],
+        category_id: d.category_id || undefined,
         price: Number(d.price) || 0,
         currency: d.currency || 'Rs.',
         description: d.description || '',
@@ -314,20 +282,19 @@ router.get('/', optionalAuthenticate, async (req: AuthenticatedRequest, res: Res
         status: itemStatus,
         is_available: itemStatus === 'available',
         has_variants: Boolean(d.has_variants),
-        variants: Array.isArray(d.variants) ? d.variants : [],
+        variants: (d.variants as any) || [],
         variant_group_name: d.variant_group_name || undefined,
-        display_style: d.display_style || 'auto',
-        show_image: d.show_image !== undefined ? Boolean(d.show_image) : true,
+        display_style: (d.display_style as any) || 'auto',
+        show_image: d.show_image,
         promo_badge: d.promo_badge || undefined,
         order_index: d.order_index,
         preparation_time_mins: d.preparation_time_mins || 15,
         created_by: d.created_by || 'system',
-        created_at: new Date(d.created_at || Date.now()),
-        updated_at: new Date(d.updated_at || Date.now()),
-      });
+        created_at: d.created_at,
+        updated_at: d.updated_at,
+      };
     });
 
-    // In-memory filter pipeline
     let filtered = items;
 
     if (categoryFilter && categoryFilter !== 'all' && categoryFilter !== 'All') {
@@ -385,31 +352,24 @@ router.get('/', optionalAuthenticate, async (req: AuthenticatedRequest, res: Res
  */
 router.get('/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = await resolveBusinessId(req);
     const itemId = req.params.id;
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'menus', itemId);
-    const snap = await getDoc(docRef);
+    const d = await prisma.menuItem.findUnique({ where: { id: itemId } });
 
-    if (!snap.exists()) {
+    if (!d) {
       return res.status(404).json({
         success: false,
         error: { code: 'NOT_FOUND', message: `Menu item with ID ${itemId} not found.` },
       });
     }
 
-    const d = snap.data();
-    const itemStatus: MenuStatus = d.status || (d.is_available === false ? 'unavailable' : 'available');
-    const additionalCats = Array.isArray(d.additional_categories) 
-      ? d.additional_categories.filter((c: any) => typeof c === 'string' && c.trim().length > 0)
-      : [];
-
+    const itemStatus: MenuStatus = (d.status as MenuStatus) || (d.is_available === false ? 'unavailable' : 'available');
     const item: MenuItem = {
-      id: snap.id,
-      business_id: d.business_id || businessId,
+      id: d.id,
+      business_id: d.business_id,
       name: d.name,
       category: d.category || 'General',
-      additional_categories: additionalCats,
-      category_id: d.category_id || null,
+      additional_categories: d.additional_categories || [],
+      category_id: d.category_id || undefined,
       price: Number(d.price) || 0,
       currency: d.currency || 'Rs.',
       description: d.description || '',
@@ -418,16 +378,16 @@ router.get('/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: 
       status: itemStatus,
       is_available: itemStatus === 'available',
       has_variants: Boolean(d.has_variants),
-      variants: Array.isArray(d.variants) ? d.variants : [],
+      variants: (d.variants as any) || [],
       variant_group_name: d.variant_group_name || undefined,
-      display_style: d.display_style || 'auto',
-      show_image: d.show_image !== undefined ? Boolean(d.show_image) : true,
+      display_style: (d.display_style as any) || 'auto',
+      show_image: d.show_image,
       promo_badge: d.promo_badge || undefined,
       order_index: d.order_index,
       preparation_time_mins: d.preparation_time_mins || 15,
       created_by: d.created_by || 'system',
-      created_at: new Date(d.created_at || Date.now()),
-      updated_at: new Date(d.updated_at || Date.now()),
+      created_at: d.created_at,
+      updated_at: d.updated_at,
     };
 
     return res.json({
@@ -445,7 +405,7 @@ router.get('/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: 
 
 /**
  * POST /api/menus
- * Create a new menu item with human-readable dish name as document ID
+ * Create a new menu item
  */
 router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -509,46 +469,36 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
         })
       : [];
 
-    const newItem: MenuItem = {
-      id: docId,
-      business_id: businessId,
-      name: name.trim(),
-      category: (category && typeof category === 'string') ? category.trim() : 'General',
-      additional_categories: validAdditionalCats,
-      category_id: category_id || null,
-      price: Number(price),
-      currency: currency || 'Rs.',
-      description: description || '',
-      image_url: image_url || '',
-      food_type: validFoodType,
-      status: itemStatus,
-      is_available: itemStatus === 'available',
-      has_variants: Boolean(has_variants && validVariants.length > 0),
-      variants: validVariants,
-      variant_group_name: variant_group_name ? String(variant_group_name).trim() : undefined,
-      display_style: display_style || 'auto',
-      show_image: show_image !== undefined ? Boolean(show_image) : true,
-      promo_badge: promo_badge ? String(promo_badge).trim() : undefined,
-      order_index: order_index !== undefined ? Number(order_index) : undefined,
-      preparation_time_mins: Number(preparation_time_mins) || 15,
-      created_by: userId,
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-
-    const payload = sanitizeForFirestore({
-      ...newItem,
-      created_at: newItem.created_at.toISOString(),
-      updated_at: newItem.updated_at.toISOString(),
-      category_id: category_id || null,
-      additional_categories: validAdditionalCats,
+    const created = await prisma.menuItem.create({
+      data: {
+        id: docId,
+        business_id: businessId,
+        name: name.trim(),
+        category: (category && typeof category === 'string') ? category.trim() : 'General',
+        additional_categories: validAdditionalCats,
+        category_id: category_id || null,
+        price: Number(price),
+        currency: currency || 'Rs.',
+        description: description || '',
+        image_url: image_url || '',
+        food_type: validFoodType,
+        status: itemStatus,
+        is_available: itemStatus === 'available',
+        has_variants: Boolean(has_variants && validVariants.length > 0),
+        variants: validVariants,
+        variant_group_name: variant_group_name ? String(variant_group_name).trim() : null,
+        display_style: display_style || 'auto',
+        show_image: show_image !== undefined ? Boolean(show_image) : true,
+        promo_badge: promo_badge ? String(promo_badge).trim() : null,
+        order_index: order_index !== undefined ? Number(order_index) : 0,
+        preparation_time_mins: Number(preparation_time_mins) || 15,
+        created_by: userId,
+      },
     });
-
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', newItem.id), payload);
 
     return res.status(201).json({
       success: true,
-      data: newItem,
+      data: created,
       message: 'Menu item created successfully',
     });
   } catch (err: any) {
@@ -566,19 +516,7 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
  */
 router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = await resolveBusinessId(req);
     const itemId = req.params.id;
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'menus', itemId);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: `Menu item with ID ${itemId} not found.` },
-      });
-    }
-
-    const existingData = snap.data();
     const {
       name,
       category,
@@ -601,9 +539,7 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
       preparation_time_mins,
     } = req.body;
 
-    const updates: Record<string, any> = {
-      updated_at: new Date().toISOString(),
-    };
+    const updates: any = {};
 
     if (name !== undefined) updates.name = String(name).trim();
     if (category !== undefined) updates.category = String(category).trim();
@@ -623,20 +559,7 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
     if (preparation_time_mins !== undefined) updates.preparation_time_mins = Number(preparation_time_mins);
     if (has_variants !== undefined) updates.has_variants = Boolean(has_variants);
     if (variants !== undefined) {
-      updates.variants = Array.isArray(variants)
-        ? variants.map((v: any, idx: number) => {
-            const variantObj: any = {
-              id: v.id || `var_${Date.now()}_${idx}`,
-              name: String(v.name || '').trim(),
-              price: Number(v.price) || 0,
-              is_available: v.is_available !== false,
-            };
-            if (v.image_url) variantObj.image_url = String(v.image_url).trim();
-            if (v.description) variantObj.description = String(v.description).trim();
-            if (v.food_type && ['veg', 'non-veg', 'egg', 'none'].includes(v.food_type)) variantObj.food_type = v.food_type;
-            return variantObj;
-          })
-        : [];
+      updates.variants = Array.isArray(variants) ? variants : [];
     }
     if (variant_group_name !== undefined) {
       updates.variant_group_name = variant_group_name ? String(variant_group_name).trim() : null;
@@ -654,45 +577,14 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
       updates.status = is_available ? 'available' : 'unavailable';
     }
 
-    await updateDoc(docRef, sanitizeForFirestore(updates));
-
-    const updatedSnap = await getDoc(docRef);
-    const d = updatedSnap.data() || {};
-    const itemStatus: MenuStatus = d.status || (d.is_available === false ? 'unavailable' : 'available');
-    const additionalCats = Array.isArray(d.additional_categories)
-      ? d.additional_categories.filter((c: any) => typeof c === 'string' && c.trim().length > 0)
-      : [];
-
-    const updatedItem: MenuItem = {
-      id: itemId,
-      business_id: d.business_id || existingData.business_id || businessId,
-      name: d.name || existingData.name,
-      category: d.category || existingData.category,
-      additional_categories: additionalCats,
-      category_id: d.category_id || null,
-      price: Number(d.price) || 0,
-      currency: d.currency || 'Rs.',
-      description: d.description || '',
-      image_url: d.image_url || '',
-      food_type: (d.food_type as FoodType) || 'none',
-      status: itemStatus,
-      is_available: itemStatus === 'available',
-      has_variants: Boolean(d.has_variants),
-      variants: Array.isArray(d.variants) ? d.variants : [],
-      variant_group_name: d.variant_group_name || undefined,
-      display_style: d.display_style || 'auto',
-      show_image: d.show_image !== undefined ? Boolean(d.show_image) : true,
-      promo_badge: d.promo_badge || undefined,
-      order_index: d.order_index,
-      preparation_time_mins: d.preparation_time_mins || 15,
-      created_by: d.created_by || 'system',
-      created_at: new Date(d.created_at || Date.now()),
-      updated_at: new Date(d.updated_at || Date.now()),
-    };
+    const updated = await prisma.menuItem.update({
+      where: { id: itemId },
+      data: updates,
+    });
 
     return res.json({
       success: true,
-      data: updatedItem,
+      data: updated,
       message: 'Menu item updated successfully',
     });
   } catch (err: any) {
@@ -706,28 +598,14 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
 
 /**
  * PATCH /api/menus/:id/status
- * Quick toggle for item availability status (available, unavailable, out_of_stock)
+ * Quick toggle for item availability status
  */
 router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = await resolveBusinessId(req);
     const itemId = req.params.id;
     const { status, is_available } = req.body;
 
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'menus', itemId);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: `Menu item with ID ${itemId} not found.` },
-      });
-    }
-
-    const updates: Record<string, any> = {
-      updated_at: new Date().toISOString(),
-    };
-
+    const updates: any = {};
     if (status) {
       updates.status = status;
       updates.is_available = status === 'available';
@@ -741,13 +619,16 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
       });
     }
 
-    await updateDoc(docRef, sanitizeForFirestore(updates));
+    const updated = await prisma.menuItem.update({
+      where: { id: itemId },
+      data: updates,
+    });
 
     return res.json({
       success: true,
-      message: `Menu item status updated to ${updates.status}`,
-      status: updates.status,
-      is_available: updates.is_available,
+      message: `Menu item status updated to ${updated.status}`,
+      status: updated.status,
+      is_available: updated.is_available,
     });
   } catch (err: any) {
     console.error('Error updating menu item status:', err);
@@ -760,23 +641,12 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
 
 /**
  * DELETE /api/menus/:id
- * Delete menu item from Firestore
+ * Delete menu item from database
  */
 router.delete('/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = await resolveBusinessId(req);
     const itemId = req.params.id;
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'menus', itemId);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: `Menu item with ID ${itemId} not found.` },
-      });
-    }
-
-    await deleteDoc(docRef);
+    await prisma.menuItem.delete({ where: { id: itemId } });
 
     return res.json({
       success: true,

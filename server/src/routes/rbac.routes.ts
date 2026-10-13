@@ -10,6 +10,8 @@ import {
   getEffectiveTabs,
   describeResourceRequirement,
 } from '../services/tabAccess';
+import { prisma } from '../lib/prisma';
+import { realtimeEmitter } from '../lib/socket';
 
 const router = Router();
 
@@ -1279,18 +1281,31 @@ router.post('/orders/:id/reject-payment', authenticate, async (req: Authenticate
   }
 });
 
-router.post('/orders/:id/payment-method', async (req: Request, res: Response) => {
+router.post('/orders/:id/payment-method', optionalAuthenticate, async (req: Request, res: Response) => {
   try {
     // This can be called unauthenticated by the guest via CustomerMenuPreviewPage/OrderSuccessModal
-    const businessId = (req.query.businessId as string) || req.body.businessId;
+    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
     const orderId = req.params.id;
     const { payment_method } = req.body;
     
     if (!businessId) throw new Error("businessId required");
     
-    const { doc, updateDoc } = require('../config/firebase');
-    const orderRef = doc(require('../config/firebase').firestoreDb, 'businesses', businessId, 'table_orders', orderId);
-    await updateDoc(orderRef, { payment_method });
+    try {
+      await prisma.tableOrder.updateMany({
+        where: { id: orderId, business_id: businessId },
+        data: { payment_method },
+      });
+    } catch (e: any) {
+      console.warn('Prisma payment-method update note:', e.message);
+    }
+
+    try {
+      const { doc, updateDoc, firestoreDb } = require('../config/firebase');
+      const orderRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId);
+      await updateDoc(orderRef, { payment_method });
+    } catch (e: any) {}
+
+    realtimeEmitter.orderUpdated(businessId, { id: orderId, payment_method });
     
     return res.json({ success: true, message: 'Payment method updated' });
   } catch (err: any) {
@@ -1563,23 +1578,6 @@ router.delete('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, 
       success: false,
       error: { code: 'SALES_BATCH_DELETE_FAILED', message: err.message }
     });
-  }
-});
-
-/**
- * Update Customer Declared Payment Method
- */
-router.post('/orders/:id/payment-method', authenticate, async (req: Request, res: Response) => {
-  try {
-    const { businessId, payment_method } = req.body;
-    const orderId = req.params.id;
-    const adminDb = require('../services/db.service').adminDb;
-    await adminDb.collection('businesses').doc(businessId).collection('table_orders').doc(orderId).update({
-      payment_method
-    });
-    return res.status(200).json({ success: true });
-  } catch (err: any) {
-    return res.status(400).json({ success: false, error: { message: err.message } });
   }
 });
 

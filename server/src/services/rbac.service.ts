@@ -40,8 +40,10 @@ import {
   SaleTaxBreakdown,
   GLAccountLink,
   GLAccountCategory
-} from '../types/rbac.types';
+} from '../types';
 import { db } from './db.service';
+import { prisma } from '../lib/prisma';
+import { realtimeEmitter } from '../lib/socket';
 import { auditService } from './audit.service';
 import { incrementSequence } from '../utils/sequence.util';
 import { generateMenuDocId, generateCategoryDocId, slugify } from '../utils/id.utils';
@@ -157,6 +159,43 @@ export class RBACService {
     }
 
     try {
+      const dbItems = await prisma.menuItem.findMany({
+        where: { business_id: businessId },
+        orderBy: { order_index: 'asc' },
+      });
+      if (dbItems.length > 0) {
+        return dbItems.map((d: any) => ({
+          id: d.id,
+          business_id: d.business_id,
+          name: d.name,
+          category: d.category || 'General',
+          category_id: d.category_id || undefined,
+          price: Number(d.price),
+          currency: d.currency || 'Rs.',
+          description: d.description || '',
+          image_url: d.image_url || '',
+          food_type: (d.food_type as any) || 'non-veg',
+          variants: (d.variants as any) || [],
+          has_variants: d.has_variants || false,
+          variant_group_name: d.variant_group_name || undefined,
+          additional_categories: d.additional_categories || [],
+          show_image: d.show_image,
+          promo_badge: d.promo_badge || undefined,
+          display_style: (d.display_style as any) || undefined,
+          status: (d.status as any) || (d.is_available ? 'available' : 'unavailable'),
+          is_available: d.is_available,
+          order_index: d.order_index,
+          preparation_time_mins: d.preparation_time_mins || 15,
+          created_by: d.created_by || 'system',
+          created_at: new Date(d.created_at),
+          updated_at: new Date(d.updated_at),
+        }));
+      }
+    } catch (err: any) {
+      console.warn('Prisma getMenuItems fallback:', err.message);
+    }
+
+    try {
       // First query hierarchical subcollection: /businesses/{businessId}/menus
       let snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'menus'));
       if (snapshot.empty) {
@@ -215,6 +254,24 @@ export class RBACService {
     user: { id: string; role?: string; email?: string }
   ): Promise<MenuCategory[]> {
     try {
+      const dbCats = await prisma.menuCategory.findMany({
+        where: { business_id: businessId },
+        orderBy: { order: 'asc' },
+      });
+      if (dbCats.length > 0) {
+        return dbCats.map((d: any) => ({
+          id: d.id,
+          business_id: d.business_id,
+          name: d.name,
+          created_at: new Date(d.created_at),
+          updated_at: new Date(d.updated_at),
+        }));
+      }
+    } catch (err: any) {
+      console.warn('Prisma getCategories fallback:', err.message);
+    }
+
+    try {
       const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'menu_categories'));
       const categories: MenuCategory[] = [];
 
@@ -258,6 +315,22 @@ export class RBACService {
       updated_at: new Date(),
     };
 
+    try {
+      await prisma.menuCategory.upsert({
+        where: { id: catId },
+        create: {
+          id: catId,
+          business_id: businessId,
+          name: data.name.trim(),
+        },
+        update: {
+          name: data.name.trim(),
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createCategory error:', e.message);
+    }
+
     const payload = {
       ...newCategory,
       created_at: newCategory.created_at.toISOString(),
@@ -265,8 +338,11 @@ export class RBACService {
     };
 
     // Save directly to /businesses/{businessId}/menu_categories/{catId}
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', newCategory.id), payload);
+    try {
+      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', newCategory.id), payload);
+    } catch (e) {}
 
+    realtimeEmitter.menuUpdated(businessId);
     return newCategory;
   }
 
@@ -284,6 +360,15 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Manager role required to rename categories.');
     }
 
+    try {
+      await prisma.menuCategory.update({
+        where: { id: categoryId },
+        data: { name: data.name.trim() },
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateCategory error:', e.message);
+    }
+
     const payload = {
       name: data.name.trim(),
       updated_at: new Date().toISOString(),
@@ -294,6 +379,8 @@ export class RBACService {
     } catch (e) {
       await setDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId), payload, { merge: true });
     }
+
+    realtimeEmitter.menuUpdated(businessId);
   }
 
   /**
@@ -310,8 +397,18 @@ export class RBACService {
     }
 
     try {
+      await prisma.menuCategory.delete({
+        where: { id: categoryId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma deleteCategory error:', e.message);
+    }
+
+    try {
       await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId));
     } catch (e) {}
+
+    realtimeEmitter.menuUpdated(businessId);
   }
 
   /**
@@ -375,6 +472,47 @@ export class RBACService {
       updated_at: new Date(),
     };
 
+    // Save to Prisma PostgreSQL
+    try {
+      await prisma.menuItem.upsert({
+        where: { id: newItem.id },
+        create: {
+          id: newItem.id,
+          business_id: businessId,
+          name: newItem.name,
+          category: newItem.category,
+          category_id: newItem.category_id || null,
+          additional_categories: newItem.additional_categories || [],
+          price: newItem.price,
+          currency: newItem.currency,
+          description: newItem.description || '',
+          image_url: newItem.image_url || '',
+          food_type: newItem.food_type || 'non-veg',
+          status: newItem.status,
+          is_available: newItem.is_available,
+          has_variants: newItem.has_variants,
+          variants: (newItem.variants as any) || [],
+          variant_group_name: itemData.name ? undefined : null,
+          display_style: newItem.display_style || 'auto',
+          show_image: newItem.show_image ?? true,
+          promo_badge: newItem.promo_badge || null,
+          order_index: newItem.order_index ?? 0,
+          preparation_time_mins: newItem.preparation_time_mins || 15,
+          created_by: user.id,
+        },
+        update: {
+          name: newItem.name,
+          category: newItem.category,
+          price: newItem.price,
+          status: newItem.status,
+          is_available: newItem.is_available,
+          variants: (newItem.variants as any) || [],
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createMenuItem error:', e.message);
+    }
+
     const payload: any = {
       ...newItem,
       created_at: newItem.created_at.toISOString(),
@@ -385,8 +523,11 @@ export class RBACService {
     Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
 
     // Save under /businesses/{businessId}/menus/{newItem.id}
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', newItem.id), payload);
+    try {
+      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', newItem.id), payload);
+    } catch (e) {}
 
+    realtimeEmitter.menuUpdated(businessId);
     return newItem;
   }
 
@@ -405,13 +546,46 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot update menu item');
     }
 
+    try {
+      const prismaData: any = {};
+      if (updates.name !== undefined) prismaData.name = updates.name.trim();
+      if (updates.category !== undefined) prismaData.category = updates.category.trim();
+      if (updates.category_id !== undefined) prismaData.category_id = updates.category_id;
+      if (updates.additional_categories !== undefined) prismaData.additional_categories = updates.additional_categories;
+      if (updates.price !== undefined) prismaData.price = Number(updates.price);
+      if (updates.currency !== undefined) prismaData.currency = updates.currency;
+      if (updates.description !== undefined) prismaData.description = updates.description;
+      if (updates.image_url !== undefined) prismaData.image_url = updates.image_url;
+      if (updates.food_type !== undefined) prismaData.food_type = updates.food_type;
+      if (updates.status !== undefined) {
+        prismaData.status = updates.status;
+        prismaData.is_available = updates.status === 'available';
+      } else if (updates.is_available !== undefined) {
+        prismaData.is_available = updates.is_available;
+        prismaData.status = updates.is_available ? 'available' : 'unavailable';
+      }
+      if (updates.has_variants !== undefined) prismaData.has_variants = updates.has_variants;
+      if (updates.variants !== undefined) prismaData.variants = updates.variants;
+      if (updates.variant_group_name !== undefined) prismaData.variant_group_name = updates.variant_group_name;
+      if (updates.display_style !== undefined) prismaData.display_style = updates.display_style;
+      if (updates.show_image !== undefined) prismaData.show_image = updates.show_image;
+      if (updates.promo_badge !== undefined) prismaData.promo_badge = updates.promo_badge;
+      if (updates.order_index !== undefined) prismaData.order_index = updates.order_index;
+      if (updates.preparation_time_mins !== undefined) prismaData.preparation_time_mins = updates.preparation_time_mins;
+
+      await prisma.menuItem.update({
+        where: { id: itemId },
+        data: prismaData,
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateMenuItem error:', e.message);
+    }
+
     const payload: any = {
       ...updates,
       updated_at: new Date().toISOString(),
     };
     
-    console.log('UPDATING MENU ITEM, variants incoming:', JSON.stringify(updates.variants, null, 2));
-
     if (updates.category_id === undefined && 'category_id' in updates) {
       payload.category_id = null;
     }
@@ -424,13 +598,13 @@ export class RBACService {
 
     Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
 
-    console.log('FINAL PAYLOAD TO FIRESTORE:', JSON.stringify(payload, null, 2));
-    
     try {
       await updateDoc(doc(firestoreDb, 'businesses', businessId, 'menus', itemId), payload);
     } catch (e) {
       await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', itemId), payload, { merge: true });
     }
+
+    realtimeEmitter.menuUpdated(businessId);
   }
 
   /**
@@ -447,8 +621,18 @@ export class RBACService {
     }
 
     try {
+      await prisma.menuItem.delete({
+        where: { id: itemId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma deleteMenuItem error:', e.message);
+    }
+
+    try {
       await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'menus', itemId));
     } catch (e) {}
+
+    realtimeEmitter.menuUpdated(businessId);
   }
 
   // =========================================================================
@@ -1070,6 +1254,37 @@ export class RBACService {
     user?: { id: string; role?: string; email?: string }
   ): Promise<RestaurantTable[]> {
     try {
+      const dbTables = await prisma.restaurantTable.findMany({
+        where: { business_id: businessId },
+      });
+      if (dbTables.length > 0) {
+        const tables: RestaurantTable[] = dbTables.map((d: any) => ({
+          id: d.id,
+          business_id: d.business_id,
+          table_number: d.table_number,
+          order_number: d.order_number || undefined,
+          invoice_number: d.invoice_number || undefined,
+          floor: d.floor ?? null,
+          building: d.building ?? null,
+          capacity: d.capacity || 4,
+          status: (d.status as TableStatus) || 'ACTIVE',
+          pay_first_enabled: Boolean(d.pay_first_enabled),
+          qr_code_url: d.qr_code_url || '',
+          last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : null,
+          current_session_id: d.current_session_id || null,
+          host_token: d.host_token || null,
+          created_at: new Date(d.created_at),
+          updated_at: new Date(d.updated_at),
+        }));
+
+        tables.sort((a, b) => a.table_number.localeCompare(b.table_number, undefined, { numeric: true, sensitivity: 'base' }));
+        return tables;
+      }
+    } catch (err: any) {
+      console.warn('Prisma getTables fallback:', err.message);
+    }
+
+    try {
       const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'tables'));
       const tables: RestaurantTable[] = [];
 
@@ -1138,6 +1353,34 @@ export class RBACService {
       updated_at: new Date(),
     };
 
+    try {
+      await db.ensureBusiness(businessId);
+      await prisma.restaurantTable.upsert({
+        where: { id: newTable.id },
+        create: {
+          id: newTable.id,
+          business_id: businessId,
+          table_number: newTable.table_number,
+          floor: newTable.floor,
+          building: newTable.building,
+          capacity: newTable.capacity,
+          status: newTable.status,
+          pay_first_enabled: newTable.pay_first_enabled,
+          qr_code_url: newTable.qr_code_url,
+        },
+        update: {
+          table_number: newTable.table_number,
+          floor: newTable.floor,
+          building: newTable.building,
+          capacity: newTable.capacity,
+          status: newTable.status,
+          pay_first_enabled: newTable.pay_first_enabled,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createTable error:', e.message);
+    }
+
     const payload = {
       ...newTable,
       created_at: newTable.created_at.toISOString(),
@@ -1145,7 +1388,9 @@ export class RBACService {
       last_scanned_at: null,
     };
 
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', newTable.id), payload);
+    try {
+      await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', newTable.id), payload);
+    } catch (e) {}
 
     auditService.log({
       userId: user.id,
@@ -1155,6 +1400,7 @@ export class RBACService {
       status: 'ONLINE',
     });
 
+    realtimeEmitter.tableUpdated(businessId, newTable);
     return newTable;
   }
 
@@ -1170,6 +1416,38 @@ export class RBACService {
     const access = this.evaluateAccess(user, 'tables', 'update');
     if (!access.granted) {
       throw new Error(access.reason || 'Permission denied: Cannot update table');
+    }
+
+    try {
+      await db.ensureBusiness(businessId);
+      const tableUpdates: any = {};
+      if (updates.table_number) {
+        tableUpdates.table_number = updates.table_number.trim();
+        tableUpdates.qr_code_url = `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent(updates.table_number.trim())}`;
+      }
+      if (updates.floor !== undefined) tableUpdates.floor = updates.floor ? updates.floor.trim() : null;
+      if (updates.building !== undefined) tableUpdates.building = updates.building ? updates.building.trim() : null;
+      if (updates.capacity !== undefined) tableUpdates.capacity = Number(updates.capacity);
+      if (updates.status !== undefined) tableUpdates.status = updates.status;
+      if (updates.pay_first_enabled !== undefined) tableUpdates.pay_first_enabled = Boolean(updates.pay_first_enabled);
+
+      await prisma.restaurantTable.upsert({
+        where: { id: tableId },
+        create: {
+          id: tableId,
+          business_id: businessId,
+          table_number: updates.table_number ? updates.table_number.trim() : tableId,
+          floor: updates.floor ? updates.floor.trim() : null,
+          building: updates.building ? updates.building.trim() : null,
+          capacity: updates.capacity ? Number(updates.capacity) : 4,
+          status: updates.status || 'ACTIVE',
+          pay_first_enabled: Boolean(updates.pay_first_enabled),
+          qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent((updates.table_number || tableId).trim())}`,
+        },
+        update: tableUpdates,
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateTable error:', e.message);
     }
 
     const payload: any = {
@@ -1198,6 +1476,8 @@ export class RBACService {
       eventType: 'TABLE_UPDATED',
       status: 'ONLINE',
     });
+
+    realtimeEmitter.tableUpdated(businessId, { id: tableId, ...updates });
   }
 
   /**
@@ -1214,6 +1494,15 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot update table status');
     }
 
+    try {
+      await prisma.restaurantTable.update({
+        where: { id: tableId },
+        data: { status },
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateTableStatus error:', e.message);
+    }
+
     const payload = {
       status,
       updated_at: new Date().toISOString(),
@@ -1224,6 +1513,8 @@ export class RBACService {
     } catch (e) {
       await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
     }
+
+    realtimeEmitter.tableUpdated(businessId, { id: tableId, status });
   }
 
   /**
@@ -1236,6 +1527,43 @@ export class RBACService {
     tableNumber?: string
   ): Promise<void> {
     const now = new Date();
+
+    try {
+      const resetData = {
+        status: 'ACTIVE',
+        current_session_id: null,
+        host_token: null,
+        last_scanned_at: null,
+      };
+      await prisma.restaurantTable.updateMany({
+        where: {
+          business_id: businessId,
+          OR: [
+            ...(tableId ? [{ id: tableId }] : []),
+            ...(tableNumber ? [{ table_number: tableNumber }] : []),
+          ],
+        },
+        data: resetData,
+      });
+      await prisma.tableOrder.updateMany({
+        where: {
+          business_id: businessId,
+          OR: [
+            ...(tableId ? [{ table_id: tableId }] : []),
+            ...(tableNumber ? [{ table_number: tableNumber }] : []),
+          ],
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        },
+        data: {
+          status: 'COMPLETED',
+          bill_requested: false,
+          updated_at: now,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma resetTableToDefault error:', e.message);
+    }
+
     let targetDocRef = tableId ? doc(firestoreDb, 'businesses', businessId, 'tables', tableId) : null;
 
     if (!targetDocRef || !(await getDoc(targetDocRef)).exists()) {
@@ -1266,7 +1594,9 @@ export class RBACService {
         await setDoc(targetDocRef, payload, { merge: true });
       }
     } else if (tableId) {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
+      try {
+        await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
+      } catch (e) {}
     }
 
     // Complete and archive all open table orders for this table so a new session starts completely clean
@@ -1303,6 +1633,8 @@ export class RBACService {
       eventType: 'TABLE_STATUS_RESET_ACTIVE',
       status: 'ONLINE',
     });
+
+    realtimeEmitter.tableUpdated(businessId, { id: tableId, table_number: tableNumber, status: 'ACTIVE' });
   }
 
   /**
@@ -1316,6 +1648,14 @@ export class RBACService {
     const access = this.evaluateAccess(user, 'tables', 'delete');
     if (!access.granted) {
       throw new Error(access.reason || 'Permission denied: Cannot delete table');
+    }
+
+    try {
+      await prisma.restaurantTable.delete({
+        where: { id: tableId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma deleteTable error:', e.message);
     }
 
     try {
@@ -1341,6 +1681,33 @@ export class RBACService {
     user?: { id: string; role?: string; email?: string }
   ): Promise<RestaurantTable> {
     const now = new Date();
+
+    try {
+      await prisma.restaurantTable.update({
+        where: { id: tableId },
+        data: {
+          status: 'ACTIVE',
+          current_session_id: null,
+          host_token: null,
+          last_scanned_at: null,
+        },
+      });
+      await prisma.tableOrder.updateMany({
+        where: {
+          business_id: businessId,
+          table_id: tableId,
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        },
+        data: {
+          status: 'COMPLETED',
+          bill_requested: false,
+          updated_at: now,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma resetTableSession error:', e.message);
+    }
+
     let tableDocRef = doc(firestoreDb, 'businesses', businessId, 'tables', tableId);
     let snap = await getDoc(tableDocRef);
 
@@ -1408,7 +1775,7 @@ export class RBACService {
 
     const updatedSnap = await getDoc(tableDocRef);
     const d = updatedSnap.data() as any;
-    return {
+    const resTable: RestaurantTable = {
       id: updatedSnap.id,
       business_id: d.business_id || businessId,
       table_number: d.table_number || 'Table',
@@ -1416,7 +1783,7 @@ export class RBACService {
       building: d.building ?? null,
       capacity: d.capacity || 4,
       status: d.status || 'ACTIVE',
-          pay_first_enabled: Boolean(d.pay_first_enabled),
+      pay_first_enabled: Boolean(d.pay_first_enabled),
       qr_code_url: d.qr_code_url || '',
       last_scanned_at: null,
       current_session_id: null,
@@ -1424,6 +1791,8 @@ export class RBACService {
       created_at: d.created_at ? new Date(d.created_at) : now,
       updated_at: now,
     };
+    realtimeEmitter.tableUpdated(businessId, resTable);
+    return resTable;
   }
 
   /**
@@ -1601,7 +1970,36 @@ export class RBACService {
         last_scanned_at: now.toISOString(),
       };
 
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableData.id), setPayload);
+      try {
+        await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableData.id), setPayload);
+      } catch (e) {}
+    }
+
+    try {
+      await prisma.restaurantTable.upsert({
+        where: { id: tableData.id },
+        create: {
+          id: tableData.id,
+          business_id: businessId,
+          table_number: tableData.table_number,
+          floor: tableData.floor,
+          building: tableData.building,
+          capacity: tableData.capacity,
+          status: tableData.status,
+          current_session_id: sessionId,
+          host_token: hostToken,
+          last_scanned_at: now,
+          qr_code_url: tableData.qr_code_url,
+        },
+        update: {
+          status: tableData.status,
+          current_session_id: sessionId,
+          host_token: hostToken,
+          last_scanned_at: now,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma scanTableCheckIn upsert error:', e.message);
     }
 
     // Fetch business name
@@ -1616,6 +2014,7 @@ export class RBACService {
       status: 'ONLINE',
     });
 
+    realtimeEmitter.tableUpdated(businessId, tableData);
     return { 
       table: tableData, 
       business: biz, 
@@ -1854,6 +2253,48 @@ export class RBACService {
         updated_at: now,
       };
 
+      try {
+        await prisma.tableOrder.upsert({
+          where: { id: updatedOrder.id },
+          create: {
+            id: updatedOrder.id,
+            business_id: businessId,
+            table_id: updatedOrder.table_id || null,
+            table_number: updatedOrder.table_number,
+            order_number: updatedOrder.order_number,
+            floor: updatedOrder.floor ?? null,
+            building: updatedOrder.building ?? null,
+            items: updatedOrder.items as any,
+            subtotal: updatedOrder.subtotal,
+            tax_amount: updatedOrder.tax_amount || 0,
+            total_amount: updatedOrder.total_amount,
+            currency: updatedOrder.currency || 'Rs.',
+            customer_name: updatedOrder.customer_name || 'Guest',
+            customer_phone: updatedOrder.customer_phone || '',
+            order_notes: updatedOrder.order_notes || '',
+            status: updatedOrder.status,
+            pay_first: updatedOrder.pay_first || false,
+            session_id: updatedOrder.session_id || null,
+            taxes: (updatedOrder.taxes as any) || [],
+            promo_code: updatedOrder.promo_code || null,
+            promo_discount: updatedOrder.promo_discount || 0,
+          },
+          update: {
+            items: updatedOrder.items as any,
+            subtotal: updatedOrder.subtotal,
+            tax_amount: updatedOrder.tax_amount || 0,
+            total_amount: updatedOrder.total_amount,
+            status: updatedOrder.status,
+            order_notes: updatedOrder.order_notes || '',
+            taxes: (updatedOrder.taxes as any) || [],
+            promo_code: updatedOrder.promo_code || null,
+            promo_discount: updatedOrder.promo_discount || 0,
+          },
+        });
+      } catch (e: any) {
+        console.warn('Prisma createTableOrder update error:', e.message);
+      }
+
       await updateDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', existingDocSnap.id), {
         order_number: existingOrderNumber,
         items: combinedItems,
@@ -1884,6 +2325,7 @@ export class RBACService {
         status: 'ONLINE',
       });
 
+      realtimeEmitter.orderUpdated(businessId, updatedOrder);
       return updatedOrder;
     }
 
@@ -1926,13 +2368,66 @@ export class RBACService {
       updated_at: now,
     };
 
+    try {
+      await db.ensureBusiness(businessId);
+      if (order.table_id) {
+        const tExists = await prisma.restaurantTable.findUnique({ where: { id: order.table_id } });
+        if (!tExists) {
+          await prisma.restaurantTable.create({
+            data: {
+              id: order.table_id,
+              business_id: businessId,
+              table_number: order.table_number || 'T-1',
+              status: 'ACTIVE',
+            },
+          }).catch(() => {});
+        }
+      }
+      await prisma.tableOrder.upsert({
+        where: { id: order.id },
+        create: {
+          id: order.id,
+          business_id: businessId,
+          table_id: order.table_id || null,
+          table_number: order.table_number,
+          order_number: order.order_number,
+          floor: order.floor ?? null,
+          building: order.building ?? null,
+          items: order.items as any,
+          subtotal: order.subtotal,
+          tax_amount: order.tax_amount || 0,
+          total_amount: order.total_amount,
+          currency: order.currency || 'Rs.',
+          customer_name: order.customer_name || 'Guest',
+          customer_phone: order.customer_phone || '',
+          order_notes: order.order_notes || '',
+          status: order.status,
+          pay_first: order.pay_first || false,
+          payment_status: order.payment_status || null,
+          session_id: order.session_id || null,
+          taxes: (order.taxes as any) || [],
+        },
+        update: {
+          items: order.items as any,
+          subtotal: order.subtotal,
+          tax_amount: order.tax_amount || 0,
+          total_amount: order.total_amount,
+          status: order.status,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createTableOrder insert error:', e.message);
+    }
+
     const payload = {
       ...order,
       created_at: now.toISOString(),
       updated_at: now.toISOString(),
     };
 
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', order.id), payload);
+    try {
+      await setDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', order.id), payload);
+    } catch (e) {}
 
     // Make sure the table remains OCCUPIED
     try {
@@ -1949,6 +2444,7 @@ export class RBACService {
       status: 'ONLINE',
     });
 
+    realtimeEmitter.orderCreated(businessId, order);
     return order;
   }
 
@@ -1961,6 +2457,55 @@ export class RBACService {
     user: { id: string; role?: string; email?: string },
     tableId?: string
   ): Promise<TableOrder[]> {
+    try {
+      const dbOrders = await prisma.tableOrder.findMany({
+        where: {
+          business_id: businessId,
+          ...(tableId ? { table_id: tableId } : {}),
+        },
+        orderBy: { created_at: 'desc' },
+      });
+      if (dbOrders.length > 0) {
+        return dbOrders.map((d: any) => ({
+          id: d.id,
+          business_id: d.business_id,
+          table_id: d.table_id || '',
+          table_number: d.table_number,
+          order_number: d.order_number || undefined,
+          floor: d.floor ?? null,
+          building: d.building ?? null,
+          items: (d.items as any) || [],
+          subtotal: Number(d.subtotal) || 0,
+          tax_amount: Number(d.tax_amount) || 0,
+          total_amount: Number(d.total_amount) || 0,
+          currency: d.currency || 'Rs.',
+          customer_name: d.customer_name || 'Guest',
+          customer_phone: d.customer_phone || '',
+          order_notes: d.order_notes || '',
+          status: (d.status as OrderStatus) || 'RECEIVED',
+          pay_first: Boolean(d.pay_first),
+          payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
+          payment_confirmed_by: d.payment_confirmed_by || null,
+          sale_id: d.sale_id || null,
+          payment_rejected_reason: d.payment_rejected_reason || null,
+          session_id: d.session_id || null,
+          bill_requested: Boolean(d.bill_requested),
+          bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
+          payment_method: d.payment_method || null,
+          payment_status: d.payment_status || null,
+          promo_code: d.promo_code || null,
+          promo_discount: Number(d.promo_discount) || 0,
+          taxes: (d.taxes as any) || [],
+          ready_at: d.ready_at ? new Date(d.ready_at) : null,
+          served_at: d.served_at ? new Date(d.served_at) : null,
+          created_at: new Date(d.created_at),
+          updated_at: new Date(d.updated_at),
+        }));
+      }
+    } catch (err: any) {
+      console.warn('Prisma getTableOrders fallback:', err.message);
+    }
+
     try {
       const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
       let orders: TableOrder[] = [];
@@ -1995,11 +2540,11 @@ export class RBACService {
             customer_phone: d.customer_phone || '',
             order_notes: d.order_notes || '',
             status: d.status || 'RECEIVED',
-          pay_first: Boolean(d.pay_first),
-          payment_confirmed_at: d.payment_confirmed_at || null,
-          payment_confirmed_by: d.payment_confirmed_by || null,
-          sale_id: d.sale_id || null,
-          payment_rejected_reason: d.payment_rejected_reason || null,
+            pay_first: Boolean(d.pay_first),
+            payment_confirmed_at: d.payment_confirmed_at || null,
+            payment_confirmed_by: d.payment_confirmed_by || null,
+            sale_id: d.sale_id || null,
+            payment_rejected_reason: d.payment_rejected_reason || null,
             bill_requested: d.bill_requested || false,
             bill_requested_at: d.bill_requested_at || null,
             payment_method: d.payment_method || null,
@@ -2079,11 +2624,34 @@ export class RBACService {
     });
     updates.items = items;
 
+    try {
+      await prisma.tableOrder.update({
+        where: { id: orderId },
+        data: {
+          status,
+          items: items as any,
+          ...(updates.ready_at ? { ready_at: new Date(updates.ready_at) } : {}),
+          ...(updates.served_at ? { served_at: new Date(updates.served_at) } : {}),
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateTableOrderStatus error:', e.message);
+    }
+
     await updateDoc(orderRef, updates);
 
     // Reset table session if a pay_first order was completed
     if (status === 'COMPLETED' && currentData.pay_first && currentData.table_id) {
         try {
+            await prisma.restaurantTable.update({
+              where: { id: currentData.table_id },
+              data: {
+                status: 'ACTIVE',
+                current_session_id: null,
+                host_token: null,
+                last_scanned_at: null,
+              },
+            });
             const tableRef = doc(firestoreDb, 'businesses', businessId, 'tables', currentData.table_id);
             await updateDoc(tableRef, {
                 status: 'ACTIVE',
@@ -2105,7 +2673,7 @@ export class RBACService {
 
     const updatedDoc = await getDoc(orderRef);
     const d = updatedDoc.data()!;
-    return {
+    const resOrder: TableOrder = {
       id: updatedDoc.id,
       business_id: d.business_id,
       table_id: d.table_id,
@@ -2126,6 +2694,8 @@ export class RBACService {
       created_at: d.created_at ? new Date(d.created_at) : now,
       updated_at: d.updated_at ? new Date(d.updated_at) : now,
     };
+    realtimeEmitter.orderUpdated(businessId, resOrder);
+    return resOrder;
   }
 
   /**
@@ -2230,11 +2800,32 @@ export class RBACService {
       updates.served_at = now.toISOString();
     }
 
+    try {
+      await prisma.tableOrder.update({
+        where: { id: orderId },
+        data: {
+          items: items as any,
+          status: nextOrderStatus,
+          subtotal: newSubtotal,
+          tax_amount: newTax,
+          total_amount: newTotal,
+          ...(updates.ready_at ? { ready_at: new Date(updates.ready_at) } : {}),
+          ...(updates.served_at ? { served_at: new Date(updates.served_at) } : {}),
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateTableOrderItemStatus error:', e.message);
+    }
+
     await updateDoc(orderRef, updates);
 
     // If order was cancelled completely, check if table can be marked AVAILABLE
     if (nextOrderStatus === 'CANCELLED' && currentData.table_id) {
       try {
+        await prisma.restaurantTable.update({
+          where: { id: currentData.table_id },
+          data: { status: 'AVAILABLE' },
+        });
         const tableRef = doc(firestoreDb, 'businesses', businessId, 'tables', currentData.table_id);
         await updateDoc(tableRef, { status: 'AVAILABLE', updated_at: now.toISOString() });
       } catch (e) {
@@ -2252,7 +2843,7 @@ export class RBACService {
 
     const updatedDoc = await getDoc(orderRef);
     const d = updatedDoc.data()!;
-    return {
+    const resOrder: TableOrder = {
       id: updatedDoc.id,
       business_id: d.business_id,
       table_id: d.table_id,
@@ -2269,16 +2860,18 @@ export class RBACService {
       customer_phone: d.customer_phone || '',
       order_notes: d.order_notes || '',
       status: d.status || 'RECEIVED',
-          pay_first: Boolean(d.pay_first),
-          payment_confirmed_at: d.payment_confirmed_at || null,
-          payment_confirmed_by: d.payment_confirmed_by || null,
-          sale_id: d.sale_id || null,
-          payment_rejected_reason: d.payment_rejected_reason || null,
+      pay_first: Boolean(d.pay_first),
+      payment_confirmed_at: d.payment_confirmed_at || null,
+      payment_confirmed_by: d.payment_confirmed_by || null,
+      sale_id: d.sale_id || null,
+      payment_rejected_reason: d.payment_rejected_reason || null,
       ready_at: d.ready_at ? new Date(d.ready_at) : null,
       served_at: d.served_at ? new Date(d.served_at) : null,
       created_at: d.created_at ? new Date(d.created_at) : new Date(),
       updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
     };
+    realtimeEmitter.orderUpdated(businessId, resOrder);
+    return resOrder;
   }
 
   /**
@@ -2464,6 +3057,59 @@ export class RBACService {
    */
   public async getTaxConfig(businessId: string): Promise<BusinessTaxConfig> {
     try {
+      const cfg = await prisma.taxConfig.findUnique({
+        where: { business_id: businessId },
+      });
+      if (cfg) {
+        const isInclusive = Boolean(
+          cfg.tax_inclusive ?? (Array.isArray(cfg.rates) && (cfg.rates as any[]).some((r: any) => r.is_inclusive))
+        );
+        return {
+          business_id: businessId,
+          tax_enabled: cfg.tax_enabled,
+          tax_inclusive: isInclusive,
+          currency: cfg.currency || 'Rs.',
+          currency_symbol: cfg.currency_symbol || 'Rs.',
+          rates: (cfg.rates as any[]) || [
+            {
+              id: 'vat',
+              name: 'VAT',
+              rate_percent: 13,
+              enabled: true,
+              is_inclusive: isInclusive,
+              description: 'Value Added Tax (13%)',
+            },
+            {
+              id: 'service_charge',
+              name: 'Service Charge',
+              rate_percent: 10,
+              enabled: false,
+              is_inclusive: isInclusive,
+              description: 'Hospitality Service Charge (10%)',
+            },
+          ],
+          invoice_prefix: cfg.invoice_prefix || 'INV-',
+          receipt_footer_note: cfg.receipt_footer_note || 'Thank you for your visit! Please dine with us again.',
+          pan_vat_number: cfg.pan_vat_number || '',
+          pan_vat_prefix: cfg.pan_vat_prefix || undefined,
+          invoice_display_name: cfg.invoice_display_name || undefined,
+          invoice_subtitle: cfg.invoice_subtitle || undefined,
+          invoice_document_title: cfg.invoice_document_title || undefined,
+          invoice_address: cfg.invoice_address || undefined,
+          active_promo_code: cfg.active_promo_code || undefined,
+          active_promo_percent: cfg.active_promo_percent ? Number(cfg.active_promo_percent) : undefined,
+          active_promo_description: cfg.active_promo_description || undefined,
+          active_promo_enabled: cfg.active_promo_enabled,
+          order_reset_interval: cfg.order_reset_interval || 'MANUAL',
+          last_order_reset_date: cfg.last_order_reset_date || null,
+          updated_at: cfg.updated_at ? cfg.updated_at.toISOString() : new Date().toISOString(),
+        };
+      }
+    } catch (e: any) {
+      console.warn('Prisma getTaxConfig note:', e.message);
+    }
+
+    try {
       const configRef = doc(firestoreDb, 'businesses', businessId, 'tax_settings', 'default');
       const snap = await getDoc(configRef);
       if (snap.exists()) {
@@ -2572,10 +3218,110 @@ export class RBACService {
       updated_at: new Date().toISOString(),
     };
 
-    const configRef = doc(firestoreDb, 'businesses', businessId, 'tax_settings', 'default');
-    await setDoc(configRef, updated);
+    try {
+      await db.ensureBusiness(businessId);
+      await prisma.taxConfig.upsert({
+        where: { business_id: businessId },
+        create: {
+          business_id: businessId,
+          tax_enabled: updated.tax_enabled ?? true,
+          tax_inclusive: updated.tax_inclusive ?? false,
+          currency: updated.currency || 'Rs.',
+          currency_symbol: updated.currency_symbol || 'Rs.',
+          rates: updated.rates as any,
+          invoice_prefix: updated.invoice_prefix || 'INV-',
+          receipt_footer_note: updated.receipt_footer_note || null,
+          pan_vat_number: updated.pan_vat_number || null,
+          pan_vat_prefix: updated.pan_vat_prefix || null,
+          invoice_display_name: updated.invoice_display_name || null,
+          invoice_subtitle: updated.invoice_subtitle || null,
+          invoice_document_title: updated.invoice_document_title || null,
+          invoice_address: updated.invoice_address || null,
+          active_promo_code: updated.active_promo_code || null,
+          active_promo_percent: updated.active_promo_percent !== undefined ? updated.active_promo_percent : null,
+          active_promo_description: updated.active_promo_description || null,
+          active_promo_enabled: updated.active_promo_enabled ?? false,
+          order_reset_interval: updated.order_reset_interval || 'MANUAL',
+          last_order_reset_date: updated.last_order_reset_date || null,
+        },
+        update: {
+          tax_enabled: updated.tax_enabled ?? true,
+          tax_inclusive: updated.tax_inclusive ?? false,
+          currency: updated.currency || 'Rs.',
+          currency_symbol: updated.currency_symbol || 'Rs.',
+          rates: updated.rates as any,
+          invoice_prefix: updated.invoice_prefix || 'INV-',
+          receipt_footer_note: updated.receipt_footer_note || null,
+          pan_vat_number: updated.pan_vat_number || null,
+          pan_vat_prefix: updated.pan_vat_prefix || null,
+          invoice_display_name: updated.invoice_display_name || null,
+          invoice_subtitle: updated.invoice_subtitle || null,
+          invoice_document_title: updated.invoice_document_title || null,
+          invoice_address: updated.invoice_address || null,
+          active_promo_code: updated.active_promo_code || null,
+          active_promo_percent: updated.active_promo_percent !== undefined ? updated.active_promo_percent : null,
+          active_promo_description: updated.active_promo_description || null,
+          active_promo_enabled: updated.active_promo_enabled ?? false,
+          order_reset_interval: updated.order_reset_interval || 'MANUAL',
+          last_order_reset_date: updated.last_order_reset_date || null,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateTaxConfig error:', e.message);
+    }
 
-    // Recalculate active unsettled table orders so live bills reflect the updated tax mode/rates
+    try {
+      const configRef = doc(firestoreDb, 'businesses', businessId, 'tax_settings', 'default');
+      await setDoc(configRef, updated);
+    } catch (e: any) {}
+
+    // Recalculate active unsettled table orders in Prisma and Firestore so live bills reflect the updated tax mode/rates
+    try {
+      const activePrismaOrders = await prisma.tableOrder.findMany({
+        where: {
+          business_id: businessId,
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          payment_status: { not: 'PAID' },
+        },
+      });
+
+      for (const od of activePrismaOrders) {
+        const activeItems = ((od.items as any[]) || []).filter((it: any) => it.status !== 'CANCELLED');
+        const itemsMenuTotal = activeItems.reduce(
+          (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
+          0
+        );
+        const {
+          subtotal: newSubtotal,
+          taxAmount: newTax,
+          computedTaxes,
+          totalAmount: preDiscountTotal,
+        } = this.calculateOrderTaxBreakdown(itemsMenuTotal, updated);
+        const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, od, updated);
+        const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
+
+        await prisma.tableOrder.update({
+          where: { id: od.id },
+          data: {
+            subtotal: newSubtotal,
+            tax_amount: newTax,
+            taxes: computedTaxes as any,
+            promo_discount: promoDiscount,
+            total_amount: newTotal,
+          },
+        }).catch(() => {});
+
+        realtimeEmitter.orderUpdated(businessId, {
+          id: od.id,
+          subtotal: newSubtotal,
+          tax_amount: newTax,
+          total_amount: newTotal,
+        });
+      }
+    } catch (e: any) {
+      console.warn('Prisma active orders recalculate note:', e.message);
+    }
+
     try {
       const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
       const orderUpdates: Promise<any>[] = [];
@@ -2613,6 +3359,8 @@ export class RBACService {
     } catch (e) {
       // Non-fatal
     }
+
+    realtimeEmitter.taxConfigUpdated(businessId, updated);
 
     auditService.log({
       userId: user?.id || 'admin',
@@ -2771,6 +3519,36 @@ export class RBACService {
    */
   public async getGLAccounts(businessId: string): Promise<GLAccountLink[]> {
     try {
+      const dbAccounts = await prisma.gLAccount.findMany({
+        where: { business_id: businessId },
+      });
+      if (dbAccounts && dbAccounts.length > 0) {
+        const accounts: GLAccountLink[] = dbAccounts.map((d) => ({
+          id: d.id,
+          business_id: d.business_id,
+          account_number: d.account_number,
+          account_name: d.account_name,
+          category: d.category as any,
+          mapping_key: d.mapping_key || '',
+          description: d.description || '',
+          customer_name: d.customer_name ?? null,
+          customer_address: d.customer_address ?? null,
+          customer_phone: d.customer_phone ?? null,
+          customer_extension: d.customer_extension ?? null,
+          customer_office_name: d.customer_office_name ?? null,
+          customer_designation: d.customer_designation ?? null,
+          is_active: d.is_active,
+          created_at: d.created_at.toISOString(),
+          updated_at: d.updated_at.toISOString(),
+        }));
+        accounts.sort((a, b) => a.account_number.localeCompare(b.account_number, undefined, { numeric: true }));
+        return accounts;
+      }
+    } catch (e: any) {
+      console.warn('Prisma getGLAccounts note:', e.message);
+    }
+
+    try {
       const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'gl_accounts'));
       if (!snap.empty) {
         const accounts: GLAccountLink[] = [];
@@ -2806,6 +3584,39 @@ export class RBACService {
 
     // Seed defaults in background & return
     const defaults = this.getDefaultGLAccounts(businessId);
+    (async () => {
+      try {
+        await db.ensureBusiness(businessId);
+        for (const acc of defaults) {
+          await prisma.gLAccount.upsert({
+            where: {
+              business_id_account_number: {
+                business_id: businessId,
+                account_number: acc.account_number,
+              },
+            },
+            create: {
+              id: acc.id,
+              business_id: businessId,
+              account_number: acc.account_number,
+              account_name: acc.account_name,
+              category: acc.category,
+              mapping_key: acc.mapping_key,
+              description: acc.description,
+              is_active: acc.is_active,
+            },
+            update: {
+              account_name: acc.account_name,
+              category: acc.category,
+              mapping_key: acc.mapping_key,
+              description: acc.description,
+              is_active: acc.is_active,
+            },
+          }).catch(() => {});
+        }
+      } catch (err: any) {}
+    })().catch(() => {});
+
     Promise.all(
       defaults.map((acc) =>
         setDoc(doc(firestoreDb, 'businesses', businessId, 'gl_accounts', acc.id), acc).catch(() => {})
@@ -2832,6 +3643,20 @@ export class RBACService {
 
     // Customer credit accounts must have a unique account number per business
     if ((accountData.mapping_key || '') === 'CREDIT_SETTLEMENT') {
+      try {
+        const existingPrisma = await prisma.gLAccount.findFirst({
+          where: {
+            business_id: businessId,
+            account_number: accNumber,
+          },
+        });
+        if (existingPrisma) {
+          throw new Error(`GL account number ${accNumber} already exists. Please use a different number.`);
+        }
+      } catch (err: any) {
+        if (err.message && err.message.includes('already exists')) throw err;
+      }
+
       const existingSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'gl_accounts'));
       let duplicate = false;
       existingSnap.forEach((d) => {
@@ -2868,6 +3693,49 @@ export class RBACService {
       updated_at: now,
     };
 
+    try {
+      await db.ensureBusiness(businessId);
+      await prisma.gLAccount.upsert({
+        where: {
+          business_id_account_number: {
+            business_id: businessId,
+            account_number: accNumber,
+          },
+        },
+        create: {
+          id,
+          business_id: businessId,
+          account_number: accNumber,
+          account_name: accName,
+          category: newAccount.category,
+          mapping_key: newAccount.mapping_key,
+          description: newAccount.description,
+          customer_name: newAccount.customer_name,
+          customer_address: newAccount.customer_address,
+          customer_phone: newAccount.customer_phone,
+          customer_extension: newAccount.customer_extension,
+          customer_office_name: newAccount.customer_office_name,
+          customer_designation: newAccount.customer_designation,
+          is_active: newAccount.is_active,
+        },
+        update: {
+          account_name: accName,
+          category: newAccount.category,
+          mapping_key: newAccount.mapping_key,
+          description: newAccount.description,
+          customer_name: newAccount.customer_name,
+          customer_address: newAccount.customer_address,
+          customer_phone: newAccount.customer_phone,
+          customer_extension: newAccount.customer_extension,
+          customer_office_name: newAccount.customer_office_name,
+          customer_designation: newAccount.customer_designation,
+          is_active: newAccount.is_active,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createGLAccount error:', e.message);
+    }
+
     await setDoc(doc(firestoreDb, 'businesses', businessId, 'gl_accounts', id), newAccount);
 
     auditService.log({
@@ -2890,9 +3758,19 @@ export class RBACService {
     updates: Partial<GLAccountLink>,
     user?: any
   ): Promise<GLAccountLink> {
+    let existingData: any = null;
+    try {
+      const pExisting = await prisma.gLAccount.findFirst({
+        where: { id: accountId, business_id: businessId },
+      });
+      if (pExisting) existingData = pExisting;
+    } catch (e) {}
+
     const ref = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', accountId);
-    const existingSnap = await getDoc(ref);
-    const existingData = existingSnap.exists() ? existingSnap.data() : null;
+    if (!existingData) {
+      const existingSnap = await getDoc(ref);
+      existingData = existingSnap.exists() ? existingSnap.data() : null;
+    }
 
     // If the field was sent, blank => null; if not sent, keep what is stored
     const pickCustomerField = (key: string): string | null => {
@@ -2919,9 +3797,31 @@ export class RBACService {
       customer_office_name: pickCustomerField('customer_office_name'),
       customer_designation: pickCustomerField('customer_designation'),
       is_active: updates.is_active !== undefined ? updates.is_active : (existingData?.is_active ?? true),
-      created_at: existingData?.created_at || new Date().toISOString(),
+      created_at: existingData?.created_at ? (typeof existingData.created_at === 'string' ? existingData.created_at : existingData.created_at.toISOString()) : new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
+
+    try {
+      await prisma.gLAccount.updateMany({
+        where: { id: accountId, business_id: businessId },
+        data: {
+          account_number: updatedAccount.account_number,
+          account_name: updatedAccount.account_name,
+          category: updatedAccount.category,
+          mapping_key: updatedAccount.mapping_key,
+          description: updatedAccount.description,
+          customer_name: updatedAccount.customer_name,
+          customer_address: updatedAccount.customer_address,
+          customer_phone: updatedAccount.customer_phone,
+          customer_extension: updatedAccount.customer_extension,
+          customer_office_name: updatedAccount.customer_office_name,
+          customer_designation: updatedAccount.customer_designation,
+          is_active: updatedAccount.is_active,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateGLAccount error:', e.message);
+    }
 
     await setDoc(ref, updatedAccount);
 
@@ -2944,6 +3844,14 @@ export class RBACService {
     accountId: string,
     user?: any
   ): Promise<void> {
+    try {
+      await prisma.gLAccount.deleteMany({
+        where: { id: accountId, business_id: businessId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma deleteGLAccount error:', e.message);
+    }
+
     const ref = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', accountId);
     await deleteDoc(ref);
 
@@ -2963,6 +3871,14 @@ export class RBACService {
     businessId: string,
     user?: any
   ): Promise<GLAccountLink[]> {
+    try {
+      await prisma.gLAccount.deleteMany({
+        where: { business_id: businessId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma resetDefaultGLAccounts clear error:', e.message);
+    }
+
     // Clear existing
     try {
       const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'gl_accounts'));
@@ -2974,6 +3890,37 @@ export class RBACService {
     }
 
     const defaults = this.getDefaultGLAccounts(businessId);
+    try {
+      await db.ensureBusiness(businessId);
+      for (const acc of defaults) {
+        await prisma.gLAccount.upsert({
+          where: {
+            business_id_account_number: {
+              business_id: businessId,
+              account_number: acc.account_number,
+            },
+          },
+          create: {
+            id: acc.id,
+            business_id: businessId,
+            account_number: acc.account_number,
+            account_name: acc.account_name,
+            category: acc.category,
+            mapping_key: acc.mapping_key,
+            description: acc.description,
+            is_active: acc.is_active,
+          },
+          update: {
+            account_name: acc.account_name,
+            category: acc.category,
+            mapping_key: acc.mapping_key,
+            description: acc.description,
+            is_active: acc.is_active,
+          },
+        }).catch(() => {});
+      }
+    } catch (err: any) {}
+
     await Promise.all(
       defaults.map((acc) =>
         setDoc(doc(firestoreDb, 'businesses', businessId, 'gl_accounts', acc.id), acc)
@@ -3004,6 +3951,64 @@ export class RBACService {
       limit?: number;
     }
   ): Promise<SaleRecord[]> {
+    try {
+      const where: any = { business_id: businessId };
+      if (filters?.date) {
+        where.date_string = filters.date;
+      } else if (filters?.startDate || filters?.endDate) {
+        where.date_string = {};
+        if (filters.startDate) where.date_string.gte = filters.startDate;
+        if (filters.endDate) where.date_string.lte = filters.endDate;
+      }
+      if (filters?.paymentMethod && filters.paymentMethod !== 'ALL') {
+        where.payment_method = filters.paymentMethod;
+      }
+
+      const rows = await prisma.sale.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        take: filters?.limit && filters.limit > 0 ? filters.limit : undefined,
+      });
+
+      if (rows && rows.length > 0) {
+        return rows.map((d) => ({
+          id: d.id,
+          invoice_number: d.invoice_number || d.id,
+          order_number: d.order_number || undefined,
+          business_id: d.business_id,
+          order_id: d.order_id || undefined,
+          table_id: d.table_id || undefined,
+          table_number: d.table_number || undefined,
+          customer_name: d.customer_name || 'Guest',
+          customer_phone: d.customer_phone || '',
+          sale_type: (d.sale_type as any) || 'DINE_IN',
+          items: (d.items as any) || [],
+          subtotal: Number(d.subtotal) || 0,
+          discount_percent: Number(d.discount_percent) || 0,
+          discount_amount: Number(d.discount_amount) || 0,
+          promo_code: d.promo_code || undefined,
+          promo_discount: Number(d.promo_discount) || 0,
+          taxes: (d.taxes as any) || [],
+          total_tax: Number(d.total_tax) || 0,
+          service_charge: Number(d.service_charge) || 0,
+          total_amount: Number(d.total_amount) || 0,
+          currency: d.currency || 'Rs.',
+          payment_method: (d.payment_method as any) || 'CASH',
+          credit_gl_account_id: d.credit_gl_account_id || undefined,
+          credit_gl_account_number: d.credit_gl_account_number || undefined,
+          credit_gl_account_name: d.credit_gl_account_name || undefined,
+          payment_status: (d.payment_status as any) || 'PAID',
+          cashier_name: d.cashier_name || 'Staff',
+          cashier_id: d.cashier_id || undefined,
+          notes: d.notes || '',
+          created_at: d.created_at.toISOString(),
+          date_string: d.date_string,
+        }));
+      }
+    } catch (e: any) {
+      console.warn('Prisma getSales fallback note:', e.message);
+    }
+
     try {
       const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'sales'));
       let sales: SaleRecord[] = [];
@@ -3080,49 +4085,123 @@ export class RBACService {
    * Create a new sale record (from POS or settled table order)
    */
   public async getNextSequenceNumber(businessId: string, type: 'invoice' | 'order', providedVal?: string, defaultPrefix = '', taxConfig?: any): Promise<string> {
-    const counterRef = doc(firestoreDb, 'businesses', businessId, 'counters', type);
-    return await runTransaction(firestoreDb, async (transaction) => {
+    try {
+      await db.ensureBusiness(businessId);
+      const counterId = `${businessId}_${type}`;
+      const now = new Date();
+      const currentDateStr = now.toISOString().split('T')[0];
+
+      let lastReset: string | null = null;
+      let currentVal: string | null = null;
+
+      const existingCounter = await prisma.counter.findUnique({
+        where: { business_id_type: { business_id: businessId, type } },
+      });
+      if (existingCounter) {
+        currentVal = existingCounter.current;
+        lastReset = existingCounter.last_reset_date;
+      }
+
+      let shouldReset = false;
+      if (type === 'order' && taxConfig && taxConfig.order_reset_interval && taxConfig.order_reset_interval !== 'MANUAL') {
+        if (!lastReset) {
+          shouldReset = true;
+        } else {
+          const lastDate = new Date(lastReset);
+          if (taxConfig.order_reset_interval === 'DAILY' && currentDateStr !== lastReset) shouldReset = true;
+          if (taxConfig.order_reset_interval === 'WEEKLY' && (now.getTime() - lastDate.getTime()) > 7 * 24 * 60 * 60 * 1000) shouldReset = true;
+          if (taxConfig.order_reset_interval === 'MONTHLY' && (now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear())) shouldReset = true;
+          if (taxConfig.order_reset_interval === 'YEARLY' && now.getFullYear() !== lastDate.getFullYear()) shouldReset = true;
+        }
+      }
+
+      let nextVal = '';
+      if (providedVal) {
+        nextVal = providedVal;
+      } else {
+        if (currentVal && !shouldReset) {
+          nextVal = incrementSequence(currentVal);
+        } else {
+          if (type === 'order') {
+            const pref = (defaultPrefix && defaultPrefix !== 'A') ? defaultPrefix : 'ORD-0';
+            nextVal = pref === 'ORD-0' ? 'ORD-01' : (pref.endsWith('-') ? `${pref}01` : (pref.endsWith('0') ? `${pref}1` : `${pref}-01`));
+          } else {
+            nextVal = defaultPrefix + '1';
+          }
+        }
+      }
+
+      await prisma.counter.upsert({
+        where: { business_id_type: { business_id: businessId, type } },
+        create: {
+          id: counterId,
+          business_id: businessId,
+          type,
+          current: nextVal,
+          last_reset_date: (shouldReset || !lastReset) ? currentDateStr : lastReset,
+        },
+        update: {
+          current: nextVal,
+          ...((shouldReset || !lastReset) ? { last_reset_date: currentDateStr } : {}),
+        },
+      });
+
+      // Dual-write to firestore
+      try {
+        const counterRef = doc(firestoreDb, 'businesses', businessId, 'counters', type);
+        await setDoc(counterRef, {
+          current: nextVal,
+          ...((shouldReset || !lastReset) ? { last_reset_date: currentDateStr } : {}),
+        }, { merge: true });
+      } catch (e) {}
+
+      return nextVal;
+    } catch (e: any) {
+      console.warn('Prisma getNextSequenceNumber fallback note:', e.message);
+      // Fallback to firestore runTransaction
+      const counterRef = doc(firestoreDb, 'businesses', businessId, 'counters', type);
+      return await runTransaction(firestoreDb, async (transaction) => {
         const docSnap = await transaction.get(counterRef);
         let nextVal = '';
-        
         let shouldReset = false;
         const now = new Date();
         const currentDateStr = now.toISOString().split('T')[0];
         const lastReset = docSnap.exists() ? docSnap.data().last_reset_date : null;
-        
+
         if (type === 'order' && taxConfig && taxConfig.order_reset_interval && taxConfig.order_reset_interval !== 'MANUAL') {
-            if (!lastReset) {
-                shouldReset = true;
-            } else {
-                const lastDate = new Date(lastReset);
-                if (taxConfig.order_reset_interval === 'DAILY' && currentDateStr !== lastReset) shouldReset = true;
-                if (taxConfig.order_reset_interval === 'WEEKLY' && (now.getTime() - lastDate.getTime()) > 7*24*60*60*1000) shouldReset = true;
-                if (taxConfig.order_reset_interval === 'MONTHLY' && (now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear())) shouldReset = true;
-                if (taxConfig.order_reset_interval === 'YEARLY' && now.getFullYear() !== lastDate.getFullYear()) shouldReset = true;
-            }
+          if (!lastReset) {
+            shouldReset = true;
+          } else {
+            const lastDate = new Date(lastReset);
+            if (taxConfig.order_reset_interval === 'DAILY' && currentDateStr !== lastReset) shouldReset = true;
+            if (taxConfig.order_reset_interval === 'WEEKLY' && (now.getTime() - lastDate.getTime()) > 7 * 24 * 60 * 60 * 1000) shouldReset = true;
+            if (taxConfig.order_reset_interval === 'MONTHLY' && (now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear())) shouldReset = true;
+            if (taxConfig.order_reset_interval === 'YEARLY' && now.getFullYear() !== lastDate.getFullYear()) shouldReset = true;
+          }
         }
 
         if (providedVal) {
-            nextVal = providedVal;
+          nextVal = providedVal;
         } else {
-            if (docSnap.exists() && docSnap.data().current && !shouldReset) {
-                nextVal = incrementSequence(docSnap.data().current);
+          if (docSnap.exists() && docSnap.data().current && !shouldReset) {
+            nextVal = incrementSequence(docSnap.data().current);
+          } else {
+            if (type === 'order') {
+              const pref = (defaultPrefix && defaultPrefix !== 'A') ? defaultPrefix : 'ORD-0';
+              nextVal = pref === 'ORD-0' ? 'ORD-01' : (pref.endsWith('-') ? `${pref}01` : (pref.endsWith('0') ? `${pref}1` : `${pref}-01`));
             } else {
-                if (type === 'order') {
-                const pref = (defaultPrefix && defaultPrefix !== 'A') ? defaultPrefix : 'ORD-0';
-                nextVal = pref === 'ORD-0' ? 'ORD-01' : (pref.endsWith('-') ? `${pref}01` : (pref.endsWith('0') ? `${pref}1` : `${pref}-01`));
-            } else {
-                nextVal = defaultPrefix + '1';
-            } 
+              nextVal = defaultPrefix + '1';
             }
+          }
         }
 
-        transaction.set(counterRef, { 
-            current: nextVal,
-            ...((shouldReset || !lastReset) ? { last_reset_date: currentDateStr } : {})
+        transaction.set(counterRef, {
+          current: nextVal,
+          ...((shouldReset || !lastReset) ? { last_reset_date: currentDateStr } : {}),
         }, { merge: true });
         return nextVal;
-    });
+      });
+    }
   }
 
   public async createSale(
@@ -3143,26 +4222,33 @@ export class RBACService {
     let resolvedCreditCustomer: { name: string | null; phone: string | null } = { name: null, phone: null };
     if (saleData.payment_method === 'CREDIT') {
       if (!saleData.credit_gl_account_id) {
-        // Fallback for legacy tests or endpoints that don't enforce it: Throw an Error as requested by prompt.
-        // Wait, the prompt said "Attempt a CREDIT sale with no account... Each must be rejected with 400."
-        // We will throw a standard Error which the route handler captures as 400 or 500.
         throw new Error('A valid customer credit GL account must be selected for CREDIT sales.');
       }
-      
-      const glRef = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', saleData.credit_gl_account_id);
-      const glSnap = await getDoc(glRef);
-      if (!glSnap.exists()) {
+
+      let glData: any = null;
+      try {
+        const pGl = await prisma.gLAccount.findUnique({ where: { id: saleData.credit_gl_account_id } });
+        if (pGl) glData = pGl;
+      } catch (e) {}
+
+      if (!glData) {
+        const glRef = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', saleData.credit_gl_account_id);
+        const glSnap = await getDoc(glRef);
+        if (glSnap.exists()) {
+          glData = glSnap.data();
+        }
+      }
+
+      if (!glData) {
         throw new Error('Selected customer credit GL account does not exist.');
       }
-      
-      const glData = glSnap.data();
       if (glData.is_active === false) {
         throw new Error('Selected customer credit GL account is inactive.');
       }
       if (glData.mapping_key !== 'CREDIT_SETTLEMENT') {
         throw new Error('Selected GL account is not mapped for Credit Settlement.');
       }
-      
+
       resolvedCreditGlName = glData.account_name;
       resolvedCreditGlNumber = glData.account_number;
       resolvedCreditCustomer = {
@@ -3177,19 +4263,27 @@ export class RBACService {
 
     let orderNumber = saleData.order_number;
     if (!orderNumber) {
-        if (saleData.order_id) {
-            try {
-                const oDoc = await getDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', saleData.order_id));
-                if (oDoc.exists() && oDoc.data().order_number) {
-                    orderNumber = oDoc.data().order_number;
-                }
-            } catch (e) {}
-        }
+      if (saleData.order_id) {
+        try {
+          const pOrder = await prisma.tableOrder.findUnique({ where: { id: saleData.order_id } });
+          if (pOrder && pOrder.order_number) {
+            orderNumber = pOrder.order_number;
+          }
+        } catch (e) {}
         if (!orderNumber) {
-            orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
+          try {
+            const oDoc = await getDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', saleData.order_id));
+            if (oDoc.exists() && oDoc.data().order_number) {
+              orderNumber = oDoc.data().order_number;
+            }
+          } catch (e) {}
         }
+      }
+      if (!orderNumber) {
+        orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
+      }
     } else {
-        orderNumber = await this.getNextSequenceNumber(businessId, 'order', saleData.order_number, 'ORD-0', taxConfig);
+      orderNumber = await this.getNextSequenceNumber(businessId, 'order', saleData.order_number, 'ORD-0', taxConfig);
     }
 
     const newSale: any = {
@@ -3230,15 +4324,88 @@ export class RBACService {
       created_at: now.toISOString(),
       date_string: dateStr,
     };
-    
-    // Remove null keys so we don't save nulls to firestore unnecessarily
-    Object.keys(newSale).forEach(key => newSale[key] === null && delete newSale[key]);
-    
 
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'sales', id), newSale);
+    // Primary save to Prisma PostgreSQL
+    try {
+      await db.ensureBusiness(businessId);
+      await prisma.sale.upsert({
+        where: { id },
+        create: {
+          id,
+          invoice_number: invoiceNumber || id,
+          order_number: orderNumber || null,
+          business_id: businessId,
+          order_id: saleData.order_id || null,
+          table_id: saleData.table_id || null,
+          table_number: saleData.table_number || null,
+          customer_name: newSale.customer_name,
+          customer_phone: newSale.customer_phone || null,
+          sale_type: newSale.sale_type,
+          items: newSale.items as any,
+          subtotal: newSale.subtotal,
+          discount_percent: newSale.discount_percent,
+          discount_amount: newSale.discount_amount,
+          promo_code: newSale.promo_code || null,
+          promo_discount: newSale.promo_discount,
+          taxes: newSale.taxes as any,
+          total_tax: newSale.total_tax,
+          service_charge: newSale.service_charge,
+          total_amount: newSale.total_amount,
+          currency: newSale.currency,
+          payment_method: newSale.payment_method,
+          credit_gl_account_id: newSale.credit_gl_account_id || null,
+          credit_gl_account_number: newSale.credit_gl_account_number || null,
+          credit_gl_account_name: newSale.credit_gl_account_name || null,
+          payment_status: newSale.payment_status,
+          cashier_name: newSale.cashier_name || null,
+          cashier_id: newSale.cashier_id || null,
+          notes: newSale.notes || null,
+          date_string: dateStr,
+          created_at: now,
+        },
+        update: {
+          invoice_number: invoiceNumber || id,
+          order_number: orderNumber || null,
+          total_amount: newSale.total_amount,
+          payment_status: newSale.payment_status,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createSale error:', e.message);
+    }
+
+    // Mirror to Firestore (delete null keys for clean Firestore document representation)
+    const firestoreSale = { ...newSale };
+    Object.keys(firestoreSale).forEach((key) => firestoreSale[key] === null && delete firestoreSale[key]);
+    await setDoc(doc(firestoreDb, 'businesses', businessId, 'sales', id), firestoreSale);
 
     // If linked to a table order or table, complete all associated active orders and reset table
     if (!options?.skipOrderCompletion && (saleData.order_id || saleData.table_id || saleData.table_number)) {
+      try {
+        const orderWhere: any = {
+          business_id: businessId,
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        };
+        if (saleData.order_id) {
+          orderWhere.id = saleData.order_id;
+        } else if (saleData.table_id) {
+          orderWhere.table_id = saleData.table_id;
+        } else if (saleData.table_number) {
+          orderWhere.table_number = saleData.table_number;
+        }
+
+        await prisma.tableOrder.updateMany({
+          where: orderWhere,
+          data: {
+            status: 'COMPLETED',
+            payment_status: 'PAID',
+            bill_requested: false,
+          },
+        });
+      } catch (e: any) {
+        console.warn('Prisma order completion note:', e.message);
+      }
+
       try {
         const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
         const batchUpdates: Promise<any>[] = [];
@@ -3267,6 +4434,26 @@ export class RBACService {
 
         // Automatically resolve any associated BILL_REQUEST service requests so the card in Waiter Station disappears
         try {
+          await prisma.serviceRequest.updateMany({
+            where: {
+              business_id: businessId,
+              OR: [
+                saleData.order_id ? { order_id: saleData.order_id } : undefined,
+                saleData.table_id ? { table_id: saleData.table_id } : undefined,
+                saleData.table_number ? { table_number: saleData.table_number } : undefined,
+              ].filter(Boolean) as any,
+              type: 'BILL_REQUEST',
+              status: 'PENDING',
+            },
+            data: {
+              status: 'RESOLVED',
+              resolved_at: now,
+              resolved_by: 'POS_CASHIER_SETTLED',
+            },
+          });
+        } catch (e) {}
+
+        try {
           const srvSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'service_requests'));
           const srvUpdates: Promise<any>[] = [];
           srvSnap.forEach((sDoc) => {
@@ -3291,6 +4478,31 @@ export class RBACService {
           }
         } catch (e) {
           console.warn('Service requests resolution note:', e);
+        }
+      } catch (e) {}
+
+      // Reset Table in Prisma & Firestore
+      try {
+        if (saleData.table_id) {
+          await prisma.restaurantTable.updateMany({
+            where: { id: saleData.table_id, business_id: businessId },
+            data: {
+              status: 'ACTIVE',
+              current_session_id: null,
+              host_token: null,
+              last_scanned_at: null,
+            },
+          });
+        } else if (saleData.table_number) {
+          await prisma.restaurantTable.updateMany({
+            where: { table_number: saleData.table_number, business_id: businessId },
+            data: {
+              status: 'ACTIVE',
+              current_session_id: null,
+              host_token: null,
+              last_scanned_at: null,
+            },
+          });
         }
       } catch (e) {}
 
@@ -3320,6 +4532,19 @@ export class RBACService {
           });
         } catch (e) {}
       }
+
+      realtimeEmitter.tableUpdated(businessId, {
+        id: saleData.table_id || '',
+        table_number: saleData.table_number || '',
+        status: 'ACTIVE',
+      });
+      if (saleData.order_id) {
+        realtimeEmitter.orderUpdated(businessId, {
+          id: saleData.order_id,
+          status: 'COMPLETED',
+          payment_status: 'PAID',
+        });
+      }
     }
 
     auditService.log({
@@ -3337,6 +4562,14 @@ export class RBACService {
    * Delete a single sale record
    */
   public async deleteSale(businessId: string, saleId: string, user?: any): Promise<void> {
+    try {
+      await prisma.sale.deleteMany({
+        where: { id: saleId, business_id: businessId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma deleteSale error:', e.message);
+    }
+
     const saleRef = doc(firestoreDb, 'businesses', businessId, 'sales', saleId);
     await deleteDoc(saleRef);
 
@@ -3357,6 +4590,16 @@ export class RBACService {
     dateString: string,
     user?: any
   ): Promise<{ deletedCount: number }> {
+    let prismaCount = 0;
+    try {
+      const delRes = await prisma.sale.deleteMany({
+        where: { business_id: businessId, date_string: dateString },
+      });
+      prismaCount = delRes.count;
+    } catch (e: any) {
+      console.warn('Prisma deleteSalesByDate error:', e.message);
+    }
+
     const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'sales'));
     let count = 0;
     const promises: Promise<any>[] = [];
@@ -3377,16 +4620,26 @@ export class RBACService {
       email: user?.email || 'admin@serveflow.app',
       businessId,
       eventType: 'SALES_HISTORY_DELETED_BY_DATE',
-      status: `DELETED_DATE_${dateString}_COUNT_${count}`,
+      status: `DELETED_DATE_${dateString}_COUNT_${Math.max(count, prismaCount)}`,
     });
 
-    return { deletedCount: count };
+    return { deletedCount: Math.max(count, prismaCount) };
   }
 
   /**
    * Delete entire saved sales records
    */
   public async deleteAllSales(businessId: string, user?: any): Promise<{ deletedCount: number }> {
+    let prismaCount = 0;
+    try {
+      const delRes = await prisma.sale.deleteMany({
+        where: { business_id: businessId },
+      });
+      prismaCount = delRes.count;
+    } catch (e: any) {
+      console.warn('Prisma deleteAllSales error:', e.message);
+    }
+
     const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'sales'));
     let count = 0;
     const promises: Promise<any>[] = [];
@@ -3403,10 +4656,10 @@ export class RBACService {
       email: user?.email || 'admin@serveflow.app',
       businessId,
       eventType: 'ALL_SALES_HISTORY_CLEARED',
-      status: `CLEARED_ALL_COUNT_${count}`,
+      status: `CLEARED_ALL_COUNT_${Math.max(count, prismaCount)}`,
     });
 
-    return { deletedCount: count };
+    return { deletedCount: Math.max(count, prismaCount) };
   }
 
   /**
@@ -3729,19 +4982,74 @@ export class RBACService {
     
     const createdSale = await this.createSale(businessId, salePayload as any, { id: 'system', role: 'SYSTEM' }, { skipOrderCompletion: true });
     
-    await updateDoc(docRef, {
-      status: 'RECEIVED',
-      subtotal: calcSubtotal,
-      tax_amount: calcTax,
-      taxes: computedTaxes,
-      promo_discount: promoDiscount,
-      total_amount: finalTotal,
-      payment_status: 'PAID',
-      payment_confirmed_at: new Date().toISOString(),
-      payment_confirmed_by: cashierName,
-      sale_id: createdSale.id,
-      updated_at: new Date().toISOString()
-    });
+    try {
+      await db.ensureBusiness(businessId);
+      if (order.table_id) {
+        const tExists = await prisma.restaurantTable.findUnique({ where: { id: order.table_id } });
+        if (!tExists) {
+          await prisma.restaurantTable.create({
+            data: {
+              id: order.table_id,
+              business_id: businessId,
+              table_number: order.table_number || 'T-1',
+              status: 'ACTIVE',
+            },
+          }).catch(() => {});
+        }
+      }
+      await prisma.tableOrder.upsert({
+        where: { id: orderId },
+        create: {
+          id: orderId,
+          business_id: businessId,
+          table_id: order.table_id || null,
+          table_number: order.table_number || 'T-1',
+          status: 'RECEIVED',
+          subtotal: calcSubtotal,
+          tax_amount: calcTax,
+          taxes: computedTaxes as any,
+          promo_discount: promoDiscount,
+          total_amount: finalTotal,
+          payment_status: 'PAID',
+          payment_confirmed_at: new Date(),
+          payment_confirmed_by: cashierName,
+          sale_id: createdSale.id,
+          items: activeItems as any,
+        },
+        update: {
+          status: 'RECEIVED',
+          subtotal: calcSubtotal,
+          tax_amount: calcTax,
+          taxes: computedTaxes as any,
+          promo_discount: promoDiscount,
+          total_amount: finalTotal,
+          payment_status: 'PAID',
+          payment_confirmed_at: new Date(),
+          payment_confirmed_by: cashierName,
+          sale_id: createdSale.id,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma confirmTableOrderPayment error:', e.message);
+    }
+
+    try {
+      await updateDoc(docRef, {
+        status: 'RECEIVED',
+        subtotal: calcSubtotal,
+        tax_amount: calcTax,
+        taxes: computedTaxes,
+        promo_discount: promoDiscount,
+        total_amount: finalTotal,
+        payment_status: 'PAID',
+        payment_confirmed_at: new Date().toISOString(),
+        payment_confirmed_by: cashierName,
+        sale_id: createdSale.id,
+        updated_at: new Date().toISOString()
+      });
+    } catch (e: any) {}
+
+    realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'RECEIVED', payment_status: 'PAID', sale_id: createdSale.id });
   }
 
   public async rejectTableOrderPayment(
@@ -3758,12 +5066,29 @@ export class RBACService {
     if (!order.pay_first) throw new Error('Not a pay-first order');
     if (order.status !== 'AWAITING_PAYMENT') throw new Error('Order is not awaiting payment');
     
-    await updateDoc(docRef, {
-      status: 'CANCELLED',
-      payment_rejected_reason: reason || 'Payment rejected',
-      payment_status: 'CANCELLED',
-      updated_at: new Date().toISOString()
-    });
+    try {
+      await prisma.tableOrder.updateMany({
+        where: { id: orderId },
+        data: {
+          status: 'CANCELLED',
+          payment_rejected_reason: reason || 'Payment rejected',
+          payment_status: 'CANCELLED',
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma rejectTableOrderPayment error:', e.message);
+    }
+
+    try {
+      await updateDoc(docRef, {
+        status: 'CANCELLED',
+        payment_rejected_reason: reason || 'Payment rejected',
+        payment_status: 'CANCELLED',
+        updated_at: new Date().toISOString()
+      });
+    } catch (e: any) {}
+
+    realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'CANCELLED', payment_status: 'CANCELLED' });
   }
 
 }

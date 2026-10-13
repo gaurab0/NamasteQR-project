@@ -1,9 +1,15 @@
+import http from 'http';
 import path from 'path';
 import { createApp } from './server/src/app';
+import { initSocketServer } from './server/src/lib/socket';
 
 async function startServer() {
   const app = createApp();
+  const httpServer = http.createServer(app);
   const PORT = Number(process.env.PORT) || 3000;
+
+  // Initialize Socket.io real-time engine
+  initSocketServer(httpServer);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
@@ -21,7 +27,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 ServeFlow Server running on http://0.0.0.0:${PORT}`);
     
     // Automatically convert any legacy UUID document IDs in Firestore to human-readable identifiers

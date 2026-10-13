@@ -6,6 +6,7 @@ import { MenuItem, MenuCategory, CartItem, TableOrder, CustomerTableSession, Men
 import { Business } from '../types/auth';
 import { useAuth } from '../context/AuthContext';
 import { rbacService } from '../services/rbac.service';
+import { socketService } from '../services/socket.service';
 import { getAllItemCategories, itemMatchesCategory } from '../utils/menuUtils';
 import { CustomerCartModal } from '../components/cart/CustomerCartModal';
 import { OrderSuccessModal } from '../components/cart/OrderSuccessModal';
@@ -782,6 +783,48 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
     return () => unsub();
   }, [tableParams.businessId, user?.business?.id, activeOrder?.id, tableParams.tableNumber]);
+
+  // Socket.io Real-time WebSocket Subscription for guest table and order events
+  useEffect(() => {
+    const targetBizId = tableParams.businessId || user?.business?.id;
+    const tableId = tableParams.tableId;
+    if (!targetBizId) return;
+
+    if (tableId) {
+      socketService.joinTable(targetBizId, tableId);
+    } else {
+      socketService.joinBusiness(targetBizId);
+    }
+
+    const unsubOrder = socketService.subscribeToOrders((updatedOrder) => {
+      if (activeOrder?.id && updatedOrder.id === activeOrder.id) {
+        setActiveOrder((prev) => prev ? { ...prev, ...updatedOrder } : prev);
+        if (updatedOrder.status === 'COMPLETED' || updatedOrder.payment_status === 'PAID') {
+          sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
+          setSessionExpired(true);
+          setIsTableBillConcluded(true);
+          setSessionExpiredReason('Your table order and billing process has been concluded. Thank you for dining with us!');
+          setIsFinalBillPageOpen(false);
+        }
+      }
+    });
+
+    const unsubTable = socketService.subscribeToTables((tableData) => {
+      if (tableId && tableData.id === tableId) {
+        if (tableData.status === 'ACTIVE' && (!tableData.current_session_id || (tableParams.sessionId && tableData.current_session_id !== tableParams.sessionId))) {
+          sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
+          setSessionExpired(true);
+          setIsTableBillConcluded(true);
+          setIsFinalBillPageOpen(false);
+        }
+      }
+    });
+
+    return () => {
+      unsubOrder();
+      unsubTable();
+    };
+  }, [tableParams.businessId, user?.business?.id, tableParams.tableId, activeOrder?.id, tableParams.sessionId]);
 
   // Real-time Firestore listener for table settlement (if table session reset to ACTIVE / session_id cleared)
   useEffect(() => {

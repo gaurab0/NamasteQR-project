@@ -1,0 +1,417 @@
+// ServeFlow Prisma Schema
+// Database engine: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// -------------------------------------------------------------
+// 1. Multi-Tenancy & Core Business Profile
+// -------------------------------------------------------------
+model Business {
+  id                  String   @id
+  name                String
+  business_type       String   @default("RESTAURANT")
+  status              String   @default("ACTIVE")
+  tagline             String?
+  location            String?
+  address             String?
+  kitchen_hours       String?
+  phone               String?
+  parent_business_id  String?
+  owner_uid           String?
+  branch_code         String?
+  currency            String   @default("Rs.")
+  tax_rate            Float    @default(0)
+  show_menu_images    Boolean  @default(true)
+  menu_theme_config   Json?
+  date_format_nav     String   @default("BOTH")
+  date_format_billing String   @default("BOTH")
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  users            User[]
+  categories       MenuCategory[]
+  menu_items       MenuItem[]
+  tables           RestaurantTable[]
+  orders           TableOrder[]
+  sales            Sale[]
+  gl_accounts      GLAccount[]
+  service_requests ServiceRequest[]
+  counters         Counter[]
+  tax_config       TaxConfig?
+
+  @@index([parent_business_id])
+  @@map("businesses")
+}
+
+// -------------------------------------------------------------
+// 2. Staff Accounts & Tab-Based Access Control
+// -------------------------------------------------------------
+model User {
+  id            String    @id @default(cuid())
+  business_id   String
+  email         String    @unique
+  name          String?
+  password_hash String
+  role          String    @default("STAFF")
+  status        String    @default("ACTIVE")
+  allowed_tabs  String[]  @default([])
+  last_login_at DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@map("users")
+}
+
+// -------------------------------------------------------------
+// 3. Menus & Categories
+// -------------------------------------------------------------
+model MenuCategory {
+  id          String   @id @default(cuid())
+  business_id String
+  name        String
+  order       Int      @default(0)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  business Business   @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  items    MenuItem[]
+
+  @@index([business_id])
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id                    String   @id @default(cuid())
+  business_id           String
+  category_id           String?
+  category              String
+  additional_categories String[] @default([])
+  name                  String
+  price                 Decimal  @db.Decimal(12, 2)
+  currency              String   @default("Rs.")
+  description           String?
+  image_url             String?
+  food_type             String   @default("veg") // veg, non-veg, none
+  status                String   @default("available") // available, unavailable, out_of_stock
+  is_available          Boolean  @default(true)
+  has_variants          Boolean  @default(false)
+  variants              Json? // Array of variant objects: { id, name, price, is_available, image_url, etc. }
+  variant_group_name    String?
+  display_style         String   @default("auto")
+  show_image            Boolean  @default(true)
+  promo_badge           String?
+  order_index           Int      @default(0)
+  preparation_time_mins Int?
+  created_by            String?
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  business      Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  menu_category MenuCategory? @relation(fields: [category_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id])
+  @@index([category_id])
+  @@map("menu_items")
+}
+
+// -------------------------------------------------------------
+// 4. Tables & QR Dine-in Check-in
+// -------------------------------------------------------------
+model RestaurantTable {
+  id                 String    @id @default(cuid())
+  business_id        String
+  table_number       String
+  order_number       String?
+  floor              String?
+  building           String?
+  capacity           Int       @default(4)
+  status             String    @default("ACTIVE") // ACTIVE, INACTIVE, OCCUPIED, RESERVED
+  pay_first_enabled  Boolean   @default(false)
+  qr_code_url        String?
+  last_scanned_at    DateTime?
+  current_session_id String?
+  host_token         String?
+  assigned_waiter_ids String[]  @default([])
+  waiter_ping        Json?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  business Business     @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  orders   TableOrder[]
+
+  @@unique([business_id, table_number])
+  @@index([business_id])
+  @@map("restaurant_tables")
+}
+
+// -------------------------------------------------------------
+// 5. Orders & Live Kitchen/Bar KDS
+// -------------------------------------------------------------
+model TableOrder {
+  id                      String    @id
+  business_id             String
+  table_id                String?
+  table_number            String
+  order_number            String?
+  invoice_number          String?
+  floor                   String?
+  building                String?
+  items                   Json // Array of TableOrderItem objects
+  subtotal                Decimal   @db.Decimal(12, 2)
+  tax_amount              Decimal   @default(0) @db.Decimal(12, 2)
+  total_amount            Decimal   @db.Decimal(12, 2)
+  currency                String    @default("Rs.")
+  customer_name           String?
+  customer_phone          String?
+  order_notes             String?
+  status                  String    @default("PENDING") // PENDING, AWAITING_PAYMENT, RECEIVED, PREPARING, READY, SERVED, COMPLETED, CANCELLED
+  pay_first               Boolean   @default(false)
+  payment_confirmed_at    DateTime?
+  payment_confirmed_by    String?
+  sale_id                 String?
+  payment_rejected_reason String?
+  session_id              String?
+  bill_requested          Boolean   @default(false)
+  bill_requested_at       DateTime?
+  payment_method          String?
+  payment_status          String?
+  promo_code              String?
+  promo_discount          Decimal   @default(0) @db.Decimal(12, 2)
+  taxes                   Json? // Array of SaleTaxBreakdown
+  ready_at                DateTime?
+  served_at               DateTime?
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  business Business         @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  table    RestaurantTable? @relation(fields: [table_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id])
+  @@index([table_id])
+  @@index([status])
+  @@map("table_orders")
+}
+
+// -------------------------------------------------------------
+// 6. Finalized Invoices & Sales Register
+// -------------------------------------------------------------
+model Sale {
+  id                       String   @id
+  invoice_number           String
+  order_number             String?
+  business_id              String
+  order_id                 String?
+  table_id                 String?
+  table_number             String?
+  customer_name            String   @default("Walk-in Guest")
+  customer_phone           String?
+  sale_type                String   @default("DINE_IN")
+  items                    Json // Array of SaleItem objects
+  subtotal                 Decimal  @db.Decimal(12, 2)
+  discount_percent         Decimal  @default(0) @db.Decimal(5, 2)
+  discount_amount          Decimal  @default(0) @db.Decimal(12, 2)
+  promo_code               String?
+  promo_discount           Decimal  @default(0) @db.Decimal(12, 2)
+  taxes                    Json // Array of SaleTaxBreakdown
+  total_tax                Decimal  @db.Decimal(12, 2)
+  service_charge           Decimal  @default(0) @db.Decimal(12, 2)
+  total_amount             Decimal  @db.Decimal(12, 2)
+  currency                 String   @default("Rs.")
+  payment_method           String   @default("CASH")
+  credit_gl_account_id     String?
+  credit_gl_account_number String?
+  credit_gl_account_name   String?
+  payment_status           String   @default("PAID")
+  cashier_name             String?
+  cashier_id               String?
+  notes                    String?
+  date_string              String // YYYY-MM-DD
+  created_at               DateTime @default(now())
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@index([date_string])
+  @@index([invoice_number])
+  @@map("sales")
+}
+
+// -------------------------------------------------------------
+// 7. Taxes, Invoicing & VAT Config
+// -------------------------------------------------------------
+model TaxConfig {
+  business_id              String   @id
+  tax_enabled              Boolean  @default(true)
+  tax_inclusive            Boolean  @default(false)
+  currency                 String   @default("Rs.")
+  currency_symbol          String   @default("Rs.")
+  rates                    Json // Array of TaxRateItem: { id, name, rate_percent, enabled, is_inclusive }
+  invoice_prefix           String   @default("INV-")
+  receipt_footer_note      String?
+  pan_vat_number           String?
+  pan_vat_prefix           String?
+  invoice_display_name     String?
+  invoice_subtitle         String?
+  invoice_document_title   String?
+  invoice_address          String?
+  active_promo_code        String?
+  active_promo_percent     Decimal? @db.Decimal(5, 2)
+  active_promo_description String?
+  active_promo_enabled     Boolean  @default(false)
+  order_reset_interval     String   @default("DAILY")
+  last_order_reset_date    String?
+  updated_at               DateTime @updatedAt
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@map("tax_configs")
+}
+
+// -------------------------------------------------------------
+// 8. General Ledger Accounts (Double-Entry Bookkeeping)
+// -------------------------------------------------------------
+model GLAccount {
+  id                   String   @id @default(cuid())
+  business_id          String
+  account_number       String
+  account_name         String
+  category             String // REVENUE, TAX_LIABILITY, ASSET, EXPENSE, LIABILITY, EQUITY
+  mapping_key          String?
+  description          String?
+  customer_name        String?
+  customer_address     String?
+  customer_phone       String?
+  customer_extension   String?
+  customer_office_name String?
+  customer_designation String?
+  is_active            Boolean  @default(true)
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, account_number])
+  @@index([business_id])
+  @@map("gl_accounts")
+}
+
+// -------------------------------------------------------------
+// 9. Service Requests (Waiter Calls, Bill Requests)
+// -------------------------------------------------------------
+model ServiceRequest {
+  id             String    @id
+  business_id    String
+  type           String // BILL_REQUEST, WAITER_CALL, WATER, CLEANING
+  order_id       String?
+  table_id       String
+  table_number   String
+  order_number   String?
+  payment_method String?
+  total_amount   Decimal?  @db.Decimal(12, 2)
+  currency       String?
+  status         String    @default("PENDING") // PENDING, ATTENDED, RESOLVED
+  notes          String?
+  resolved_at    DateTime?
+  resolved_by    String?
+  created_at     DateTime  @default(now())
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@index([status])
+  @@map("service_requests")
+}
+
+// -------------------------------------------------------------
+// 10. Atomic Sequences & Counters
+// -------------------------------------------------------------
+model Counter {
+  id              String   @id // format: ${business_id}_${type}
+  business_id     String
+  type            String // invoice, order
+  current         String
+  last_reset_date String?
+  updated_at      DateTime @updatedAt
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, type])
+  @@map("counters")
+}
+
+// -------------------------------------------------------------
+// 11. Security Audit Logs
+// -------------------------------------------------------------
+model AuditLog {
+  id           String   @id @default(cuid())
+  user_id      String?
+  business_id  String?
+  account_name String?
+  email        String?
+  status       String?
+  event_type   String
+  ip_address   String?
+  user_agent   String?
+  created_at   DateTime @default(now())
+
+  @@index([business_id])
+  @@map("audit_logs")
+}
+
+// -------------------------------------------------------------
+// 12. Phone & OTP Verifications
+// -------------------------------------------------------------
+model PhoneVerification {
+  id                 String    @id @default(cuid())
+  user_id            String
+  phone_country_code String
+  phone_number       String
+  phone_e164         String
+  is_verified        Boolean   @default(false)
+  verified_at        DateTime?
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  @@index([user_id])
+  @@index([phone_e164])
+  @@map("phone_verifications")
+}
+
+model OtpVerification {
+  id            String    @id @default(cuid())
+  user_id       String
+  phone_e164    String
+  otp_hash      String
+  purpose       String
+  expires_at    DateTime
+  attempt_count Int       @default(0)
+  verified_at   DateTime?
+  created_at    DateTime  @default(now())
+
+  @@index([user_id])
+  @@index([phone_e164])
+  @@map("otp_verifications")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  user_id    String
+  token_hash String    @unique
+  expires_at DateTime
+  used_at    DateTime?
+  created_at DateTime  @default(now())
+
+  @@index([user_id])
+  @@map("password_reset_tokens")
+}

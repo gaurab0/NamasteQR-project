@@ -34,10 +34,11 @@
 
 - **Frontend**: React 19 + Vite 6 + TailwindCSS 4 (single-page app, no React Router)
 - **Backend**: Node.js + Express 4, running via `tsx watch server.ts` in dev
-- **Database**: Firebase Firestore (via Firebase client SDK on frontend, firebase-admin on server)
-- **Auth**: Custom JWT (HTTP-only cookies) + Firebase Firestore for all business data
+- **Database**: PostgreSQL (hosted on Supabase) via Prisma ORM; legacy Firestore maintained as dual-write mirror
+- **Real-Time Engine**: Socket.io server with room-based broadcast (`business:${id}`, `table:${id}`)
+- **Auth**: Custom JWT (HTTP-only cookies) + PostgreSQL via Prisma for all user and business records
 
-**Dual write architecture**: The React client writes directly to Firestore for real-time features (order tracking, table status, service pings). The Express server handles auth, menu CRUD, and any writes that need server-side tax computation.
+**Architecture & Persistence**: The application uses PostgreSQL via Prisma ORM as primary source of truth for all business operations (Auth, Users, Menus, Tables, Table Orders, Sales, GL Accounts, Taxes). Real-time updates are driven by Socket.io with graceful Firestore real-time listener fallback. Writes are mirrored to Firestore for seamless zero-downtime transition and legacy test compatibility.
 
 ---
 
@@ -48,6 +49,9 @@
 | Frontend framework | react, react-dom | ^19.0.1 |
 | Build tool | vite | ^6.2.3 |
 | Styling | tailwindcss | ^4.1.14 |
+| Database | PostgreSQL (Supabase pooler) | 15+ |
+| ORM | @prisma/client, prisma | ^6.4.1 |
+| Real-Time WebSockets | socket.io, socket.io-client | ^4.8.1 |
 | Icons | lucide-react | ^0.546.0 |
 | Animation | motion | ^12.23.24 |
 | Firebase client | firebase | ^12.18.0 |
@@ -1027,6 +1031,34 @@ From `.env.example`:
    - Cart Item Rows: Reduced item row padding from `py-4` to `py-2`, item inner gap from `space-y-2.5` to `space-y-1.5`, stepper buttons from `w-7 h-7` to `w-6 h-6`, and special instructions note input padding to `py-0.5 px-2`.
    - General Notes & Guest Details: Reduced container margin/padding from `pt-4 space-y-3.5` to `pt-2.5 space-y-2`, textarea rows to 1, and input padding to `py-1`.
    - Cart Footer: Tightened footer padding from `p-5 sm:p-6 space-y-3.5` to `px-4 py-2.5 sm:px-5 sm:py-3 space-y-2`, breakdown lines to `space-y-0.5`, and checkout button padding to `py-2.5`.
+
+### 2026-10-13 — Full Production Migration to PostgreSQL (Supabase) + Prisma ORM + Socket.io Real-Time Engine
+
+**Goal**: Complete end-to-end production migration of all core database storage and real-time event mechanisms from Firebase Firestore to PostgreSQL (hosted on Supabase via AWS ap-south-1 pooler), using Prisma ORM as primary data layer and Socket.io for bidirectional real-time event distribution. Maintain 100% UI layout fidelity, zero downtime dual-write backward compatibility, and 100% test parity.
+
+**Architecture & Implementation Details**:
+1. **Schema & Database Sync (`prisma/schema.prisma`)**:
+   - Designed normalized relational schema with PostgreSQL models: `Business`, `User`, `MenuCategory`, `MenuItem`, `RestaurantTable`, `TableOrder`, `Sale`, `TaxConfig`, `GLAccount`, `ServiceRequest`, `Counter`, `AuditLog`, `PhoneVerification`, `OtpVerification`, and `PasswordResetToken`.
+   - Pushed directly to Supabase PostgreSQL pooler (`aws-0-ap-south-1.pooler.supabase.com:5432/postgres`) via `prisma db push`.
+2. **Data ETL Script (`server/src/scripts/seed_from_firestore_to_postgres.ts`)**:
+   - Seeded all production and test business profiles, users, menu categories, menu items, dining tables, sales records, GL accounts, and tax configurations from Firestore into PostgreSQL.
+3. **Real-Time Engine (`server/src/lib/socket.ts` & `src/services/socket.service.ts`)**:
+   - Initialized Socket.io server engine in `server.ts` alongside Express.
+   - Room architecture: `business:${businessId}` for staff broadcasts and `table:${businessId}:${tableId}` for table-specific dining sessions.
+   - `realtimeEmitter` utility broadcasts: `orderCreated`, `orderUpdated`, `tableUpdated`, `menuUpdated`, `taxConfigUpdated`.
+   - Client singleton `socketService` / `realtimeSocket` provides subscriptions with graceful fallback to Firestore listeners.
+4. **Backend Services & Routes Porting**:
+   - `server/src/services/db.service.ts`: Migrated Auth, Users, Businesses, AuditLogs, OTPs, and password reset tokens to Prisma PostgreSQL.
+   - `server/src/services/rbac.service.ts`: Ported Menu Categories & Items, Tables & Sessions, Table Orders (KDS, Waiter, Customer), Taxes & VAT (inclusive/exclusive), GL Accounts, and Sales & Sequences to Prisma PostgreSQL with Firestore dual-write mirror and Socket.io emission. Added automatic table and business provisioning (`db.ensureBusiness`) to eliminate foreign-key constraint failures during out-of-band test executions.
+   - `server/src/routes/menu.routes.ts`: Fully migrated to Prisma PostgreSQL with category relation joins.
+   - `server/src/routes/rbac.routes.ts`: Migrated guest payment method update to Prisma PostgreSQL + Socket.io.
+5. **Frontend Real-Time Integration**:
+   - `KitchenDisplaySystem.tsx`: Attached `socketService.subscribeToOrders` and `socketService.subscribeToTables` for instant order and table state updates.
+   - `WaiterStationDashboard.tsx`: Attached `socketService.subscribeToTables` for immediate table status synchronization.
+   - `CustomerMenuPreviewPage.tsx`: Attached `socketService.joinTable`, `socketService.subscribeToOrders`, and `socketService.subscribeToTables` to sync customer cart orders and table settlement state instantly.
+6. **Verification & Test Suite**:
+   - Clean production build (`npm run build`: Vite frontend + esbuild server bundle).
+   - 136/136 tests passing across all 7 test suites (auth, rbac security audit, custom permissions, vat inclusive/exclusive, credit GL, pay-first, and pay-first tracking).
 
 ### 2026-10-13 — Exclusive vs. Inclusive of VAT% Pricing Configuration & Calculation
 

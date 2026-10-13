@@ -5,6 +5,7 @@ import { TableOrder, OrderStatus, TableOrderItem, ServiceRequest, RestaurantTabl
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { rbacService } from '../../services/rbac.service';
+import { socketService } from '../../services/socket.service';
 import { determineItemStation } from '../../utils/menuUtils';
 import { usePrinter } from '../../contexts/PrinterContext';
 import {
@@ -326,6 +327,22 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       console.warn('Live KDS setup note:', err);
       loadFallbackOrders();
     }
+  }, [businessId]);
+
+  // Socket.io Real-time WebSocket Subscription for instant updates
+  useEffect(() => {
+    if (!businessId) return;
+    socketService.joinBusiness(businessId);
+    const unsubOrders = socketService.subscribeToOrders(() => {
+      loadFallbackOrders();
+    });
+    const unsubTables = socketService.subscribeToTables(() => {
+      rbacService.getTablesApi().then(setTables).catch(() => {});
+    });
+    return () => {
+      unsubOrders();
+      unsubTables();
+    };
   }, [businessId]);
 
   // Acknowledge a pending bill request / waiter ping

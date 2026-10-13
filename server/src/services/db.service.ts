@@ -1,21 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { 
-  firestoreDb, 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  limit, 
-  getDocFromServer,
-  collectionGroup
-} from '../config/firebase';
+import { prisma } from '../lib/prisma';
 import { 
   Business, 
   User, 
@@ -30,8 +15,8 @@ import { slugify, sanitizePhoneId, generateUserDocId } from '../utils/id.utils';
 import { sanitizeTabs, deriveAllowedTabs, isBusinessOwnerRole } from './tabAccess';
 import type { TabPermissionId } from '../types/rbac.types';
 
-class FirestoreDatabaseStore {
-  private isFirestoreConnected = false;
+class PostgresDatabaseStore {
+  private isPostgresConnected = false;
   private isInitialized = false;
 
   // In-memory caching layer for instant sub-millisecond responses
@@ -44,154 +29,110 @@ class FirestoreDatabaseStore {
   private devOtpStore: Map<string, string> = new Map();
 
   constructor() {
-    this.initFirestore();
+    this.initPostgres();
   }
 
-  private async initFirestore() {
+  private async initPostgres() {
     try {
-      // Test and sync Firestore collections on startup
-      await this.syncFromFirestore();
-      this.isFirestoreConnected = true;
+      await this.syncFromPostgres();
+      this.isPostgresConnected = true;
       this.isInitialized = true;
-      console.log('✅ Connected to Google Firebase Firestore & synced live collections.');
+      console.log('✅ Connected to PostgreSQL (Supabase) & synchronized live tables.');
     } catch (err: any) {
-      console.warn('⚠️ Firestore initialization notice (using memory sync):', err.message);
+      console.warn('⚠️ PostgreSQL initialization notice (using memory sync):', err.message);
     }
   }
 
-  private async syncFromFirestore() {
+  private async syncFromPostgres() {
     try {
-      // 1. Sync Businesses (strictly registered business entities only, purging any stray documents)
-      const bSnap = await getDocs(collection(firestoreDb, 'businesses'));
-      for (const d of bSnap.docs) {
-        const data = d.data() as any;
-        const currentId = d.id;
-        
-        // A valid business document must have a valid business name, business type, and cannot be a session or staff doc
-        const isStray = currentId.startsWith('customer-sess-') || 
-                        currentId.startsWith('order-') ||
-                        currentId.startsWith('LOG-') ||
-                        currentId === 'staff' || 
-                        currentId === 'audit_logs' || 
-                        !data ||
-                        !data.name ||
-                        typeof data.name !== 'string' ||
-                        data.name.trim().length === 0 ||
-                        (!data.business_type && !data.status);
-
-        if (isStray) {
-          try {
-            await deleteDoc(doc(firestoreDb, 'businesses', currentId));
-          } catch (err) {}
-        } else {
-          this.businesses.set(d.id, {
-            id: d.id,
-            name: data.name || d.id,
-            business_type: data.business_type || 'RESTAURANT',
-            status: data.status || 'ACTIVE',
-            tagline: data.tagline ?? (data.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-            location: data.location ?? 'Main Dining & Service Area',
-            address: data.address || '',
-            kitchen_hours: data.kitchen_hours ?? '07:30 AM – 10:30 PM',
-            phone: data.phone ?? '',
-            parent_business_id: data.parent_business_id || undefined,
-            owner_uid: data.owner_uid || undefined,
-            branch_code: data.branch_code || undefined,
-            currency: data.currency || undefined,
-            tax_rate: typeof data.tax_rate === 'number' ? data.tax_rate : undefined,
-            created_at: data.created_at ? new Date(data.created_at) : new Date(),
-            updated_at: data.updated_at ? new Date(data.updated_at) : new Date(),
-          });
-        }
-      }
-
-      // 1b. Sync Franchises
-      const fSnap = await getDocs(collectionGroup(firestoreDb, 'franchises'));
-      for (const d of fSnap.docs) {
-        const data = d.data() as any;
-        const bizId = d.ref.path.replace('businesses/', ''); // e.g. "parent_id/franchises/slug"
-        this.businesses.set(bizId, {
-          id: bizId,
-          name: data.name || d.id,
-          business_type: data.business_type || 'RESTAURANT',
-          status: data.status || 'ACTIVE',
-          tagline: data.tagline,
-          location: data.location,
-          address: data.address || '',
-          kitchen_hours: data.kitchen_hours,
-          phone: data.phone ?? '',
-          parent_business_id: data.parent_business_id || undefined,
-          owner_uid: data.owner_uid || undefined,
-          branch_code: data.branch_code || undefined,
-          currency: data.currency || undefined,
-          tax_rate: typeof data.tax_rate === 'number' ? data.tax_rate : undefined,
-          created_at: data.created_at ? new Date(data.created_at) : new Date(),
-          updated_at: data.updated_at ? new Date(data.updated_at) : new Date(),
+      // 1. Sync Businesses
+      const dbBusinesses = await prisma.business.findMany();
+      for (const d of dbBusinesses) {
+        this.businesses.set(d.id, {
+          id: d.id,
+          name: d.name,
+          business_type: (d.business_type as BusinessType) || 'RESTAURANT',
+          status: (d.status as any) || 'ACTIVE',
+          tagline: d.tagline ?? (d.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+          location: d.location ?? 'Main Dining & Service Area',
+          address: d.address || '',
+          kitchen_hours: d.kitchen_hours ?? '07:30 AM – 10:30 PM',
+          phone: d.phone ?? '',
+          parent_business_id: d.parent_business_id || undefined,
+          owner_uid: d.owner_uid || undefined,
+          branch_code: d.branch_code || undefined,
+          currency: d.currency || 'Rs.',
+          tax_rate: typeof d.tax_rate === 'number' ? d.tax_rate : 0,
+          show_menu_images: d.show_menu_images,
+          menu_theme_config: (d.menu_theme_config as any) || undefined,
+          date_format_nav: (d.date_format_nav as any) || 'BOTH',
+          date_format_billing: (d.date_format_billing as any) || 'BOTH',
+          created_at: d.created_at,
+          updated_at: d.updated_at,
         });
       }
 
-      // If database is brand new (e.g. freshly remixed), initialize default business
+      // If database has 0 businesses, initialize default
       if (this.businesses.size === 0) {
         await this.ensureBusiness('maya-forest-resort', 'Maya Forest Resort', 'HOTEL');
       }
 
       // 2. Sync Users
-      const uSnap = await getDocs(collection(firestoreDb, 'users'));
-      uSnap.forEach((d) => {
-        const data = d.data() as any;
+      const dbUsers = await prisma.user.findMany();
+      for (const d of dbUsers) {
         this.users.set(d.id, {
           id: d.id,
-          business_id: data.business_id,
-          email: data.email,
-          password_hash: data.password_hash,
-          role: data.role,
-          status: data.status,
-          custom_permissions: data.custom_permissions,
-          allowed_tabs: Array.isArray(data.allowed_tabs) ? sanitizeTabs(data.allowed_tabs) : undefined,
-          last_login_at: data.last_login_at ? new Date(data.last_login_at) : null,
-          created_at: data.created_at ? new Date(data.created_at) : new Date(),
-          updated_at: data.updated_at ? new Date(data.updated_at) : new Date(),
+          business_id: d.business_id,
+          email: d.email,
+          name: d.name || undefined,
+          password_hash: d.password_hash,
+          role: d.role as UserRole,
+          status: d.status as any,
+          allowed_tabs: Array.isArray(d.allowed_tabs) ? sanitizeTabs(d.allowed_tabs as any) : undefined,
+          last_login_at: d.last_login_at,
+          created_at: d.created_at,
+          updated_at: d.updated_at,
         });
-      });
+      }
 
       // 3. Sync Phone Verifications
-      const pSnap = await getDocs(collection(firestoreDb, 'phone_verifications'));
-      pSnap.forEach((d) => {
-        const data = d.data() as any;
+      const dbPhones = await prisma.phoneVerification.findMany();
+      for (const d of dbPhones) {
         this.phoneVerifications.set(d.id, {
           id: d.id,
-          user_id: data.user_id,
-          phone_country_code: data.phone_country_code,
-          phone_number: data.phone_number,
-          phone_e164: data.phone_e164,
-          is_verified: data.is_verified,
-          verified_at: data.verified_at ? new Date(data.verified_at) : null,
-          created_at: data.created_at ? new Date(data.created_at) : new Date(),
-          updated_at: data.updated_at ? new Date(data.updated_at) : new Date(),
+          user_id: d.user_id,
+          phone_country_code: d.phone_country_code,
+          phone_number: d.phone_number,
+          phone_e164: d.phone_e164,
+          is_verified: d.is_verified,
+          verified_at: d.verified_at,
+          created_at: d.created_at,
+          updated_at: d.updated_at,
         });
-      });
+      }
 
       // 4. Sync Audit Logs
-      const aSnap = await getDocs(collection(firestoreDb, 'audit_logs'));
-      aSnap.forEach((d) => {
-        const data = d.data() as any;
+      const dbAudits = await prisma.auditLog.findMany({
+        take: 500,
+        orderBy: { created_at: 'desc' },
+      });
+      for (const d of dbAudits) {
         this.auditLogs.set(d.id, {
           id: d.id,
-          user_id: data.user_id || data.account_name,
-          business_id: data.business_id || data.account_name,
-          account_name: data.account_name || 'ServeFlow Business',
-          email: data.email,
-          status: data.status || 'OFFLINE',
-          event_type: data.event_type,
-          ip_address: data.ip_address,
-          user_agent: data.user_agent,
-          last_active_at: data.last_active_at ? new Date(data.last_active_at) : new Date(),
-          created_at: data.created_at ? new Date(data.created_at) : new Date(),
-          updated_at: data.updated_at ? new Date(data.updated_at) : new Date(),
+          user_id: d.user_id || d.account_name,
+          business_id: d.business_id || d.account_name,
+          account_name: d.account_name || 'ServeFlow Business',
+          email: d.email || undefined,
+          status: (d.status as any) || 'OFFLINE',
+          event_type: d.event_type as any,
+          ip_address: d.ip_address || undefined,
+          user_agent: d.user_agent || undefined,
+          created_at: d.created_at,
+          updated_at: d.created_at,
         });
-      });
+      }
     } catch (e: any) {
-      console.warn('Firestore initial sync notice:', e.message);
+      console.warn('PostgreSQL initial sync notice:', e.message);
     }
   }
 
@@ -218,34 +159,49 @@ class FirestoreDatabaseStore {
       branch_code: extra?.branch_code,
       currency: extra?.currency || 'Rs.',
       tax_rate: typeof extra?.tax_rate === 'number' ? extra.tax_rate : 5,
+      show_menu_images: extra?.show_menu_images !== undefined ? extra.show_menu_images : true,
+      menu_theme_config: extra?.menu_theme_config,
+      date_format_nav: extra?.date_format_nav || 'BOTH',
+      date_format_billing: extra?.date_format_billing || 'BOTH',
       created_at: new Date(),
       updated_at: new Date(),
     };
     this.businesses.set(business.id, business);
 
     try {
-      const payload: any = {
-        id: business.id,
-        name: business.name,
-        business_type: business.business_type,
-        status: business.status,
-        tagline: business.tagline,
-        location: business.location,
-        address: business.address,
-        kitchen_hours: business.kitchen_hours,
-        phone: business.phone,
-        created_at: business.created_at.toISOString(),
-        updated_at: business.updated_at.toISOString(),
-      };
-      if (business.parent_business_id) payload.parent_business_id = business.parent_business_id;
-      if (business.owner_uid) payload.owner_uid = business.owner_uid;
-      if (business.branch_code) payload.branch_code = business.branch_code;
-      if (business.currency) payload.currency = business.currency;
-      if (typeof business.tax_rate === 'number') payload.tax_rate = business.tax_rate;
-
-      await setDoc(doc(firestoreDb, 'businesses', business.id), payload);
+      await prisma.business.upsert({
+        where: { id: business.id },
+        create: {
+          id: business.id,
+          name: business.name,
+          business_type: business.business_type,
+          status: business.status,
+          tagline: business.tagline || null,
+          location: business.location || null,
+          address: business.address || null,
+          kitchen_hours: business.kitchen_hours || null,
+          phone: business.phone || null,
+          parent_business_id: business.parent_business_id || null,
+          owner_uid: business.owner_uid || null,
+          branch_code: business.branch_code || null,
+          currency: business.currency || 'Rs.',
+          tax_rate: typeof business.tax_rate === 'number' ? business.tax_rate : 5,
+          show_menu_images: business.show_menu_images,
+          menu_theme_config: (business.menu_theme_config as any) || null,
+          date_format_nav: business.date_format_nav || 'BOTH',
+          date_format_billing: business.date_format_billing || 'BOTH',
+          created_at: business.created_at,
+          updated_at: business.updated_at,
+        },
+        update: {
+          name: business.name,
+          business_type: business.business_type,
+          status: business.status,
+          updated_at: new Date(),
+        },
+      });
     } catch (err: any) {
-      console.warn('Firestore createBusiness notice:', err.message);
+      console.warn('PostgreSQL createBusiness notice:', err.message);
     }
 
     return business;
@@ -301,7 +257,6 @@ class FirestoreDatabaseStore {
     });
 
     return Array.from(branchMap.values()).sort((a, b) => {
-      // Flagship/parent first
       if (a.id === parentBusinessId) return -1;
       if (b.id === parentBusinessId) return 1;
       return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -312,28 +267,29 @@ class FirestoreDatabaseStore {
     if (this.businesses.has(id)) {
       return this.businesses.get(id)!;
     }
+
     try {
-      const snap = await getDoc(doc(firestoreDb, 'businesses', id));
-      if (snap.exists()) {
-        const data = snap.data() as any;
+      const dbBiz = await prisma.business.findUnique({ where: { id } });
+      if (dbBiz) {
         const b: Business = {
-          id: snap.id,
-          name: data.name || name || id,
-          business_type: data.business_type || type || 'RESTAURANT',
-          status: data.status || 'ACTIVE',
-          tagline: data.tagline ?? (data.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: data.location ?? 'Main Dining & Service Area',
-            address: data.address || '',
-          kitchen_hours: data.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: data.phone ?? '',
-          parent_business_id: data.parent_business_id || undefined,
-          owner_uid: data.owner_uid || undefined,
-          branch_code: data.branch_code || undefined,
-          currency: data.currency || undefined,
-          tax_rate: typeof data.tax_rate === 'number' ? data.tax_rate : undefined,
-          show_menu_images: data.show_menu_images !== undefined ? Boolean(data.show_menu_images) : true,
-          created_at: new Date(data.created_at || Date.now()),
-          updated_at: new Date(data.updated_at || Date.now()),
+          id: dbBiz.id,
+          name: dbBiz.name,
+          business_type: (dbBiz.business_type as BusinessType) || type || 'RESTAURANT',
+          status: (dbBiz.status as any) || 'ACTIVE',
+          tagline: dbBiz.tagline ?? (dbBiz.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+          location: dbBiz.location ?? 'Main Dining & Service Area',
+          address: dbBiz.address || '',
+          kitchen_hours: dbBiz.kitchen_hours ?? '07:30 AM – 10:30 PM',
+          phone: dbBiz.phone ?? '',
+          parent_business_id: dbBiz.parent_business_id || undefined,
+          owner_uid: dbBiz.owner_uid || undefined,
+          branch_code: dbBiz.branch_code || undefined,
+          currency: dbBiz.currency || undefined,
+          tax_rate: typeof dbBiz.tax_rate === 'number' ? dbBiz.tax_rate : undefined,
+          show_menu_images: dbBiz.show_menu_images,
+          menu_theme_config: (dbBiz.menu_theme_config as any) || undefined,
+          created_at: dbBiz.created_at,
+          updated_at: dbBiz.updated_at,
         };
         this.businesses.set(b.id, b);
         return b;
@@ -362,22 +318,33 @@ class FirestoreDatabaseStore {
       updated_at: new Date(),
     };
     this.businesses.set(business.id, business);
+
     try {
-      await setDoc(doc(firestoreDb, 'businesses', business.id), {
-        id: business.id,
-        name: business.name,
-        business_type: business.business_type,
-        status: business.status,
-        tagline: business.tagline,
-        location: business.location,
-        kitchen_hours: business.kitchen_hours,
-        phone: business.phone,
-        created_at: business.created_at.toISOString(),
-        updated_at: business.updated_at.toISOString(),
+      await prisma.business.upsert({
+        where: { id: business.id },
+        create: {
+          id: business.id,
+          name: business.name,
+          business_type: business.business_type,
+          status: business.status,
+          tagline: business.tagline || null,
+          location: business.location || null,
+          kitchen_hours: business.kitchen_hours || null,
+          phone: business.phone || null,
+          parent_business_id: business.parent_business_id || null,
+          created_at: business.created_at,
+          updated_at: business.updated_at,
+        },
+        update: {
+          name: business.name,
+          business_type: business.business_type,
+          status: business.status,
+        },
       });
     } catch (err: any) {
-      console.warn('Firestore ensureBusiness notice:', err.message);
+      console.warn('PostgreSQL ensureBusiness notice:', err.message);
     }
+
     return business;
   }
 
@@ -386,30 +353,29 @@ class FirestoreDatabaseStore {
       return this.businesses.get(id)!;
     }
     try {
-      const snap = await getDoc(doc(firestoreDb, 'businesses', id));
-      if (snap.exists()) {
-        const data = snap.data() as any;
+      const dbBiz = await prisma.business.findUnique({ where: { id } });
+      if (dbBiz) {
         const b: Business = {
-          id: snap.id,
-          name: data.name,
-          business_type: data.business_type,
-          status: data.status,
-          tagline: data.tagline ?? (data.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: data.location ?? 'Main Dining & Service Area',
-            address: data.address || '',
-          kitchen_hours: data.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: data.phone ?? '',
-          parent_business_id: data.parent_business_id || undefined,
-          owner_uid: data.owner_uid || undefined,
-          branch_code: data.branch_code || undefined,
-          currency: data.currency || undefined,
-          tax_rate: typeof data.tax_rate === 'number' ? data.tax_rate : undefined,
-          show_menu_images: data.show_menu_images !== undefined ? Boolean(data.show_menu_images) : true,
-          menu_theme_config: data.menu_theme_config || undefined,
-          date_format_nav: data.date_format_nav || undefined,
-          date_format_billing: data.date_format_billing || undefined,
-          created_at: new Date(data.created_at),
-          updated_at: new Date(data.updated_at),
+          id: dbBiz.id,
+          name: dbBiz.name,
+          business_type: dbBiz.business_type as BusinessType,
+          status: dbBiz.status as any,
+          tagline: dbBiz.tagline ?? (dbBiz.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+          location: dbBiz.location ?? 'Main Dining & Service Area',
+          address: dbBiz.address || '',
+          kitchen_hours: dbBiz.kitchen_hours ?? '07:30 AM – 10:30 PM',
+          phone: dbBiz.phone ?? '',
+          parent_business_id: dbBiz.parent_business_id || undefined,
+          owner_uid: dbBiz.owner_uid || undefined,
+          branch_code: dbBiz.branch_code || undefined,
+          currency: dbBiz.currency || undefined,
+          tax_rate: typeof dbBiz.tax_rate === 'number' ? dbBiz.tax_rate : undefined,
+          show_menu_images: dbBiz.show_menu_images,
+          menu_theme_config: (dbBiz.menu_theme_config as any) || undefined,
+          date_format_nav: (dbBiz.date_format_nav as any) || undefined,
+          date_format_billing: (dbBiz.date_format_billing as any) || undefined,
+          created_at: dbBiz.created_at,
+          updated_at: dbBiz.updated_at,
         };
         this.businesses.set(b.id, b);
         return b;
@@ -420,81 +386,47 @@ class FirestoreDatabaseStore {
 
   async getAllBusinesses(): Promise<Business[]> {
     try {
-      const snap = await getDocs(collection(firestoreDb, 'businesses'));
+      const dbBizs = await prisma.business.findMany();
       const list: Business[] = [];
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        const isStray = d.id.startsWith('customer-sess-') || 
-                        d.id === 'staff' || 
-                        d.id === 'audit_logs' || 
-                        (!data.name && !data.business_type);
-        if (!isStray) {
-          const b: Business = {
-            id: d.id,
-            name: data.name || 'Unnamed Venue',
-            business_type: data.business_type || 'RESTAURANT',
-            status: data.status || 'ACTIVE',
-            tagline: data.tagline ?? (data.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-            location: data.location ?? 'Main Dining & Service Area',
-            address: data.address || '',
-            kitchen_hours: data.kitchen_hours ?? '07:30 AM – 10:30 PM',
-            phone: data.phone ?? '',
-            parent_business_id: data.parent_business_id || undefined,
-            owner_uid: data.owner_uid || undefined,
-            branch_code: data.branch_code || undefined,
-            currency: data.currency || undefined,
-            tax_rate: typeof data.tax_rate === 'number' ? data.tax_rate : undefined,
-            show_menu_images: data.show_menu_images !== undefined ? Boolean(data.show_menu_images) : true,
-            menu_theme_config: data.menu_theme_config || undefined,
-            date_format_nav: data.date_format_nav || undefined,
-            date_format_billing: data.date_format_billing || undefined,
-            created_at: new Date(data.created_at || Date.now()),
-            updated_at: new Date(data.updated_at || Date.now()),
-          };
-          this.businesses.set(b.id, b);
-          list.push(b);
-        }
-      });
-      if (list.length > 0) {
-        return list;
+      for (const d of dbBizs) {
+        const b: Business = {
+          id: d.id,
+          name: d.name || 'Unnamed Venue',
+          business_type: (d.business_type as BusinessType) || 'RESTAURANT',
+          status: (d.status as any) || 'ACTIVE',
+          tagline: d.tagline ?? (d.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+          location: d.location ?? 'Main Dining & Service Area',
+          address: d.address || '',
+          kitchen_hours: d.kitchen_hours ?? '07:30 AM – 10:30 PM',
+          phone: d.phone ?? '',
+          parent_business_id: d.parent_business_id || undefined,
+          owner_uid: d.owner_uid || undefined,
+          branch_code: d.branch_code || undefined,
+          currency: d.currency || undefined,
+          tax_rate: typeof d.tax_rate === 'number' ? d.tax_rate : undefined,
+          show_menu_images: d.show_menu_images,
+          menu_theme_config: (d.menu_theme_config as any) || undefined,
+          date_format_nav: (d.date_format_nav as any) || undefined,
+          date_format_billing: (d.date_format_billing as any) || undefined,
+          created_at: d.created_at,
+          updated_at: d.updated_at,
+        };
+        this.businesses.set(b.id, b);
+        list.push(b);
       }
+      if (list.length > 0) return list;
     } catch (e: any) {
-      console.warn('getAllBusinesses Firestore read notice:', e.message);
+      console.warn('getAllBusinesses PostgreSQL notice:', e.message);
     }
-    return [];
+    return Array.from(this.businesses.values());
   }
 
   async getDefaultBusiness(): Promise<Business | null> {
     if (this.businesses.size > 0) {
-      return this.businesses.values().next().value;
+      return this.businesses.values().next().value || null;
     }
-    try {
-      const snap = await getDocs(collection(firestoreDb, 'businesses'));
-      if (!snap.empty) {
-        const firstDoc = snap.docs[0];
-        const data = firstDoc.data() as any;
-        const b: Business = {
-          id: firstDoc.id,
-          name: data.name,
-          business_type: data.business_type,
-          status: data.status,
-          tagline: data.tagline ?? (data.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: data.location ?? 'Main Dining & Service Area',
-            address: data.address || '',
-          kitchen_hours: data.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: data.phone ?? '',
-          show_menu_images: data.show_menu_images !== undefined ? Boolean(data.show_menu_images) : true,
-          menu_theme_config: data.menu_theme_config || undefined,
-          date_format_nav: data.date_format_nav || undefined,
-          date_format_billing: data.date_format_billing || undefined,
-          created_at: new Date(data.created_at || Date.now()),
-          updated_at: new Date(data.updated_at || Date.now()),
-        };
-        this.businesses.set(b.id, b);
-        return b;
-      }
-    } catch (e) {}
-    return null;
+    const all = await this.getAllBusinesses();
+    return all.length > 0 ? all[0] : null;
   }
 
   async updateBusinessProfile(id: string, updates: Partial<Business>): Promise<Business | null> {
@@ -520,22 +452,25 @@ class FirestoreDatabaseStore {
     this.businesses.set(id, business);
 
     try {
-      await setDoc(doc(firestoreDb, 'businesses', id), {
-        ...(updates.name !== undefined ? { name: business.name } : {}),
-        ...(updates.business_type !== undefined ? { business_type: business.business_type } : {}),
-        ...(updates.tagline !== undefined ? { tagline: business.tagline } : {}),
-        ...(updates.location !== undefined ? { location: business.location } : {}),
-        ...(updates.address !== undefined ? { address: business.address } : {}),
-        ...(updates.kitchen_hours !== undefined ? { kitchen_hours: business.kitchen_hours } : {}),
-        ...(updates.phone !== undefined ? { phone: business.phone } : {}),
-        ...(updates.show_menu_images !== undefined ? { show_menu_images: business.show_menu_images } : {}),
-        ...(updates.menu_theme_config !== undefined ? { menu_theme_config: business.menu_theme_config } : {}),
-        ...(updates.date_format_nav !== undefined ? { date_format_nav: business.date_format_nav } : {}),
-        ...(updates.date_format_billing !== undefined ? { date_format_billing: business.date_format_billing } : {}),
-        updated_at: business.updated_at.toISOString(),
-      }, { merge: true });
+      await prisma.business.update({
+        where: { id },
+        data: {
+          ...(updates.name !== undefined ? { name: business.name } : {}),
+          ...(updates.business_type !== undefined ? { business_type: business.business_type } : {}),
+          ...(updates.tagline !== undefined ? { tagline: business.tagline } : {}),
+          ...(updates.location !== undefined ? { location: business.location } : {}),
+          ...(updates.address !== undefined ? { address: business.address } : {}),
+          ...(updates.kitchen_hours !== undefined ? { kitchen_hours: business.kitchen_hours } : {}),
+          ...(updates.phone !== undefined ? { phone: business.phone } : {}),
+          ...(updates.show_menu_images !== undefined ? { show_menu_images: business.show_menu_images } : {}),
+          ...(updates.menu_theme_config !== undefined ? { menu_theme_config: business.menu_theme_config as any } : {}),
+          ...(updates.date_format_nav !== undefined ? { date_format_nav: business.date_format_nav } : {}),
+          ...(updates.date_format_billing !== undefined ? { date_format_billing: business.date_format_billing } : {}),
+          updated_at: business.updated_at,
+        },
+      });
     } catch (e: any) {
-      console.error('Firestore updateBusinessProfile ERROR:', e.code, e.message);
+      console.error('PostgreSQL updateBusinessProfile ERROR:', e.message);
     }
 
     return business;
@@ -549,12 +484,15 @@ class FirestoreDatabaseStore {
       this.businesses.set(id, business);
     }
     try {
-      await setDoc(doc(firestoreDb, 'businesses', id), {
-        status,
-        updated_at: new Date().toISOString(),
-      }, { merge: true });
+      await prisma.business.update({
+        where: { id },
+        data: {
+          status,
+          updated_at: new Date(),
+        },
+      });
     } catch (e: any) {
-      console.error('Firestore updateBusinessStatus ERROR:', e.code, e.message);
+      console.error('PostgreSQL updateBusinessStatus ERROR:', e.message);
     }
     return business || null;
   }
@@ -584,20 +522,29 @@ class FirestoreDatabaseStore {
     this.users.set(user.id, user);
 
     try {
-      await setDoc(doc(firestoreDb, 'users', user.id), {
-        id: user.id,
-        business_id: user.business_id,
-        email: user.email,
-        password_hash: user.password_hash,
-        role: user.role,
-        status: user.status,
-        ...(user.allowed_tabs ? { allowed_tabs: user.allowed_tabs } : {}),
-        last_login_at: null,
-        created_at: user.created_at.toISOString(),
-        updated_at: user.updated_at.toISOString(),
+      await prisma.user.upsert({
+        where: { email: user.email },
+        create: {
+          id: user.id,
+          business_id: user.business_id,
+          email: user.email,
+          password_hash: user.password_hash,
+          role: user.role,
+          status: user.status,
+          allowed_tabs: user.allowed_tabs || [],
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+        },
+        update: {
+          password_hash: user.password_hash,
+          role: user.role,
+          status: user.status,
+          allowed_tabs: user.allowed_tabs || [],
+          updated_at: new Date(),
+        },
       });
     } catch (err: any) {
-      console.warn('Firestore createUser notice:', err.message);
+      console.warn('PostgreSQL createUser notice:', err.message);
     }
 
     return user;
@@ -612,23 +559,19 @@ class FirestoreDatabaseStore {
     }
 
     try {
-      const q = query(collection(firestoreDb, 'users'), where('email', '==', normalized), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        const data = d.data() as any;
+      const dbUser = await prisma.user.findUnique({ where: { email: normalized } });
+      if (dbUser) {
         const u: User = {
-          id: d.id,
-          business_id: data.business_id,
-          email: data.email,
-          password_hash: data.password_hash,
-          role: data.role,
-          status: data.status,
-          custom_permissions: data.custom_permissions,
-          allowed_tabs: Array.isArray(data.allowed_tabs) ? sanitizeTabs(data.allowed_tabs) : undefined,
-          last_login_at: data.last_login_at ? new Date(data.last_login_at) : null,
-          created_at: new Date(data.created_at),
-          updated_at: new Date(data.updated_at),
+          id: dbUser.id,
+          business_id: dbUser.business_id,
+          email: dbUser.email,
+          password_hash: dbUser.password_hash,
+          role: dbUser.role as UserRole,
+          status: dbUser.status as any,
+          allowed_tabs: Array.isArray(dbUser.allowed_tabs) ? sanitizeTabs(dbUser.allowed_tabs as any) : undefined,
+          last_login_at: dbUser.last_login_at,
+          created_at: dbUser.created_at,
+          updated_at: dbUser.updated_at,
         };
         this.users.set(u.id, u);
         return u;
@@ -667,20 +610,30 @@ class FirestoreDatabaseStore {
       updated_at: new Date(),
     };
     this.users.set(user.id, user);
+
     try {
-      await setDoc(doc(firestoreDb, 'users', user.id), {
-        id: user.id,
-        business_id: user.business_id,
-        email: user.email,
-        password_hash: user.password_hash,
-        role: user.role,
-        status: user.status,
-        last_login_at: user.last_login_at?.toISOString() || null,
-        created_at: user.created_at.toISOString(),
-        updated_at: user.updated_at.toISOString(),
+      await prisma.user.upsert({
+        where: { email },
+        create: {
+          id: user.id,
+          business_id: user.business_id,
+          email: user.email,
+          password_hash: user.password_hash,
+          role: user.role,
+          status: user.status,
+          allowed_tabs: user.allowed_tabs || [],
+          last_login_at: user.last_login_at,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+        },
+        update: {
+          role: user.role,
+          status: user.status,
+          updated_at: new Date(),
+        },
       });
     } catch (err: any) {
-      console.warn('Firestore ensureUser notice:', err.message);
+      console.warn('PostgreSQL ensureUser notice:', err.message);
     }
     return user;
   }
@@ -690,21 +643,19 @@ class FirestoreDatabaseStore {
       return this.users.get(id)!;
     }
     try {
-      const snap = await getDoc(doc(firestoreDb, 'users', id));
-      if (snap.exists()) {
-        const data = snap.data() as any;
+      const dbUser = await prisma.user.findUnique({ where: { id } });
+      if (dbUser) {
         const u: User = {
-          id: snap.id,
-          business_id: data.business_id,
-          email: data.email,
-          password_hash: data.password_hash,
-          role: data.role,
-          status: data.status,
-          custom_permissions: data.custom_permissions,
-          allowed_tabs: Array.isArray(data.allowed_tabs) ? sanitizeTabs(data.allowed_tabs) : undefined,
-          last_login_at: data.last_login_at ? new Date(data.last_login_at) : null,
-          created_at: new Date(data.created_at),
-          updated_at: new Date(data.updated_at),
+          id: dbUser.id,
+          business_id: dbUser.business_id,
+          email: dbUser.email,
+          password_hash: dbUser.password_hash,
+          role: dbUser.role as UserRole,
+          status: dbUser.status as any,
+          allowed_tabs: Array.isArray(dbUser.allowed_tabs) ? sanitizeTabs(dbUser.allowed_tabs as any) : undefined,
+          last_login_at: dbUser.last_login_at,
+          created_at: dbUser.created_at,
+          updated_at: dbUser.updated_at,
         };
         this.users.set(u.id, u);
         return u;
@@ -716,7 +667,7 @@ class FirestoreDatabaseStore {
   async findUsersByBusinessId(businessId: string): Promise<User[]> {
     const listMap = new Map<string, User>();
 
-    // First populate from in-memory cache
+    // First populate from cache
     for (const u of this.users.values()) {
       if (u.business_id === businessId) {
         listMap.set(u.id, u);
@@ -724,42 +675,30 @@ class FirestoreDatabaseStore {
     }
 
     try {
-      const q = query(
-        collection(firestoreDb, 'users'),
-        where('business_id', '==', businessId)
-      );
-      const snap = await getDocs(q);
-      snap.forEach(d => {
-        const data = d.data() as any;
+      const dbUsers = await prisma.user.findMany({ where: { business_id: businessId } });
+      for (const d of dbUsers) {
         const u: User = {
           id: d.id,
-          business_id: data.business_id,
-          email: data.email,
-          password_hash: data.password_hash || '',
-          role: data.role,
-          status: data.status || 'ACTIVE',
-          custom_permissions: data.custom_permissions,
-          allowed_tabs: Array.isArray(data.allowed_tabs) ? sanitizeTabs(data.allowed_tabs) : undefined,
-          last_login_at: data.last_login_at ? new Date(data.last_login_at) : null,
-          created_at: data.created_at ? new Date(data.created_at) : new Date(),
-          updated_at: data.updated_at ? new Date(data.updated_at) : new Date(),
+          business_id: d.business_id,
+          email: d.email,
+          password_hash: d.password_hash || '',
+          role: d.role as UserRole,
+          status: d.status as any,
+          allowed_tabs: Array.isArray(d.allowed_tabs) ? sanitizeTabs(d.allowed_tabs as any) : undefined,
+          last_login_at: d.last_login_at,
+          created_at: d.created_at,
+          updated_at: d.updated_at,
         };
         listMap.set(u.id, u);
         this.users.set(u.id, u);
-      });
+      }
     } catch (err: any) {
       console.warn('findUsersByBusinessId error:', err.message);
     }
 
-    const results = Array.from(listMap.values());
-    return results;
+    return Array.from(listMap.values());
   }
 
-  /**
-   * Updates a user's role label and (optionally) the tabs they may open.
-   * `custom_permissions` is deprecated and ignored for access decisions; it is only passed
-   * through when explicitly given and is never deleted from existing documents.
-   */
   async updateUserRoleAndPermissions(
     id: string,
     role: UserRole,
@@ -776,30 +715,24 @@ class FirestoreDatabaseStore {
       this.users.set(id, user);
     }
     try {
-      const updates: any = {
-        role,
-        updated_at: new Date().toISOString(),
-      };
-      if (custom_permissions !== undefined) {
-        updates.custom_permissions = custom_permissions;
-      }
-      if (cleanTabs !== undefined) {
-        updates.allowed_tabs = cleanTabs;
-      }
-      await updateDoc(doc(firestoreDb, 'users', id), updates);
-    } catch (e) {}
+      await prisma.user.update({
+        where: { id },
+        data: {
+          role,
+          ...(cleanTabs !== undefined ? { allowed_tabs: cleanTabs } : {}),
+          updated_at: new Date(),
+        },
+      });
+    } catch (e: any) {
+      console.warn('updateUserRoleAndPermissions error:', e.message);
+    }
     return user || null;
   }
 
   private pinnedTabsGuard: Set<string> = new Set();
 
-  /**
-   * Lazy one-time migration: persists the derived tab list for a non-owner account that has no
-   * stored `allowed_tabs`, so the result stays stable and editable. Best effort, never throws.
-   * Returns the effective tab list for the account.
-   */
   async ensureAllowedTabsPersisted(user: User): Promise<TabPermissionId[]> {
-    if (isBusinessOwnerRole(user.role)) return deriveAllowedTabs(user.role); // owners: all tabs, nothing stored
+    if (isBusinessOwnerRole(user.role)) return deriveAllowedTabs(user.role);
     if (Array.isArray(user.allowed_tabs)) return sanitizeTabs(user.allowed_tabs);
 
     const derived = deriveAllowedTabs(user.role, user.custom_permissions);
@@ -810,7 +743,10 @@ class FirestoreDatabaseStore {
     if (!this.pinnedTabsGuard.has(user.id)) {
       this.pinnedTabsGuard.add(user.id);
       try {
-        await updateDoc(doc(firestoreDb, 'users', user.id), { allowed_tabs: derived });
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { allowed_tabs: derived },
+        });
       } catch (e) {
         this.pinnedTabsGuard.delete(user.id);
       }
@@ -821,7 +757,7 @@ class FirestoreDatabaseStore {
   async deleteUser(id: string): Promise<void> {
     this.users.delete(id);
     try {
-      await deleteDoc(doc(firestoreDb, 'users', id));
+      await prisma.user.delete({ where: { id } });
     } catch (e) {}
   }
 
@@ -833,9 +769,9 @@ class FirestoreDatabaseStore {
       this.users.set(id, user);
     }
     try {
-      await updateDoc(doc(firestoreDb, 'users', id), {
-        status,
-        updated_at: new Date().toISOString(),
+      await prisma.user.update({
+        where: { id },
+        data: { status, updated_at: new Date() },
       });
     } catch (e) {}
     return user || null;
@@ -850,9 +786,9 @@ class FirestoreDatabaseStore {
       this.users.set(id, user);
     }
     try {
-      await updateDoc(doc(firestoreDb, 'users', id), {
-        last_login_at: now.toISOString(),
-        updated_at: now.toISOString(),
+      await prisma.user.update({
+        where: { id },
+        data: { last_login_at: now, updated_at: now },
       });
     } catch (e) {}
   }
@@ -860,7 +796,6 @@ class FirestoreDatabaseStore {
   async updateLastLogin(id: string): Promise<void> {
     return this.updateUserLastLogin(id);
   }
-
 
   async findActivePasswordResetTokens(userId: string): Promise<PasswordResetToken[]> {
     const tokens: PasswordResetToken[] = [];
@@ -904,7 +839,6 @@ class FirestoreDatabaseStore {
     await this.upsertAuditLog(log);
   }
 
-
   async updateUserPassword(id: string, password_hash: string): Promise<void> {
     const user = this.users.get(id);
     const now = new Date();
@@ -914,9 +848,9 @@ class FirestoreDatabaseStore {
       this.users.set(id, user);
     }
     try {
-      await updateDoc(doc(firestoreDb, 'users', id), {
-        password_hash,
-        updated_at: now.toISOString(),
+      await prisma.user.update({
+        where: { id },
+        data: { password_hash, updated_at: now },
       });
     } catch (e) {}
   }
@@ -943,16 +877,25 @@ class FirestoreDatabaseStore {
     this.phoneVerifications.set(pv.id, pv);
 
     try {
-      await setDoc(doc(firestoreDb, 'phone_verifications', pv.id), {
-        id: pv.id,
-        user_id: pv.user_id,
-        phone_country_code: pv.phone_country_code,
-        phone_number: pv.phone_number,
-        phone_e164: pv.phone_e164,
-        is_verified: pv.is_verified,
-        verified_at: null,
-        created_at: pv.created_at.toISOString(),
-        updated_at: pv.updated_at?.toISOString() || null,
+      await prisma.phoneVerification.upsert({
+        where: { id: pv.id },
+        create: {
+          id: pv.id,
+          user_id: pv.user_id,
+          phone_country_code: pv.phone_country_code,
+          phone_number: pv.phone_number,
+          phone_e164: pv.phone_e164,
+          is_verified: pv.is_verified,
+          verified_at: null,
+          created_at: pv.created_at,
+          updated_at: pv.updated_at,
+        },
+        update: {
+          phone_country_code: pv.phone_country_code,
+          phone_number: pv.phone_number,
+          phone_e164: pv.phone_e164,
+          updated_at: new Date(),
+        },
       });
     } catch (e) {}
 
@@ -977,21 +920,18 @@ class FirestoreDatabaseStore {
       if (pv.user_id === userId) return pv;
     }
     try {
-      const q = query(collection(firestoreDb, 'phone_verifications'), where('user_id', '==', userId), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        const data = d.data() as any;
+      const dbPv = await prisma.phoneVerification.findFirst({ where: { user_id: userId } });
+      if (dbPv) {
         const pv: PhoneVerification = {
-          id: d.id,
-          user_id: data.user_id,
-          phone_country_code: data.phone_country_code,
-          phone_number: data.phone_number,
-          phone_e164: data.phone_e164,
-          is_verified: data.is_verified,
-          verified_at: data.verified_at ? new Date(data.verified_at) : null,
-          created_at: new Date(data.created_at),
-          updated_at: data.updated_at ? new Date(data.updated_at) : null,
+          id: dbPv.id,
+          user_id: dbPv.user_id,
+          phone_country_code: dbPv.phone_country_code,
+          phone_number: dbPv.phone_number,
+          phone_e164: dbPv.phone_e164,
+          is_verified: dbPv.is_verified,
+          verified_at: dbPv.verified_at,
+          created_at: dbPv.created_at,
+          updated_at: dbPv.updated_at,
         };
         this.phoneVerifications.set(pv.id, pv);
         return pv;
@@ -1005,21 +945,18 @@ class FirestoreDatabaseStore {
       if (pv.phone_e164 === phone_e164) return pv;
     }
     try {
-      const q = query(collection(firestoreDb, 'phone_verifications'), where('phone_e164', '==', phone_e164), limit(1));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        const data = d.data() as any;
+      const dbPv = await prisma.phoneVerification.findFirst({ where: { phone_e164 } });
+      if (dbPv) {
         const pv: PhoneVerification = {
-          id: d.id,
-          user_id: data.user_id,
-          phone_country_code: data.phone_country_code,
-          phone_number: data.phone_number,
-          phone_e164: data.phone_e164,
-          is_verified: data.is_verified,
-          verified_at: data.verified_at ? new Date(data.verified_at) : null,
-          created_at: new Date(data.created_at),
-          updated_at: data.updated_at ? new Date(data.updated_at) : null,
+          id: dbPv.id,
+          user_id: dbPv.user_id,
+          phone_country_code: dbPv.phone_country_code,
+          phone_number: dbPv.phone_number,
+          phone_e164: dbPv.phone_e164,
+          is_verified: dbPv.is_verified,
+          verified_at: dbPv.verified_at,
+          created_at: dbPv.created_at,
+          updated_at: dbPv.updated_at,
         };
         this.phoneVerifications.set(pv.id, pv);
         return pv;
@@ -1038,10 +975,9 @@ class FirestoreDatabaseStore {
       this.phoneVerifications.set(pv.id, pv);
 
       try {
-        await updateDoc(doc(firestoreDb, 'phone_verifications', pv.id), {
-          is_verified: true,
-          verified_at: now.toISOString(),
-          updated_at: now.toISOString(),
+        await prisma.phoneVerification.updateMany({
+          where: { user_id: userId },
+          data: { is_verified: true, verified_at: now, updated_at: now },
         });
       } catch (e) {}
     }
@@ -1057,10 +993,9 @@ class FirestoreDatabaseStore {
       this.phoneVerifications.set(pv.id, pv);
 
       try {
-        await updateDoc(doc(firestoreDb, 'phone_verifications', pv.id), {
-          is_verified: true,
-          verified_at: now.toISOString(),
-          updated_at: now.toISOString(),
+        await prisma.phoneVerification.updateMany({
+          where: { phone_e164 },
+          data: { is_verified: true, verified_at: now, updated_at: now },
         });
       } catch (e) {}
     }
@@ -1099,16 +1034,24 @@ class FirestoreDatabaseStore {
     }
 
     try {
-      await setDoc(doc(firestoreDb, 'otp_verifications', otp.id), {
-        id: otp.id,
-        user_id: otp.user_id,
-        phone_e164: otp.phone_e164,
-        otp_hash: otp.otp_hash,
-        purpose: otp.purpose,
-        expires_at: otp.expires_at.toISOString(),
-        attempt_count: otp.attempt_count,
-        verified_at: null,
-        created_at: otp.created_at.toISOString(),
+      await prisma.otpVerification.upsert({
+        where: { id: otp.id },
+        create: {
+          id: otp.id,
+          user_id: otp.user_id,
+          phone_e164: otp.phone_e164,
+          otp_hash: otp.otp_hash,
+          purpose: otp.purpose,
+          expires_at: otp.expires_at,
+          attempt_count: otp.attempt_count,
+          verified_at: null,
+          created_at: otp.created_at,
+        },
+        update: {
+          otp_hash: otp.otp_hash,
+          expires_at: otp.expires_at,
+          attempt_count: otp.attempt_count,
+        },
       });
     } catch (e) {}
 
@@ -1133,8 +1076,9 @@ class FirestoreDatabaseStore {
       otp.attempt_count += 1;
       this.otpVerifications.set(id, otp);
       try {
-        await updateDoc(doc(firestoreDb, 'otp_verifications', id), {
-          attempt_count: otp.attempt_count,
+        await prisma.otpVerification.update({
+          where: { id },
+          data: { attempt_count: otp.attempt_count },
         });
       } catch (e) {}
       return otp.attempt_count;
@@ -1149,8 +1093,9 @@ class FirestoreDatabaseStore {
       otp.verified_at = now;
       this.otpVerifications.set(id, otp);
       try {
-        await updateDoc(doc(firestoreDb, 'otp_verifications', id), {
-          verified_at: now.toISOString(),
+        await prisma.otpVerification.update({
+          where: { id },
+          data: { verified_at: now },
         });
       } catch (e) {}
     }
@@ -1185,13 +1130,15 @@ class FirestoreDatabaseStore {
     this.passwordResetTokens.set(prt.id, prt);
 
     try {
-      await setDoc(doc(firestoreDb, 'password_reset_tokens', prt.id), {
-        id: prt.id,
-        user_id: prt.user_id,
-        token_hash: prt.token_hash,
-        expires_at: prt.expires_at.toISOString(),
-        used_at: null,
-        created_at: prt.created_at.toISOString(),
+      await prisma.passwordResetToken.create({
+        data: {
+          id: prt.id,
+          user_id: prt.user_id,
+          token_hash: prt.token_hash,
+          expires_at: prt.expires_at,
+          used_at: null,
+          created_at: prt.created_at,
+        },
       });
     } catch (e) {}
 
@@ -1202,6 +1149,21 @@ class FirestoreDatabaseStore {
     for (const prt of this.passwordResetTokens.values()) {
       if (prt.token_hash === token_hash) return prt;
     }
+    try {
+      const dbPrt = await prisma.passwordResetToken.findUnique({ where: { token_hash } });
+      if (dbPrt) {
+        const prt: PasswordResetToken = {
+          id: dbPrt.id,
+          user_id: dbPrt.user_id,
+          token_hash: dbPrt.token_hash,
+          expires_at: dbPrt.expires_at,
+          used_at: dbPrt.used_at,
+          created_at: dbPrt.created_at,
+        };
+        this.passwordResetTokens.set(prt.id, prt);
+        return prt;
+      }
+    } catch (e) {}
     return null;
   }
 
@@ -1212,8 +1174,9 @@ class FirestoreDatabaseStore {
       prt.used_at = now;
       this.passwordResetTokens.set(id, prt);
       try {
-        await updateDoc(doc(firestoreDb, 'password_reset_tokens', id), {
-          used_at: now.toISOString(),
+        await prisma.passwordResetToken.update({
+          where: { id },
+          data: { used_at: now },
         });
       } catch (e) {}
     }
@@ -1243,7 +1206,7 @@ class FirestoreDatabaseStore {
   }
 
   getDbStatus(): string {
-    return this.isFirestoreConnected ? 'FIREBASE_FIRESTORE_CONNECTED' : 'LOCAL_FIREBASE_STORE_READY';
+    return this.isPostgresConnected ? 'POSTGRESQL_SUPABASE_CONNECTED' : 'LOCAL_POSTGRES_STORE_READY';
   }
 
   // --- Audit Logs ---
@@ -1261,7 +1224,6 @@ class FirestoreDatabaseStore {
     return logs;
   }
 
-
   async deleteAuditLogs(userId?: string, email?: string, businessId?: string, filterType?: string, date?: string): Promise<{ deletedCount: number }> {
     let logsToDelete: string[] = [];
     const targetDate = date ? new Date(date).toISOString().split('T')[0] : null;
@@ -1274,7 +1236,7 @@ class FirestoreDatabaseStore {
         if (userId && (log.user_id === userId || log.id === userId)) matchesUser = true;
         if (email && log.email?.toLowerCase() === email.toLowerCase()) matchesUser = true;
       } else {
-        matchesUser = true; // Admin deletion or fallback
+        matchesUser = true;
       }
 
       if (matchesUser) {
@@ -1298,11 +1260,9 @@ class FirestoreDatabaseStore {
     for (const id of logsToDelete) {
       this.auditLogs.delete(id);
       try {
-        await deleteDoc(doc(firestoreDb, 'audit_logs', id));
+        await prisma.auditLog.delete({ where: { id } });
         deletedCount++;
-      } catch(e) {
-        console.error('Failed to delete log from Firestore', id, e);
-      }
+      } catch(e) {}
     }
 
     return { deletedCount };
@@ -1311,22 +1271,27 @@ class FirestoreDatabaseStore {
   async upsertAuditLog(log: AuditLog): Promise<void> {
     this.auditLogs.set(log.id, log);
     try {
-      await setDoc(doc(firestoreDb, 'audit_logs', log.id), {
-        id: log.id,
-        user_id: log.user_id || log.account_name,
-        business_id: log.business_id || log.account_name,
-        account_name: log.account_name,
-        email: log.email || null,
-        status: log.status || 'OFFLINE',
-        event_type: log.event_type,
-        ip_address: log.ip_address || null,
-        user_agent: log.user_agent || null,
-        last_active_at: (log.last_active_at || log.created_at).toISOString(),
-        created_at: log.created_at.toISOString(),
-        updated_at: (log.updated_at || log.created_at).toISOString(),
-      }, { merge: true });
+      await prisma.auditLog.upsert({
+        where: { id: log.id },
+        create: {
+          id: log.id,
+          user_id: log.user_id || log.account_name || null,
+          business_id: log.business_id || null,
+          account_name: log.account_name || null,
+          email: log.email || null,
+          status: log.status || 'OFFLINE',
+          event_type: log.event_type,
+          ip_address: log.ip_address || null,
+          user_agent: log.user_agent || null,
+          created_at: log.created_at,
+        },
+        update: {
+          status: log.status || 'OFFLINE',
+          event_type: log.event_type,
+        },
+      });
     } catch (e: any) {
-      console.warn('Firestore upsert audit_log error:', e.message);
+      console.warn('PostgreSQL upsert audit_log error:', e.message);
     }
   }
 
@@ -1343,5 +1308,4 @@ class FirestoreDatabaseStore {
   }
 }
 
-export const db = new FirestoreDatabaseStore();
-
+export const db = new PostgresDatabaseStore();
