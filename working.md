@@ -1275,4 +1275,19 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-14 by Antigravity (Franchise Menu Catalog cloning ID scoping and variant preservation verified)*
+## 22. Removal of "Open Waiter View" Banner & Isolation of Orders Section
+
+- **Issue**: In the **Orders** section (`activeTab === 'kds'`), marking dishes or drinks ready triggered a prominent blue alert banner containing `"Open Waiter View →"` (and in fullscreen mode, `"View Waiter Queue →"`). Clicking it switched the station view to `'WAITER'` within the Orders tab, breaking layout consistency and confusing kitchen staff who have a dedicated **Waiter Station** tab in the sidebar.
+- **Root Cause**:
+  1. Relic from the legacy single-view KDS where Kitchen, Bar, and Waiter were 3 sub-tabs in one component. When Waiter Station was separated into its own top-level sidebar entry (`activeTab === 'waiter'`), the `lastPingedOrder` banner with `setActiveStation('WAITER')` was left behind in `KitchenDisplaySystem.tsx`.
+  2. The header description in Orders also redundantly advertised "and Waiter ready-to-serve notifications".
+- **Fix**:
+  1. Removed `lastPingedOrder` banner and its buttons (`Open Waiter View →` and `View Waiter Queue →`) from both standard and fullscreen views in [`KitchenDisplaySystem.tsx`](file:///C:/Users/Sansl/antigravity/ServeFlow-test---Restaurant-&-Hotel-Management-Portal/src/components/kds/KitchenDisplaySystem.tsx).
+  2. Added an explicit guard `useEffect` ensuring `activeStation` can never be set to `'WAITER'` when `defaultStation !== 'WAITER'`.
+  3. Contextualized header subtitle: Displays `"Separated station queues for Kitchen dishes and Bar drinks."` in the Orders section, and `"Live queue for prepared dishes, drink delivery, and customer table assistance."` in the Waiter Station.
+  4. Mirrored changes to `C:\Users\Sansl\antigravity\Serveflow`.
+  5. Verified with `npm run lint` and `npm run build`.
+
+---
+
+*Last updated: 2026-10-14 by Antigravity (Removal of Open Waiter View from Orders section verified)*

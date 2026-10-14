@@ -78,10 +78,16 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'READY' | 'SERVED'>('ACTIVE');
-  const [lastPingedOrder, setLastPingedOrder] = useState<string | null>(null);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const prevBillPingsRef = useRef<number>(0);
+
+  // Ensure Waiter view cannot be opened in Orders section (where defaultStation is KITCHEN)
+  useEffect(() => {
+    if (defaultStation !== 'WAITER' && activeStation === 'WAITER') {
+      setActiveStation('KITCHEN');
+    }
+  }, [defaultStation, activeStation]);
 
   const canDeliver = !isViewOnly;
 
@@ -387,10 +393,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     try {
       await rbacService.updateTableOrderStatusApi(orderId, newStatus, businessId);
       playChime();
-      if (newStatus === 'READY') {
-        setLastPingedOrder(orderId);
-        setTimeout(() => setLastPingedOrder(null), 6000);
-      }
     } catch (err: any) {
       alert(`Failed to update status: ${err.message}`);
     } finally {
@@ -467,10 +469,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       }
 
       playChime();
-      if (newStatus === 'READY') {
-        setLastPingedOrder(orderId);
-        setTimeout(() => setLastPingedOrder(null), 5000);
-      }
     } catch (err: any) {
       alert(`Failed to update item status: ${err.message}`);
     } finally {
@@ -523,8 +521,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       }
 
       playChime();
-      setLastPingedOrder(order.id);
-      setTimeout(() => setLastPingedOrder(null), 5000);
     } catch (err: any) {
       alert(`Failed to mark all items ready: ${err.message}`);
     } finally {
@@ -595,13 +591,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       }
 
       playChime();
-      if (newStatus === 'READY') {
-        const firstOrderId = targetItems[0]?.orderId;
-        if (firstOrderId) {
-          setLastPingedOrder(firstOrderId);
-          setTimeout(() => setLastPingedOrder(null), 5000);
-        }
-      }
     } catch (err: any) {
       alert(`Failed to batch update items: ${err.message}`);
     }
@@ -2388,22 +2377,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
         {/* Fullscreen Body Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-          {lastPingedOrder && (
-            <div className="p-3 bg-blue-950/80 border border-blue-700 rounded-2xl flex items-center justify-between gap-3 text-blue-200 animate-in slide-in-from-top duration-300">
-              <div className="flex items-center gap-3">
-                <Bell className="w-5 h-5 text-blue-400 animate-bounce shrink-0" />
-                <div className="text-xs font-bold">Dish Prepared Notification Ping Sent to Waiters!</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveStation('WAITER')}
-                className="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-500 cursor-pointer whitespace-nowrap"
-              >
-                View Waiter Queue →
-              </button>
-            </div>
-          )}
-
           {renderOrdersList(true)}
         </div>
       </div>
@@ -2430,7 +2403,9 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
               Station Display System (KDS & Bar)
             </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Separated station queues for Kitchen dishes, Bar drinks, and Waiter ready-to-serve notifications.
+              {defaultStation === 'WAITER'
+                ? 'Live queue for prepared dishes, drink delivery, and customer table assistance.'
+                : 'Separated station queues for Kitchen dishes and Bar drinks.'}
             </p>
           </div>
 
@@ -2687,28 +2662,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
           )}
         </div>
       </div>
-
-      {/* Ping Notification Toast when Cook marks Ready */}
-      {lastPingedOrder && (
-        <div className="p-4 bg-blue-50 border-2 border-blue-400 rounded-2xl flex items-center justify-between gap-3 text-blue-900 animate-in slide-in-from-top duration-300">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center animate-bounce">
-              <Bell className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-xs font-black">Dish Prepared Notification Ping Sent to Waiters!</div>
-              <div className="text-xs text-blue-700">Order is now live in the Waiter View ready for delivery.</div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActiveStation('WAITER')}
-            className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 cursor-pointer whitespace-nowrap"
-          >
-            Open Waiter View →
-          </button>
-        </div>
-      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-zinc-200">
