@@ -98,7 +98,7 @@ export class ClientRBACService {
   // =========================================================================
 
   public async fetchMenus(businessId: string, userRole?: string): Promise<MenuItem[]> {
-    return this.getMenuItemsApi(businessId);
+    return this.getMenusApi(businessId);
   }
 
   public async fetchCheckIns(businessId: string, userRole?: string): Promise<CheckIn[]> {

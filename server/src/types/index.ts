@@ -179,3 +179,6 @@ export interface ApiResponse<T = any> {
     details?: any;
   };
 }
+
+export * from './rbac.types';
+

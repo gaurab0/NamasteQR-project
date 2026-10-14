@@ -485,7 +485,7 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
         status: itemStatus,
         is_available: itemStatus === 'available',
         has_variants: Boolean(has_variants && validVariants.length > 0),
-        variants: validVariants,
+        variants: validVariants as any,
         variant_group_name: variant_group_name ? String(variant_group_name).trim() : null,
         display_style: display_style || 'auto',
         show_image: show_image !== undefined ? Boolean(show_image) : true,

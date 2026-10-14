@@ -1598,7 +1598,6 @@ export class RBACService {
             data: {
               status: 'COMPLETED',
               bill_requested: false,
-              settled: true,
               updated_at: now,
             },
           });
@@ -2656,7 +2655,7 @@ export class RBACService {
           active_promo_percent: cfg.active_promo_percent ? Number(cfg.active_promo_percent) : undefined,
           active_promo_description: cfg.active_promo_description || undefined,
           active_promo_enabled: cfg.active_promo_enabled,
-          order_reset_interval: cfg.order_reset_interval || 'MANUAL',
+          order_reset_interval: (cfg.order_reset_interval as any) || 'MANUAL',
           last_order_reset_date: cfg.last_order_reset_date || null,
           updated_at: cfg.updated_at ? cfg.updated_at.toISOString() : new Date().toISOString(),
         };
@@ -2807,7 +2806,7 @@ export class RBACService {
           computedTaxes,
           totalAmount: preDiscountTotal,
         } = this.calculateOrderTaxBreakdown(itemsMenuTotal, updated);
-        const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, od, updated);
+        const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, od as any, updated);
         const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
 
         await prisma.tableOrder.update({
@@ -4215,7 +4214,7 @@ export class RBACService {
     businessId: string,
     orderId?: string,
     requestId?: string
-  ): Promise<{ orderId?: string; requestId?: string; attended: boolean; order?: any }> {
+  ): Promise<{ success?: boolean; error?: string; orderId?: string; requestId?: string; attended: boolean; order?: any }> {
     const now = new Date();
     let updatedOrderPayload: any = null;
 

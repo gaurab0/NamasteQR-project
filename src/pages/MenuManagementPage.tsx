@@ -143,13 +143,13 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
 
     setBusinessProfile((prev) =>
       prev
-        ? {
+        ? ({
             ...prev,
             menu_theme_config: {
               ...(prev.menu_theme_config || {}),
               categoryOrder: orderedIds,
-            },
-          }
+            } as any,
+          } as Business)
         : null
     );
 
