@@ -38,6 +38,16 @@ class PostgresDatabaseStore {
       this.isPostgresConnected = true;
       this.isInitialized = true;
       console.log('✅ Connected to PostgreSQL (Supabase) & synchronized live tables.');
+
+      // Periodic keepalive every 2 minutes to keep Supabase pooler connections warm
+      const keepAliveTimer = setInterval(async () => {
+        try {
+          await prisma.$queryRaw`SELECT 1`;
+        } catch {}
+      }, 2 * 60 * 1000);
+      if (keepAliveTimer && typeof keepAliveTimer.unref === 'function') {
+        keepAliveTimer.unref();
+      }
     } catch (err: any) {
       console.warn('⚠️ PostgreSQL initialization notice (using memory sync):', err.message);
     }
