@@ -1,7 +1,7 @@
 /**
  * Tab-based access control core (working.md section 19).
  *
- * Pure module: no database / Firestore imports, so it can be unit tested in isolation
+ * Pure module: no database imports, so it can be unit tested in isolation
  * and imported from services, middleware and routes without circular dependencies.
  *
  * Model:

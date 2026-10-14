@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, doc, updateDoc} from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 import { RestaurantTable, AppRole } from '../../types/rbac';
 import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
@@ -38,25 +36,16 @@ export const WaiterStationDashboard: React.FC<WaiterStationDashboardProps> = ({
     if (!businessId) return;
 
     setLoading(true);
-    const tablesColRef = collection(db, 'businesses', businessId, 'tables');
-    
-    const unsubscribe = onSnapshot(tablesColRef, (snapshot) => {
-      const liveTables: RestaurantTable[] = [];
-      snapshot.forEach((docSnap) => {
-        liveTables.push({
-          id: docSnap.id,
-          ...docSnap.data()
-        } as RestaurantTable);
+    rbacService.getTablesApi(businessId)
+      .then((data) => {
+        setTables(data || []);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error fetching tables:", err);
+        setErrorMsg("Failed to sync tables. " + err.message);
+        setLoading(false);
       });
-      setTables(liveTables);
-      setLoading(false);
-    }, (err) => {
-      console.error("Error fetching tables real-time:", err);
-      setErrorMsg("Failed to sync tables. " + err.message);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
   }, [businessId]);
 
   // Socket.io Real-time WebSocket Subscription for instant table updates

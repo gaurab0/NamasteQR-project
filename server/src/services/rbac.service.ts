@@ -1,20 +1,6 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { 
-  firestoreDb, 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs,
-  runTransaction, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  limit 
-} from '../config/firebase';
+
 import { 
   AppRole, 
   AppResource, 
@@ -143,7 +129,7 @@ export class RBACService {
   }
 
   // =========================================================================
-  // FIRESTORE MENUS COLLECTION (Restricted by RBAC)
+  // MENUS COLLECTION (Restricted by RBAC)
   // =========================================================================
 
   /**
@@ -163,85 +149,34 @@ export class RBACService {
         where: { business_id: businessId },
         orderBy: { order_index: 'asc' },
       });
-      if (dbItems.length > 0) {
-        return dbItems.map((d: any) => ({
-          id: d.id,
-          business_id: d.business_id,
-          name: d.name,
-          category: d.category || 'General',
-          category_id: d.category_id || undefined,
-          price: Number(d.price),
-          currency: d.currency || 'Rs.',
-          description: d.description || '',
-          image_url: d.image_url || '',
-          food_type: (d.food_type as any) || 'non-veg',
-          variants: (d.variants as any) || [],
-          has_variants: d.has_variants || false,
-          variant_group_name: d.variant_group_name || undefined,
-          additional_categories: d.additional_categories || [],
-          show_image: d.show_image,
-          promo_badge: d.promo_badge || undefined,
-          display_style: (d.display_style as any) || undefined,
-          status: (d.status as any) || (d.is_available ? 'available' : 'unavailable'),
-          is_available: d.is_available,
-          order_index: d.order_index,
-          preparation_time_mins: d.preparation_time_mins || 15,
-          created_by: d.created_by || 'system',
-          created_at: new Date(d.created_at),
-          updated_at: new Date(d.updated_at),
-        }));
-      }
+      return dbItems.map((d: any) => ({
+        id: d.id,
+        business_id: d.business_id,
+        name: d.name,
+        category: d.category || 'General',
+        category_id: d.category_id || undefined,
+        price: Number(d.price),
+        currency: d.currency || 'Rs.',
+        description: d.description || '',
+        image_url: d.image_url || '',
+        food_type: (d.food_type as any) || 'non-veg',
+        variants: (d.variants as any) || [],
+        has_variants: d.has_variants || false,
+        variant_group_name: d.variant_group_name || undefined,
+        additional_categories: d.additional_categories || [],
+        show_image: d.show_image,
+        promo_badge: d.promo_badge || undefined,
+        display_style: (d.display_style as any) || undefined,
+        status: (d.status as any) || (d.is_available ? 'available' : 'unavailable'),
+        is_available: d.is_available,
+        order_index: d.order_index,
+        preparation_time_mins: d.preparation_time_mins || 15,
+        created_by: d.created_by || 'system',
+        created_at: new Date(d.created_at),
+        updated_at: new Date(d.updated_at),
+      }));
     } catch (err: any) {
-      console.warn('Prisma getMenuItems fallback:', err.message);
-    }
-
-    try {
-      // First query hierarchical subcollection: /businesses/{businessId}/menus
-      let snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'menus'));
-      if (snapshot.empty) {
-        // Fallback query on root collection
-        const q = query(
-          collection(firestoreDb, 'menus'),
-          where('business_id', '==', businessId)
-        );
-        snapshot = await getDocs(q);
-      }
-      const items: MenuItem[] = [];
-
-      snapshot.forEach(docSnap => {
-        const d = docSnap.data();
-        const isAvailable = d.is_available ?? (d.status === 'available' || !d.status);
-        const status = d.status || (isAvailable ? 'available' : 'unavailable');
-        items.push({
-          id: docSnap.id,
-          business_id: d.business_id,
-          name: d.name,
-          category: d.category || 'General',
-          category_id: d.category_id,
-          price: d.price,
-          currency: d.currency || 'Rs.',
-          description: d.description || '',
-          image_url: d.image_url || '',
-          food_type: d.food_type || 'non-veg',
-          variants: d.variants || [],
-          has_variants: d.has_variants || false,
-          variant_group_name: d.variant_group_name,
-          additional_categories: d.additional_categories || [],
-          show_image: d.show_image,
-          promo_badge: d.promo_badge,
-          display_style: d.display_style,
-          status: status,
-          is_available: status === 'available',
-          preparation_time_mins: d.preparation_time_mins || 15,
-          created_by: d.created_by || 'system',
-          created_at: d.created_at ? new Date(d.created_at) : new Date(),
-          updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
-        });
-      });
-
-      return items;
-    } catch (err: any) {
-      console.warn('getMenuItems fallback:', err.message);
+      console.warn('Prisma getMenuItems error:', err.message);
       return [];
     }
   }
@@ -258,37 +193,15 @@ export class RBACService {
         where: { business_id: businessId },
         orderBy: { order: 'asc' },
       });
-      if (dbCats.length > 0) {
-        return dbCats.map((d: any) => ({
-          id: d.id,
-          business_id: d.business_id,
-          name: d.name,
-          created_at: new Date(d.created_at),
-          updated_at: new Date(d.updated_at),
-        }));
-      }
+      return dbCats.map((d: any) => ({
+        id: d.id,
+        business_id: d.business_id,
+        name: d.name,
+        created_at: new Date(d.created_at),
+        updated_at: new Date(d.updated_at),
+      }));
     } catch (err: any) {
-      console.warn('Prisma getCategories fallback:', err.message);
-    }
-
-    try {
-      const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'menu_categories'));
-      const categories: MenuCategory[] = [];
-
-      snapshot.forEach(docSnap => {
-        const d = docSnap.data();
-        categories.push({
-          id: docSnap.id,
-          business_id: d.business_id,
-          name: d.name,
-          created_at: d.created_at ? new Date(d.created_at) : new Date(),
-          updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
-        });
-      });
-
-      return categories;
-    } catch (err: any) {
-      console.warn('getCategories fallback:', err.message);
+      console.warn('Prisma getCategories error:', err.message);
       return [];
     }
   }
@@ -331,17 +244,6 @@ export class RBACService {
       console.warn('Prisma createCategory error:', e.message);
     }
 
-    const payload = {
-      ...newCategory,
-      created_at: newCategory.created_at.toISOString(),
-      updated_at: newCategory.updated_at.toISOString(),
-    };
-
-    // Save directly to /businesses/{businessId}/menu_categories/{catId}
-    try {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', newCategory.id), payload);
-    } catch (e) {}
-
     realtimeEmitter.menuUpdated(businessId);
     return newCategory;
   }
@@ -369,17 +271,6 @@ export class RBACService {
       console.warn('Prisma updateCategory error:', e.message);
     }
 
-    const payload = {
-      name: data.name.trim(),
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId), payload);
-    } catch (e) {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId), payload, { merge: true });
-    }
-
     realtimeEmitter.menuUpdated(businessId);
   }
 
@@ -403,10 +294,6 @@ export class RBACService {
     } catch (e: any) {
       console.warn('Prisma deleteCategory error:', e.message);
     }
-
-    try {
-      await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'menu_categories', categoryId));
-    } catch (e) {}
 
     realtimeEmitter.menuUpdated(businessId);
   }
@@ -513,20 +400,6 @@ export class RBACService {
       console.warn('Prisma createMenuItem error:', e.message);
     }
 
-    const payload: any = {
-      ...newItem,
-      created_at: newItem.created_at.toISOString(),
-      updated_at: newItem.updated_at.toISOString(),
-      category_id: newItem.category_id || null,
-    };
-    // Remove any undefined properties to satisfy Firestore
-    Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
-
-    // Save under /businesses/{businessId}/menus/{newItem.id}
-    try {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', newItem.id), payload);
-    } catch (e) {}
-
     realtimeEmitter.menuUpdated(businessId);
     return newItem;
   }
@@ -581,29 +454,6 @@ export class RBACService {
       console.warn('Prisma updateMenuItem error:', e.message);
     }
 
-    const payload: any = {
-      ...updates,
-      updated_at: new Date().toISOString(),
-    };
-    
-    if (updates.category_id === undefined && 'category_id' in updates) {
-      payload.category_id = null;
-    }
-
-    if (updates.status) {
-      payload.is_available = updates.status === 'available';
-    } else if (updates.is_available !== undefined) {
-      payload.status = updates.is_available ? 'available' : 'unavailable';
-    }
-
-    Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
-
-    try {
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'menus', itemId), payload);
-    } catch (e) {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', itemId), payload, { merge: true });
-    }
-
     realtimeEmitter.menuUpdated(businessId);
   }
 
@@ -628,15 +478,11 @@ export class RBACService {
       console.warn('Prisma deleteMenuItem error:', e.message);
     }
 
-    try {
-      await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'menus', itemId));
-    } catch (e) {}
-
     realtimeEmitter.menuUpdated(businessId);
   }
 
   // =========================================================================
-  // FIRESTORE CHECK-INS COLLECTION (Restricted by RBAC)
+  // CHECK-INS COLLECTION (Restricted by RBAC)
   // =========================================================================
 
   /**
@@ -654,42 +500,31 @@ export class RBACService {
     }
 
     try {
-      let snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'check_ins'));
-      if (snapshot.empty) {
-        const q = query(
-          collection(firestoreDb, 'check_ins'),
-          where('business_id', '==', businessId)
-        );
-        snapshot = await getDocs(q);
-      }
-      const checkIns: CheckIn[] = [];
-
-      snapshot.forEach(docSnap => {
-        const d = docSnap.data();
-        if (!filters?.status || d.status === filters.status) {
-          checkIns.push({
-            id: docSnap.id,
-            business_id: d.business_id,
-            guest_name: d.guest_name,
-            guest_phone: d.guest_phone || '',
-            guest_email: d.guest_email || '',
-            room_or_table_number: d.room_or_table_number,
-            check_in_date: d.check_in_date ? new Date(d.check_in_date) : new Date(),
-            check_out_date: d.check_out_date ? new Date(d.check_out_date) : null,
-            status: d.status || 'CHECKED_IN',
-            total_amount: d.total_amount || 0,
-            deposit_paid: d.deposit_paid || 0,
-            notes: d.notes || '',
-            handled_by_user_id: d.handled_by_user_id || user.id,
-            created_at: d.created_at ? new Date(d.created_at) : new Date(),
-            updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
-          });
-        }
+      const where: any = { business_id: businessId };
+      if (filters?.status) where.status = filters.status;
+      const records = await prisma.checkIn.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
       });
-
-      return checkIns;
+      return records.map((d: any) => ({
+        id: d.id,
+        business_id: d.business_id,
+        guest_name: d.guest_name,
+        guest_phone: d.guest_phone || '',
+        guest_email: d.guest_email || '',
+        room_or_table_number: d.room_or_table_number,
+        check_in_date: new Date(d.check_in_date),
+        check_out_date: d.check_out_date ? new Date(d.check_out_date) : null,
+        status: d.status as CheckInStatus,
+        total_amount: Number(d.total_amount) || 0,
+        deposit_paid: Number(d.deposit_paid) || 0,
+        notes: d.notes || '',
+        handled_by_user_id: d.handled_by_user_id || user.id,
+        created_at: new Date(d.created_at),
+        updated_at: new Date(d.updated_at),
+      }));
     } catch (err: any) {
-      console.warn('getCheckIns fallback:', err.message);
+      console.warn('getCheckIns error:', err.message);
       return [];
     }
   }
@@ -735,15 +570,28 @@ export class RBACService {
       updated_at: new Date(),
     };
 
-    const payload = {
-      ...newCheckIn,
-      check_in_date: newCheckIn.check_in_date.toISOString(),
-      check_out_date: null,
-      created_at: newCheckIn.created_at.toISOString(),
-      updated_at: newCheckIn.updated_at.toISOString(),
-    };
-
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'check_ins', newCheckIn.id), payload);
+    try {
+      await db.ensureBusiness(businessId);
+      await prisma.checkIn.create({
+        data: {
+          id: newCheckIn.id,
+          business_id: businessId,
+          guest_name: newCheckIn.guest_name,
+          guest_phone: newCheckIn.guest_phone,
+          guest_email: newCheckIn.guest_email,
+          room_or_table_number: newCheckIn.room_or_table_number,
+          check_in_date: newCheckIn.check_in_date,
+          check_out_date: null,
+          status: newCheckIn.status,
+          total_amount: newCheckIn.total_amount,
+          deposit_paid: newCheckIn.deposit_paid,
+          notes: newCheckIn.notes,
+          handled_by_user_id: user.id,
+        },
+      });
+    } catch (e: any) {
+      console.warn('Prisma createCheckIn error:', e.message);
+    }
 
     return newCheckIn;
   }
@@ -764,22 +612,26 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot update check-in record');
     }
 
-    const payload: any = {
-      ...updates,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (updates.check_in_date instanceof Date) {
-      payload.check_in_date = updates.check_in_date.toISOString();
-    }
-    if (updates.check_out_date instanceof Date) {
-      payload.check_out_date = updates.check_out_date.toISOString();
-    }
+    const prismaData: any = {};
+    if (updates.guest_name !== undefined) prismaData.guest_name = updates.guest_name.trim();
+    if (updates.guest_phone !== undefined) prismaData.guest_phone = updates.guest_phone;
+    if (updates.guest_email !== undefined) prismaData.guest_email = updates.guest_email;
+    if (updates.room_or_table_number !== undefined) prismaData.room_or_table_number = updates.room_or_table_number;
+    if (updates.check_in_date !== undefined) prismaData.check_in_date = new Date(updates.check_in_date);
+    if (updates.check_out_date !== undefined) prismaData.check_out_date = updates.check_out_date ? new Date(updates.check_out_date) : null;
+    if (updates.status !== undefined) prismaData.status = updates.status;
+    if (updates.total_amount !== undefined) prismaData.total_amount = Number(updates.total_amount);
+    if (updates.deposit_paid !== undefined) prismaData.deposit_paid = Number(updates.deposit_paid);
+    if (updates.notes !== undefined) prismaData.notes = updates.notes;
+    if (updates.handled_by_user_id !== undefined) prismaData.handled_by_user_id = updates.handled_by_user_id;
 
     try {
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'check_ins', checkInId), payload);
-    } catch (e) {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'check_ins', checkInId), payload, { merge: true });
+      await prisma.checkIn.update({
+        where: { id: checkInId },
+        data: prismaData,
+      });
+    } catch (e: any) {
+      console.warn('Prisma updateCheckIn error:', e.message);
     }
   }
 
@@ -798,8 +650,12 @@ export class RBACService {
     }
 
     try {
-      await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'check_ins', checkInId));
-    } catch (e) {}
+      await prisma.checkIn.delete({
+        where: { id: checkInId },
+      });
+    } catch (e: any) {
+      console.warn('Prisma deleteCheckIn error:', e.message);
+    }
   }
 
   // =========================================================================
@@ -1072,6 +928,7 @@ export class RBACService {
   private async seedDefaultCategories(businessId: string): Promise<MenuCategory[]> {
     const categoryNames = ['Breakfast', 'Lunch', 'Dinner', 'Nepali', 'Chinese', 'Snacks', 'Desserts', 'Beverages'];
     const results: MenuCategory[] = [];
+    await db.ensureBusiness(businessId);
     for (const name of categoryNames) {
       const catId = generateCategoryDocId(name);
       const cat: MenuCategory = {
@@ -1081,11 +938,17 @@ export class RBACService {
         created_at: new Date(),
         updated_at: new Date(),
       };
-      await setDoc(doc(firestoreDb, 'menu_categories', cat.id), {
-        ...cat,
-        created_at: cat.created_at.toISOString(),
-        updated_at: cat.updated_at.toISOString(),
-      });
+      await prisma.menuCategory.upsert({
+        where: { id: catId },
+        create: {
+          id: catId,
+          business_id: businessId,
+          name,
+        },
+        update: {
+          name,
+        },
+      }).catch(() => {});
       results.push(cat);
     }
     return results;
@@ -1168,6 +1031,7 @@ export class RBACService {
     ];
 
     const results: MenuItem[] = [];
+    await db.ensureBusiness(businessId);
     for (const d of defaults) {
       const docId = generateMenuDocId(d.name);
       const item: MenuItem = {
@@ -1187,18 +1051,29 @@ export class RBACService {
         created_at: new Date(),
         updated_at: new Date(),
       };
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'menus', item.id), {
-        ...item,
-        created_at: item.created_at.toISOString(),
-        updated_at: item.updated_at.toISOString(),
-      });
-      try {
-        await setDoc(doc(firestoreDb, 'menus', item.id), {
-          ...item,
-          created_at: item.created_at.toISOString(),
-          updated_at: item.updated_at.toISOString(),
-        });
-      } catch (e) {}
+      await prisma.menuItem.upsert({
+        where: { id: docId },
+        create: {
+          id: docId,
+          business_id: businessId,
+          name: d.name,
+          category: d.category,
+          price: d.price,
+          currency: d.currency,
+          description: d.description,
+          image_url: d.image_url,
+          food_type: d.food_type,
+          status: d.status,
+          is_available: d.is_available,
+          preparation_time_mins: d.preparation_time_mins,
+          created_by: userId,
+        },
+        update: {
+          name: d.name,
+          category: d.category,
+          price: d.price,
+        },
+      }).catch(() => {});
       results.push(item);
     }
     return results;
@@ -1211,6 +1086,7 @@ export class RBACService {
     ];
 
     const results: CheckIn[] = [];
+    await db.ensureBusiness(businessId);
     for (const d of defaults) {
       const docId = `${slugify(d.guest_name)}-${slugify(d.room_or_table_number)}`;
       const ci: CheckIn = {
@@ -1230,20 +1106,34 @@ export class RBACService {
         created_at: new Date(),
         updated_at: new Date(),
       };
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'check_ins', ci.id), {
-        ...ci,
-        check_in_date: ci.check_in_date.toISOString(),
-        check_out_date: null,
-        created_at: ci.created_at.toISOString(),
-        updated_at: ci.updated_at.toISOString(),
-      });
+      await prisma.checkIn.upsert({
+        where: { id: docId },
+        create: {
+          id: docId,
+          business_id: businessId,
+          guest_name: d.guest_name,
+          guest_phone: d.guest_phone,
+          guest_email: d.guest_email,
+          room_or_table_number: d.room_or_table_number,
+          check_in_date: d.check_in_date,
+          status: d.status,
+          total_amount: d.total_amount,
+          deposit_paid: d.deposit_paid,
+          notes: d.notes,
+          handled_by_user_id: userId,
+        },
+        update: {
+          guest_name: d.guest_name,
+          room_or_table_number: d.room_or_table_number,
+        },
+      }).catch(() => {});
       results.push(ci);
     }
     return results;
   }
 
   // =========================================================================
-  // FIRESTORE TABLES & DIGITAL ORDERING
+  // TABLES & DIGITAL ORDERING
   // =========================================================================
 
   /**
@@ -1257,61 +1147,29 @@ export class RBACService {
       const dbTables = await prisma.restaurantTable.findMany({
         where: { business_id: businessId },
       });
-      if (dbTables.length > 0) {
-        const tables: RestaurantTable[] = dbTables.map((d: any) => ({
-          id: d.id,
-          business_id: d.business_id,
-          table_number: d.table_number,
-          order_number: d.order_number || undefined,
-          invoice_number: d.invoice_number || undefined,
-          floor: d.floor ?? null,
-          building: d.building ?? null,
-          capacity: d.capacity || 4,
-          status: (d.status as TableStatus) || 'ACTIVE',
-          pay_first_enabled: Boolean(d.pay_first_enabled),
-          qr_code_url: d.qr_code_url || '',
-          last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : null,
-          current_session_id: d.current_session_id || null,
-          host_token: d.host_token || null,
-          created_at: new Date(d.created_at),
-          updated_at: new Date(d.updated_at),
-        }));
+      const tables: RestaurantTable[] = dbTables.map((d: any) => ({
+        id: d.id,
+        business_id: d.business_id,
+        table_number: d.table_number,
+        order_number: d.order_number || undefined,
+        invoice_number: d.invoice_number || undefined,
+        floor: d.floor ?? null,
+        building: d.building ?? null,
+        capacity: d.capacity || 4,
+        status: (d.status as TableStatus) || 'ACTIVE',
+        pay_first_enabled: Boolean(d.pay_first_enabled),
+        qr_code_url: d.qr_code_url || '',
+        last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : null,
+        current_session_id: d.current_session_id || null,
+        host_token: d.host_token || null,
+        created_at: new Date(d.created_at),
+        updated_at: new Date(d.updated_at),
+      }));
 
-        tables.sort((a, b) => a.table_number.localeCompare(b.table_number, undefined, { numeric: true, sensitivity: 'base' }));
-        return tables;
-      }
-    } catch (err: any) {
-      console.warn('Prisma getTables fallback:', err.message);
-    }
-
-    try {
-      const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'tables'));
-      const tables: RestaurantTable[] = [];
-
-      snapshot.forEach((docSnap) => {
-        const d = docSnap.data();
-        tables.push({
-          id: docSnap.id,
-          business_id: d.business_id,
-          table_number: d.table_number,
-          floor: d.floor ?? null,
-          building: d.building ?? null,
-          capacity: d.capacity || 4,
-          status: d.status || 'ACTIVE',
-          pay_first_enabled: Boolean(d.pay_first_enabled),
-          qr_code_url: d.qr_code_url || '',
-          last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : null,
-          current_session_id: d.current_session_id || null,
-          created_at: d.created_at ? new Date(d.created_at) : new Date(),
-          updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
-        });
-      });
-
-      // Sort naturally by table number / id
       tables.sort((a, b) => a.table_number.localeCompare(b.table_number, undefined, { numeric: true, sensitivity: 'base' }));
       return tables;
     } catch (err: any) {
-      console.warn('getTables fallback:', err.message);
+      console.warn('Prisma getTables error:', err.message);
       return [];
     }
   }
@@ -1381,17 +1239,6 @@ export class RBACService {
       console.warn('Prisma createTable error:', e.message);
     }
 
-    const payload = {
-      ...newTable,
-      created_at: newTable.created_at.toISOString(),
-      updated_at: newTable.updated_at.toISOString(),
-      last_scanned_at: null,
-    };
-
-    try {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', newTable.id), payload);
-    } catch (e) {}
-
     auditService.log({
       userId: user.id,
       email: user.email,
@@ -1450,25 +1297,6 @@ export class RBACService {
       console.warn('Prisma updateTable error:', e.message);
     }
 
-    const payload: any = {
-      ...updates,
-      updated_at: new Date().toISOString(),
-    };
-
-    if (updates.table_number) {
-      payload.table_number = updates.table_number.trim();
-      payload.qr_code_url = `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent(updates.table_number.trim())}`;
-    }
-    if (updates.floor !== undefined) payload.floor = updates.floor ? updates.floor.trim() : null;
-    if (updates.building !== undefined) payload.building = updates.building ? updates.building.trim() : null;
-    if (updates.capacity !== undefined) payload.capacity = Number(updates.capacity);
-
-    try {
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload);
-    } catch (e) {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
-    }
-
     auditService.log({
       userId: user.id,
       email: user.email,
@@ -1501,17 +1329,6 @@ export class RBACService {
       });
     } catch (e: any) {
       console.warn('Prisma updateTableStatus error:', e.message);
-    }
-
-    const payload = {
-      status,
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload);
-    } catch (e) {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
     }
 
     realtimeEmitter.tableUpdated(businessId, { id: tableId, status });
@@ -1564,68 +1381,6 @@ export class RBACService {
       console.warn('Prisma resetTableToDefault error:', e.message);
     }
 
-    let targetDocRef = tableId ? doc(firestoreDb, 'businesses', businessId, 'tables', tableId) : null;
-
-    if (!targetDocRef || !(await getDoc(targetDocRef)).exists()) {
-      if (tableNumber) {
-        const q = query(
-          collection(firestoreDb, 'businesses', businessId, 'tables'),
-          where('table_number', '==', tableNumber)
-        );
-        const snap = await getDocs(q);
-        if (!snap.empty) {
-          targetDocRef = snap.docs[0].ref;
-        }
-      }
-    }
-
-    const payload = {
-      status: 'ACTIVE',
-      current_session_id: null,
-      host_token: null,
-      last_scanned_at: null,
-      updated_at: now.toISOString(),
-    };
-
-    if (targetDocRef) {
-      try {
-        await updateDoc(targetDocRef, payload);
-      } catch (e) {
-        await setDoc(targetDocRef, payload, { merge: true });
-      }
-    } else if (tableId) {
-      try {
-        await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
-      } catch (e) {}
-    }
-
-    // Complete and archive all open table orders for this table so a new session starts completely clean
-    try {
-      const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-      const batchUpdates: Promise<any>[] = [];
-      ordersSnap.forEach((oDoc) => {
-        const od = oDoc.data();
-        const matchesTable = (tableId && od.table_id === tableId) ||
-                             (tableNumber && od.table_number === tableNumber);
-        if (matchesTable && od.status !== 'COMPLETED' && od.status !== 'CANCELLED') {
-          batchUpdates.push(
-            updateDoc(oDoc.ref, {
-              status: 'COMPLETED',
-              bill_requested: false,
-              settled: true,
-              completed_at: now.toISOString(),
-              updated_at: now.toISOString(),
-            }).catch(() => {})
-          );
-        }
-      });
-      if (batchUpdates.length > 0) {
-        await Promise.all(batchUpdates);
-      }
-    } catch (err) {
-      console.warn('Error completing orders during table resetToDefault:', err);
-    }
-
     auditService.log({
       userId: 'customer-bill',
       email: 'guest@serveflow.app',
@@ -1657,10 +1412,6 @@ export class RBACService {
     } catch (e: any) {
       console.warn('Prisma deleteTable error:', e.message);
     }
-
-    try {
-      await deleteDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableId));
-    } catch (e) {}
 
     auditService.log({
       userId: user.id,
@@ -1708,62 +1459,19 @@ export class RBACService {
       console.warn('Prisma resetTableSession error:', e.message);
     }
 
-    let tableDocRef = doc(firestoreDb, 'businesses', businessId, 'tables', tableId);
-    let snap = await getDoc(tableDocRef);
-
-    if (!snap.exists()) {
-      const q = query(
-        collection(firestoreDb, 'businesses', businessId, 'tables'),
-        where('table_number', '==', tableId)
-      );
-      const querySnap = await getDocs(q);
-      if (!querySnap.empty) {
-        tableDocRef = querySnap.docs[0].ref;
-        snap = querySnap.docs[0];
-      } else {
-        throw new Error(`Table ${tableId} not found`);
-      }
-    }
-
-    const payload = {
-      status: 'ACTIVE' as TableStatus,
-      current_session_id: null,
-      host_token: null,
-      last_scanned_at: null,
-      updated_at: now.toISOString(),
-    };
-
-    await updateDoc(tableDocRef, payload);
-
-    const actualTableId = snap.id;
-    const actualTableNumber = (snap.data() as any)?.table_number;
-
-    // Conclude and archive all active orders for this table so they never bleed into future sessions
-    try {
-      const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-      const batchUpdates: Promise<any>[] = [];
-      ordersSnap.forEach((oDoc) => {
-        const od = oDoc.data();
-        const matchesTable = (actualTableId && od.table_id === actualTableId) ||
-                             (actualTableNumber && od.table_number === actualTableNumber);
-        if (matchesTable && od.status !== 'COMPLETED' && od.status !== 'CANCELLED') {
-          batchUpdates.push(
-            updateDoc(oDoc.ref, {
-              status: 'COMPLETED',
-              bill_requested: false,
-              settled: true,
-              completed_at: now.toISOString(),
-              updated_at: now.toISOString(),
-            }).catch(() => {})
-          );
-        }
+    let targetTable = await prisma.restaurantTable.findUnique({ where: { id: tableId } });
+    if (!targetTable) {
+      targetTable = await prisma.restaurantTable.findFirst({
+        where: { business_id: businessId, table_number: tableId },
       });
-      if (batchUpdates.length > 0) {
-        await Promise.all(batchUpdates);
-      }
-    } catch (err) {
-      console.warn('Error completing orders during table session reset:', err);
     }
+
+    if (!targetTable) {
+      throw new Error(`Table ${tableId} not found`);
+    }
+
+    const actualTableId = targetTable.id;
+    const actualTableNumber = targetTable.table_number;
 
     auditService.log({
       userId: user?.id || 'manager',
@@ -1773,22 +1481,20 @@ export class RBACService {
       status: 'ONLINE',
     });
 
-    const updatedSnap = await getDoc(tableDocRef);
-    const d = updatedSnap.data() as any;
     const resTable: RestaurantTable = {
-      id: updatedSnap.id,
-      business_id: d.business_id || businessId,
-      table_number: d.table_number || 'Table',
-      floor: d.floor ?? null,
-      building: d.building ?? null,
-      capacity: d.capacity || 4,
-      status: d.status || 'ACTIVE',
-      pay_first_enabled: Boolean(d.pay_first_enabled),
-      qr_code_url: d.qr_code_url || '',
+      id: actualTableId,
+      business_id: targetTable.business_id || businessId,
+      table_number: targetTable.table_number || 'Table',
+      floor: targetTable.floor ?? null,
+      building: targetTable.building ?? null,
+      capacity: targetTable.capacity || 4,
+      status: 'ACTIVE',
+      pay_first_enabled: Boolean(targetTable.pay_first_enabled),
+      qr_code_url: targetTable.qr_code_url || '',
       last_scanned_at: null,
       current_session_id: null,
       host_token: null,
-      created_at: d.created_at ? new Date(d.created_at) : now,
+      created_at: new Date(targetTable.created_at),
       updated_at: now,
     };
     realtimeEmitter.tableUpdated(businessId, resTable);
@@ -1808,20 +1514,13 @@ export class RBACService {
     tableId: string,
     metadata?: { tableNumber?: string; customerName?: string; existingHostToken?: string }
   ): Promise<{ table: RestaurantTable; business: any; is_host: boolean; host_token: string | null; session_id: string }> {
-    let tableDocRef = doc(firestoreDb, 'businesses', businessId, 'tables', tableId);
-    let snap = await getDoc(tableDocRef);
+    await db.ensureBusiness(businessId);
 
-    // If table doesn't exist yet, try finding by table_number or create on the fly
-    if (!snap.exists() && metadata?.tableNumber) {
-      const q = query(
-        collection(firestoreDb, 'businesses', businessId, 'tables'),
-        where('table_number', '==', metadata.tableNumber)
-      );
-      const querySnap = await getDocs(q);
-      if (!querySnap.empty) {
-        tableDocRef = querySnap.docs[0].ref;
-        snap = querySnap.docs[0];
-      }
+    let existingTable = await prisma.restaurantTable.findUnique({ where: { id: tableId } });
+    if (!existingTable && metadata?.tableNumber) {
+      existingTable = await prisma.restaurantTable.findFirst({
+        where: { business_id: businessId, table_number: metadata.tableNumber },
+      });
     }
 
     const now = new Date();
@@ -1830,119 +1529,98 @@ export class RBACService {
     let hostToken: string | null = null;
     let sessionId: string;
 
-    if (snap.exists()) {
-      const d = snap.data();
-      const existingSessionId = d.current_session_id;
-      const existingHostToken = d.host_token;
-      const lastScannedMs = d.last_scanned_at ? new Date(d.last_scanned_at).getTime() : 0;
+    if (existingTable) {
+      const existingSessionId = existingTable.current_session_id;
+      const existingHostToken = existingTable.host_token;
+      const lastScannedMs = existingTable.last_scanned_at ? new Date(existingTable.last_scanned_at).getTime() : 0;
       const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
-      const isSessionLive = d.status === 'OCCUPIED' && existingSessionId && (lastScannedMs > fourHoursAgo);
+      const isSessionLive = existingTable.status === 'OCCUPIED' && existingSessionId && (lastScannedMs > fourHoursAgo);
 
       // Check if there are actual active, unsettled orders on this table
       let hasActiveOrders = false;
       try {
-        const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-        ordersSnap.forEach((oDoc) => {
-          const od = oDoc.data();
-          const matchesTable = (od.table_id && od.table_id === snap.id) ||
-                               (od.table_number && od.table_number === (d.table_number || metadata?.tableNumber));
-          if (matchesTable && od.status !== 'COMPLETED' && od.status !== 'CANCELLED') {
-            hasActiveOrders = true;
-          }
+        const activeOrders = await prisma.tableOrder.findMany({
+          where: {
+            business_id: businessId,
+            OR: [
+              { table_id: existingTable.id },
+              { table_number: existingTable.table_number },
+            ],
+            status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          },
         });
+        hasActiveOrders = activeOrders.length > 0;
       } catch (e) {}
 
       const isSessionRecent = (Date.now() - lastScannedMs) < (15 * 60 * 1000); // 15 mins
       if (isSessionLive && (hasActiveOrders || isSessionRecent)) {
-        // Active table session with food order underway or recently created!
         sessionId = existingSessionId;
 
-        // Check if this scanner is the original host
         if (metadata?.existingHostToken && metadata.existingHostToken === existingHostToken) {
           isHost = true;
           hostToken = existingHostToken;
         } else {
-          // Group member scanning: View-Only Guest mode!
           isHost = false;
           hostToken = null;
         }
 
         tableData = {
-          id: snap.id,
-          business_id: d.business_id || businessId,
-          table_number: d.table_number || metadata?.tableNumber || 'Table',
-          floor: d.floor ?? null,
-          building: d.building ?? null,
-          capacity: d.capacity || 4,
+          id: existingTable.id,
+          business_id: existingTable.business_id || businessId,
+          table_number: existingTable.table_number || metadata?.tableNumber || 'Table',
+          floor: existingTable.floor ?? null,
+          building: existingTable.building ?? null,
+          capacity: existingTable.capacity || 4,
           status: 'OCCUPIED',
-          qr_code_url: d.qr_code_url || '',
-          last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : now,
+          qr_code_url: existingTable.qr_code_url || '',
+          last_scanned_at: existingTable.last_scanned_at ? new Date(existingTable.last_scanned_at) : now,
           current_session_id: sessionId,
-          host_token: isHost ? hostToken : null, // Do not expose host token to guests
-          created_at: d.created_at ? new Date(d.created_at) : now,
+          host_token: isHost ? hostToken : null,
+          created_at: new Date(existingTable.created_at),
           updated_at: now,
         };
       } else {
-        // Brand new session OR table had no active orders: First person becomes TABLE HOST!
         sessionId = `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
         hostToken = `host-${crypto.randomBytes(12).toString('hex')}`;
         isHost = true;
 
         // Archive any leftover uncompleted orders from previous session on this table
         try {
-          const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-          const batchUpdates: Promise<any>[] = [];
-          ordersSnap.forEach((oDoc) => {
-            const od = oDoc.data();
-            const matchesTable = (od.table_id && od.table_id === snap.id) ||
-                                 (od.table_number && od.table_number === (snap.data() as any)?.table_number);
-            if (matchesTable && od.status !== 'COMPLETED' && od.status !== 'CANCELLED') {
-              batchUpdates.push(
-                updateDoc(oDoc.ref, {
-                  status: 'COMPLETED',
-                  bill_requested: false,
-                  settled: true,
-                  completed_at: now.toISOString(),
-                  updated_at: now.toISOString(),
-                }).catch(() => {})
-              );
-            }
+          await prisma.tableOrder.updateMany({
+            where: {
+              business_id: businessId,
+              OR: [
+                { table_id: existingTable.id },
+                { table_number: existingTable.table_number },
+              ],
+              status: { notIn: ['COMPLETED', 'CANCELLED'] },
+            },
+            data: {
+              status: 'COMPLETED',
+              bill_requested: false,
+              settled: true,
+              updated_at: now,
+            },
           });
-          if (batchUpdates.length > 0) {
-            await Promise.all(batchUpdates);
-          }
         } catch (e) {}
 
         tableData = {
-          id: snap.id,
-          business_id: d.business_id || businessId,
-          table_number: d.table_number || metadata?.tableNumber || 'Table',
-          floor: d.floor ?? null,
-          building: d.building ?? null,
-          capacity: d.capacity || 4,
+          id: existingTable.id,
+          business_id: existingTable.business_id || businessId,
+          table_number: existingTable.table_number || metadata?.tableNumber || 'Table',
+          floor: existingTable.floor ?? null,
+          building: existingTable.building ?? null,
+          capacity: existingTable.capacity || 4,
           status: 'OCCUPIED',
-          qr_code_url: d.qr_code_url || '',
+          qr_code_url: existingTable.qr_code_url || '',
           last_scanned_at: now,
           current_session_id: sessionId,
           host_token: hostToken,
-          created_at: d.created_at ? new Date(d.created_at) : now,
+          created_at: new Date(existingTable.created_at),
           updated_at: now,
         };
-
-        const updatePayload = {
-          status: 'OCCUPIED',
-          last_scanned_at: now.toISOString(),
-          current_session_id: sessionId,
-          host_token: hostToken,
-          updated_at: now.toISOString(),
-        };
-
-        try {
-          await updateDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableData.id), updatePayload);
-        } catch (e) {}
       }
     } else {
-      // Table doesn't exist yet: initialize table and designate scanner as HOST
       sessionId = `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       hostToken = `host-${crypto.randomBytes(12).toString('hex')}`;
       isHost = true;
@@ -1962,17 +1640,6 @@ export class RBACService {
         created_at: now,
         updated_at: now,
       };
-
-      const setPayload = {
-        ...tableData,
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-        last_scanned_at: now.toISOString(),
-      };
-
-      try {
-        await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', tableData.id), setPayload);
-      } catch (e) {}
     }
 
     try {
@@ -2002,10 +1669,8 @@ export class RBACService {
       console.warn('Prisma scanTableCheckIn upsert error:', e.message);
     }
 
-    // Fetch business name
     const biz = await db.findBusinessById(businessId);
 
-    // Also record checkin activity
     auditService.log({
       userId: `customer-${sessionId}`,
       email: isHost ? 'host@serveflow.app' : 'guest-viewer@serveflow.app',
@@ -2070,19 +1735,15 @@ export class RBACService {
 
     const now = new Date();
 
-    // 1. Check if there is an active unsettled order for this table/session
+    // 1. Check if there is an active unsettled order for this table/session in Prisma
     let existingDocSnap: any = null;
     let targetOrderId = orderData.existing_order_id;
 
     if (targetOrderId) {
       try {
-        const existingRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', targetOrderId);
-        const snap = await getDoc(existingRef);
-        if (snap.exists()) {
-          const d = snap.data();
-          if (!d.bill_requested && d.status !== 'COMPLETED' && d.status !== 'CANCELLED') {
-            existingDocSnap = snap;
-          }
+        const snap = await prisma.tableOrder.findUnique({ where: { id: targetOrderId } });
+        if (snap && !snap.bill_requested && snap.status !== 'COMPLETED' && snap.status !== 'CANCELLED') {
+          existingDocSnap = { data: () => snap, id: snap.id };
         }
       } catch (e) {
         console.warn('Existing order ID lookup note:', e);
@@ -2092,24 +1753,25 @@ export class RBACService {
     // Fallback search: find active unsettled order for this table from the last 12 hours
     if (!existingDocSnap && (orderData.table_id || orderData.table_number)) {
       try {
-        const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-        const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
-        for (const docSnap of snap.docs) {
-          const d = docSnap.data();
-          const createdAt = d.created_at ? new Date(d.created_at).getTime() : 0;
-          const isSameTable = (orderData.table_id && d.table_id === orderData.table_id) ||
-                              (orderData.table_number && d.table_number === orderData.table_number);
-          if (
-            isSameTable &&
-            !d.bill_requested &&
-            d.status !== 'COMPLETED' &&
-            d.status !== 'CANCELLED' &&
-            createdAt > twelveHoursAgo
-          ) {
-            existingDocSnap = docSnap;
-            targetOrderId = docSnap.id;
-            break;
-          }
+        const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+        const candidates = await prisma.tableOrder.findMany({
+          where: {
+            business_id: businessId,
+            OR: [
+              ...(orderData.table_id ? [{ table_id: orderData.table_id }] : []),
+              ...(orderData.table_number ? [{ table_number: orderData.table_number }] : []),
+            ],
+            bill_requested: false,
+            status: { notIn: ['COMPLETED', 'CANCELLED'] },
+            created_at: { gte: twelveHoursAgo },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 1,
+        });
+        if (candidates.length > 0) {
+          const snap = candidates[0];
+          existingDocSnap = { data: () => snap, id: snap.id };
+          targetOrderId = snap.id;
         }
       } catch (e) {
         console.warn('Active table order search note:', e);
@@ -2121,52 +1783,43 @@ export class RBACService {
     // Session Security Enforcement: Validate table session is active and not settled/expired
     if (orderData.table_id && orderData.table_id !== 'walk-in' && orderData.table_id !== 'takeout') {
       try {
-        let tableDocRef = doc(firestoreDb, 'businesses', businessId, 'tables', orderData.table_id);
-        let tableSnap = await getDoc(tableDocRef);
-        if (!tableSnap.exists() && orderData.table_number) {
-          const tQ = query(
-            collection(firestoreDb, 'businesses', businessId, 'tables'),
-            where('table_number', '==', orderData.table_number)
-          );
-          const tSnap = await getDocs(tQ);
-          if (!tSnap.empty) {
-            tableSnap = tSnap.docs[0];
-          }
+        let tableSnap = await prisma.restaurantTable.findUnique({ where: { id: orderData.table_id } });
+        if (!tableSnap && orderData.table_number) {
+          tableSnap = await prisma.restaurantTable.findFirst({
+            where: { business_id: businessId, table_number: orderData.table_number },
+          });
         }
 
-        if (tableSnap.exists()) {
-          const tableData = tableSnap.data();
-          tableDocData = tableData;
+        if (tableSnap) {
+          tableDocData = tableSnap;
 
           // If table has been reset to ACTIVE (settled / paid / cleared) or current_session_id is null:
-          // NEVER reuse an old order!
-          if (tableData.status === 'ACTIVE' || !tableData.current_session_id) {
+          if (tableSnap.status === 'ACTIVE' || !tableSnap.current_session_id) {
             existingDocSnap = null;
             targetOrderId = undefined;
           }
-          if (tableData.pay_first_enabled) {
+          if (tableSnap.pay_first_enabled) {
             existingDocSnap = null;
             targetOrderId = undefined;
           } else if (existingDocSnap) {
             const exData = existingDocSnap.data();
-            // If the existing order's session_id doesn't match the current active session, do not reuse it
-            if (exData.session_id && tableData.current_session_id && exData.session_id !== tableData.current_session_id) {
+            if (exData.session_id && tableSnap.current_session_id && exData.session_id !== tableSnap.current_session_id) {
               existingDocSnap = null;
               targetOrderId = undefined;
             }
           }
 
           // If table session is older than 4 hours without active orders:
-          if (tableData.last_scanned_at && !existingDocSnap) {
-            const lastScannedMs = new Date(tableData.last_scanned_at).getTime();
+          if (tableSnap.last_scanned_at && !existingDocSnap) {
+            const lastScannedMs = new Date(tableSnap.last_scanned_at).getTime();
             const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
             if (lastScannedMs < fourHoursAgo) {
               throw new Error('Table QR session has expired (timeout). Please scan the live QR code on your table.');
             }
           }
           // Validate Host ordering authority: Only the Table Host who first scanned can place orders
-          if (tableData.host_token) {
-            if (!orderData.host_token || orderData.host_token !== tableData.host_token) {
+          if (tableSnap.host_token) {
+            if (!orderData.host_token || orderData.host_token !== tableSnap.host_token) {
               throw new Error('Ordering authority required: Only the Table Host who first scanned the table QR code can place or modify orders. Other group members are in View-Only mode.');
             }
           }
@@ -2295,28 +1948,15 @@ export class RBACService {
         console.warn('Prisma createTableOrder update error:', e.message);
       }
 
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', existingDocSnap.id), {
-        order_number: existingOrderNumber,
-        items: combinedItems,
-        subtotal: newSubtotal,
-        tax_amount: calculatedTax,
-        taxes: computedTaxes,
-        promo_discount: promoDiscount,
-        total_amount: newTotalAmount,
-        order_notes: combinedNotes,
-        status: updatedStatus,
-        bill_requested: false,
-        ready_at: null,
-        updated_at: now.toISOString(),
-      });
-
       // Keep table occupied
-      try {
-        await updateDoc(doc(firestoreDb, 'businesses', businessId, 'tables', updatedOrder.table_id), {
-          status: 'OCCUPIED',
-          updated_at: now.toISOString(),
-        });
-      } catch (e) {}
+      if (updatedOrder.table_id) {
+        try {
+          await prisma.restaurantTable.update({
+            where: { id: updatedOrder.table_id },
+            data: { status: 'OCCUPIED' },
+          });
+        } catch (e) {}
+      }
 
       auditService.log({
         userId: `order-${updatedOrder.customer_name}`,
@@ -2419,23 +2059,15 @@ export class RBACService {
       console.warn('Prisma createTableOrder insert error:', e.message);
     }
 
-    const payload = {
-      ...order,
-      created_at: now.toISOString(),
-      updated_at: now.toISOString(),
-    };
-
-    try {
-      await setDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', order.id), payload);
-    } catch (e) {}
-
     // Make sure the table remains OCCUPIED
-    try {
-      await updateDoc(doc(firestoreDb, 'businesses', businessId, 'tables', order.table_id), {
-        status: 'OCCUPIED',
-        updated_at: now.toISOString(),
-      });
-    } catch (e) {}
+    if (order.table_id) {
+      try {
+        await prisma.restaurantTable.update({
+          where: { id: order.table_id },
+          data: { status: 'OCCUPIED' },
+        });
+      } catch (e) {}
+    }
 
     auditService.log({
       userId: `order-${order.customer_name}`,
@@ -2450,7 +2082,7 @@ export class RBACService {
 
   /**
    * Get table orders
-   * Note: Automatically purges orders older than 24 hours from Firebase to avoid data buildup
+   * Note: Automatically purges orders older than 24 hours to avoid data buildup
    */
   public async getTableOrders(
     businessId: string,
@@ -2465,111 +2097,43 @@ export class RBACService {
         },
         orderBy: { created_at: 'desc' },
       });
-      if (dbOrders.length > 0) {
-        return dbOrders.map((d: any) => ({
-          id: d.id,
-          business_id: d.business_id,
-          table_id: d.table_id || '',
-          table_number: d.table_number,
-          order_number: d.order_number || undefined,
-          floor: d.floor ?? null,
-          building: d.building ?? null,
-          items: (d.items as any) || [],
-          subtotal: Number(d.subtotal) || 0,
-          tax_amount: Number(d.tax_amount) || 0,
-          total_amount: Number(d.total_amount) || 0,
-          currency: d.currency || 'Rs.',
-          customer_name: d.customer_name || 'Guest',
-          customer_phone: d.customer_phone || '',
-          order_notes: d.order_notes || '',
-          status: (d.status as OrderStatus) || 'RECEIVED',
-          pay_first: Boolean(d.pay_first),
-          payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
-          payment_confirmed_by: d.payment_confirmed_by || null,
-          sale_id: d.sale_id || null,
-          payment_rejected_reason: d.payment_rejected_reason || null,
-          session_id: d.session_id || null,
-          bill_requested: Boolean(d.bill_requested),
-          bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
-          payment_method: d.payment_method || null,
-          payment_status: d.payment_status || null,
-          promo_code: d.promo_code || null,
-          promo_discount: Number(d.promo_discount) || 0,
-          taxes: (d.taxes as any) || [],
-          ready_at: d.ready_at ? new Date(d.ready_at) : null,
-          served_at: d.served_at ? new Date(d.served_at) : null,
-          created_at: new Date(d.created_at),
-          updated_at: new Date(d.updated_at),
-        }));
-      }
+      return dbOrders.map((d: any) => ({
+        id: d.id,
+        business_id: d.business_id,
+        table_id: d.table_id || '',
+        table_number: d.table_number,
+        order_number: d.order_number || undefined,
+        floor: d.floor ?? null,
+        building: d.building ?? null,
+        items: (d.items as any) || [],
+        subtotal: Number(d.subtotal) || 0,
+        tax_amount: Number(d.tax_amount) || 0,
+        total_amount: Number(d.total_amount) || 0,
+        currency: d.currency || 'Rs.',
+        customer_name: d.customer_name || 'Guest',
+        customer_phone: d.customer_phone || '',
+        order_notes: d.order_notes || '',
+        status: (d.status as OrderStatus) || 'RECEIVED',
+        pay_first: Boolean(d.pay_first),
+        payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
+        payment_confirmed_by: d.payment_confirmed_by || null,
+        sale_id: d.sale_id || null,
+        payment_rejected_reason: d.payment_rejected_reason || null,
+        session_id: d.session_id || null,
+        bill_requested: Boolean(d.bill_requested),
+        bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
+        payment_method: d.payment_method || null,
+        payment_status: d.payment_status || null,
+        promo_code: d.promo_code || null,
+        promo_discount: Number(d.promo_discount) || 0,
+        taxes: (d.taxes as any) || [],
+        ready_at: d.ready_at ? new Date(d.ready_at) : null,
+        served_at: d.served_at ? new Date(d.served_at) : null,
+        created_at: new Date(d.created_at),
+        updated_at: new Date(d.updated_at),
+      }));
     } catch (err: any) {
-      console.warn('Prisma getTableOrders fallback:', err.message);
-    }
-
-    try {
-      const snapshot = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-      let orders: TableOrder[] = [];
-      const now = Date.now();
-      const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-      const staleDocsToDelete: Promise<any>[] = [];
-
-      snapshot.forEach((docSnap) => {
-        const d = docSnap.data();
-        const createdAt = d.created_at ? new Date(d.created_at).getTime() : 0;
-
-        // Auto-purge items from Firebase if older than 24 hours
-        if (createdAt > 0 && createdAt < twentyFourHoursAgo) {
-          staleDocsToDelete.push(deleteDoc(docSnap.ref).catch(() => {}));
-          return;
-        }
-
-        if (!tableId || d.table_id === tableId) {
-          orders.push({
-            id: docSnap.id,
-            business_id: d.business_id,
-            table_id: d.table_id,
-            table_number: d.table_number,
-            floor: d.floor ?? null,
-            building: d.building ?? null,
-            items: d.items || [],
-            subtotal: d.subtotal || 0,
-            tax_amount: d.tax_amount || 0,
-            total_amount: d.total_amount || 0,
-            currency: d.currency || 'Rs.',
-            customer_name: d.customer_name || 'Guest',
-            customer_phone: d.customer_phone || '',
-            order_notes: d.order_notes || '',
-            status: d.status || 'RECEIVED',
-            pay_first: Boolean(d.pay_first),
-            payment_confirmed_at: d.payment_confirmed_at || null,
-            payment_confirmed_by: d.payment_confirmed_by || null,
-            sale_id: d.sale_id || null,
-            payment_rejected_reason: d.payment_rejected_reason || null,
-            bill_requested: d.bill_requested || false,
-            bill_requested_at: d.bill_requested_at || null,
-            payment_method: d.payment_method || null,
-            payment_status: d.payment_status || null,
-            promo_code: d.promo_code || null,
-            promo_discount: d.promo_discount || 0,
-            taxes: d.taxes || [],
-            ready_at: d.ready_at ? new Date(d.ready_at) : null,
-            served_at: d.served_at ? new Date(d.served_at) : null,
-            created_at: d.created_at ? new Date(d.created_at) : new Date(),
-            updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
-          });
-        }
-      });
-
-      // Cleanup stale documents in background without blocking
-      if (staleDocsToDelete.length > 0) {
-        Promise.all(staleDocsToDelete).catch(() => {});
-      }
-
-      // Sort newest first
-      orders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return orders;
-    } catch (err: any) {
-      console.warn('getTableOrders fallback:', err.message);
+      console.warn('Prisma getTableOrders error:', err.message);
       return [];
     }
   }
@@ -2583,84 +2147,64 @@ export class RBACService {
     status: OrderStatus,
     user?: { id: string; role?: string; email?: string }
   ): Promise<TableOrder> {
-    const orderRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId);
-    const orderDoc = await getDoc(orderRef);
-    if (!orderDoc.exists()) {
+    const currentOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (!currentOrder) {
       throw new Error(`Order ${orderId} not found.`);
     }
-    const currentData = orderDoc.data();
-    if (currentData.pay_first && currentData.payment_status === 'UNPAID' && status !== 'CANCELLED') {
+    if (currentOrder.pay_first && currentOrder.payment_status === 'UNPAID' && status !== 'CANCELLED') {
       throw new Error('Use the confirm-payment endpoint to process this order.');
     }
 
     const now = new Date();
-    const updates: Record<string, any> = {
-      status,
-      updated_at: now.toISOString(),
-    };
+    let readyAt = currentOrder.ready_at;
+    let servedAt = currentOrder.served_at;
+    let nextStatus = status;
 
-    if (status === 'READY' && !currentData.ready_at) {
-      updates.ready_at = now.toISOString();
+    if (status === 'READY' && !readyAt) {
+      readyAt = now;
     }
-    if (status === 'SERVED' && !currentData.served_at) {
-      updates.served_at = now.toISOString();
+    if (status === 'SERVED' && !servedAt) {
+      servedAt = now;
     }
     // Auto-complete pay-first orders when served
-    if (status === 'SERVED' && currentData.pay_first) {
-      status = 'COMPLETED' as any;
-      updates.status = 'COMPLETED';
-      updates.completed_at = now.toISOString();
+    if (status === 'SERVED' && currentOrder.pay_first) {
+      nextStatus = 'COMPLETED' as any;
     }
 
     // If the whole order is marked READY or SERVED, keep line-items in sync
-    const items = (currentData.items || []).map((it: any) => {
-      if (status === 'READY' && it.status !== 'SERVED') {
+    const items = ((currentOrder.items as any[]) || []).map((it: any) => {
+      if (nextStatus === 'READY' && it.status !== 'SERVED') {
         return { ...it, status: 'READY', ready_at: it.ready_at || now.toISOString() };
       }
-      if (status === 'SERVED') {
+      if (nextStatus === 'SERVED') {
         return { ...it, status: 'SERVED', served_at: it.served_at || now.toISOString() };
       }
       return it;
     });
-    updates.items = items;
 
-    try {
-      await prisma.tableOrder.update({
-        where: { id: orderId },
-        data: {
-          status,
-          items: items as any,
-          ...(updates.ready_at ? { ready_at: new Date(updates.ready_at) } : {}),
-          ...(updates.served_at ? { served_at: new Date(updates.served_at) } : {}),
-        },
-      });
-    } catch (e: any) {
-      console.warn('Prisma updateTableOrderStatus error:', e.message);
-    }
-
-    await updateDoc(orderRef, updates);
+    const updated = await prisma.tableOrder.update({
+      where: { id: orderId },
+      data: {
+        status: nextStatus,
+        items: items as any,
+        ready_at: readyAt,
+        served_at: servedAt,
+      },
+    });
 
     // Reset table session if a pay_first order was completed
-    if (status === 'COMPLETED' && currentData.pay_first && currentData.table_id) {
-        try {
-            await prisma.restaurantTable.update({
-              where: { id: currentData.table_id },
-              data: {
-                status: 'ACTIVE',
-                current_session_id: null,
-                host_token: null,
-                last_scanned_at: null,
-              },
-            });
-            const tableRef = doc(firestoreDb, 'businesses', businessId, 'tables', currentData.table_id);
-            await updateDoc(tableRef, {
-                status: 'ACTIVE',
-                current_session_id: null,
-                host_token: null,
-                last_scanned_at: null,
-                updated_at: now.toISOString(),
-            });
-        } catch (e) {}
+    if (nextStatus === 'COMPLETED' && currentOrder.pay_first && currentOrder.table_id) {
+      try {
+        await prisma.restaurantTable.update({
+          where: { id: currentOrder.table_id },
+          data: {
+            status: 'ACTIVE',
+            current_session_id: null,
+            host_token: null,
+            last_scanned_at: null,
+          },
+        });
+      } catch (e) {}
     }
 
     auditService.log({
@@ -2668,31 +2212,29 @@ export class RBACService {
       email: user?.email || 'staff@serveflow.app',
       businessId,
       eventType: 'ORDER_STATUS_UPDATED',
-      status: `STATUS_${status}`,
+      status: `STATUS_${nextStatus}`,
     });
 
-    const updatedDoc = await getDoc(orderRef);
-    const d = updatedDoc.data()!;
     const resOrder: TableOrder = {
-      id: updatedDoc.id,
-      business_id: d.business_id,
-      table_id: d.table_id,
-      table_number: d.table_number,
-      floor: d.floor ?? null,
-      building: d.building ?? null,
-      items: d.items || [],
-      subtotal: d.subtotal || 0,
-      tax_amount: d.tax_amount || 0,
-      total_amount: d.total_amount || 0,
-      currency: d.currency || 'Rs.',
-      customer_name: d.customer_name || 'Guest',
-      customer_phone: d.customer_phone || '',
-      order_notes: d.order_notes || '',
-      status: d.status || status,
-      ready_at: d.ready_at ? new Date(d.ready_at) : null,
-      served_at: d.served_at ? new Date(d.served_at) : null,
-      created_at: d.created_at ? new Date(d.created_at) : now,
-      updated_at: d.updated_at ? new Date(d.updated_at) : now,
+      id: updated.id,
+      business_id: updated.business_id,
+      table_id: updated.table_id || '',
+      table_number: updated.table_number,
+      floor: updated.floor ?? null,
+      building: updated.building ?? null,
+      items: (updated.items as any) || [],
+      subtotal: Number(updated.subtotal) || 0,
+      tax_amount: Number(updated.tax_amount) || 0,
+      total_amount: Number(updated.total_amount) || 0,
+      currency: updated.currency || 'Rs.',
+      customer_name: updated.customer_name || 'Guest',
+      customer_phone: updated.customer_phone || '',
+      order_notes: updated.order_notes || '',
+      status: updated.status as OrderStatus,
+      ready_at: updated.ready_at ? new Date(updated.ready_at) : null,
+      served_at: updated.served_at ? new Date(updated.served_at) : null,
+      created_at: new Date(updated.created_at),
+      updated_at: new Date(updated.updated_at),
     };
     realtimeEmitter.orderUpdated(businessId, resOrder);
     return resOrder;
@@ -2709,14 +2251,13 @@ export class RBACService {
     newStatus: OrderStatus,
     user?: { id: string; role?: string; email?: string }
   ): Promise<TableOrder> {
-    const orderRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId);
-    const orderDoc = await getDoc(orderRef);
+    const currentOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
 
-    if (!orderDoc.exists()) {
+    if (!currentOrder) {
       throw new Error(`Order ${orderId} not found.`);
     }
 
-    const currentData = orderDoc.data();
+    const currentData: any = currentOrder;
     const items: TableOrderItem[] = (currentData.items || []).map((it: any, i: number) => ({
       ...it,
       item_key: it.item_key || `${it.item_id || 'item'}_${i}`,
@@ -2817,8 +2358,6 @@ export class RBACService {
       console.warn('Prisma updateTableOrderItemStatus error:', e.message);
     }
 
-    await updateDoc(orderRef, updates);
-
     // If order was cancelled completely, check if table can be marked AVAILABLE
     if (nextOrderStatus === 'CANCELLED' && currentData.table_id) {
       try {
@@ -2826,8 +2365,6 @@ export class RBACService {
           where: { id: currentData.table_id },
           data: { status: 'AVAILABLE' },
         });
-        const tableRef = doc(firestoreDb, 'businesses', businessId, 'tables', currentData.table_id);
-        await updateDoc(tableRef, { status: 'AVAILABLE', updated_at: now.toISOString() });
       } catch (e) {
         console.warn('Table status update on order cancellation note:', e);
       }
@@ -2841,34 +2378,34 @@ export class RBACService {
       status: `ITEM_${targetItem.name}_${newStatus}`,
     });
 
-    const updatedDoc = await getDoc(orderRef);
-    const d = updatedDoc.data()!;
+    const updated = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    const d: any = updated || currentData;
     const resOrder: TableOrder = {
-      id: updatedDoc.id,
+      id: d.id,
       business_id: d.business_id,
-      table_id: d.table_id,
+      table_id: d.table_id || '',
       table_number: d.table_number,
       floor: d.floor ?? null,
       building: d.building ?? null,
-      items: d.items || [],
-      subtotal: d.subtotal || 0,
-      tax_amount: d.tax_amount || 0,
-      taxes: d.taxes || [],
-      total_amount: d.total_amount || 0,
+      items: (d.items as any) || [],
+      subtotal: Number(d.subtotal) || 0,
+      tax_amount: Number(d.tax_amount) || 0,
+      taxes: (d.taxes as any) || [],
+      total_amount: Number(d.total_amount) || 0,
       currency: d.currency || 'Rs.',
       customer_name: d.customer_name || 'Guest',
       customer_phone: d.customer_phone || '',
       order_notes: d.order_notes || '',
-      status: d.status || 'RECEIVED',
+      status: (d.status as OrderStatus) || 'RECEIVED',
       pay_first: Boolean(d.pay_first),
-      payment_confirmed_at: d.payment_confirmed_at || null,
+      payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
       payment_confirmed_by: d.payment_confirmed_by || null,
       sale_id: d.sale_id || null,
       payment_rejected_reason: d.payment_rejected_reason || null,
       ready_at: d.ready_at ? new Date(d.ready_at) : null,
       served_at: d.served_at ? new Date(d.served_at) : null,
-      created_at: d.created_at ? new Date(d.created_at) : new Date(),
-      updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
+      created_at: new Date(d.created_at),
+      updated_at: new Date(d.updated_at),
     };
     realtimeEmitter.orderUpdated(businessId, resOrder);
     return resOrder;
@@ -2941,18 +2478,6 @@ export class RBACService {
         console.warn('Prisma seedDefaultTables notice:', e.message);
       }
 
-      const payload = {
-        ...t,
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-        last_scanned_at: null,
-      };
-
-      try {
-        await setDoc(doc(firestoreDb, 'businesses', businessId, 'tables', t.id), payload);
-      } catch (e) {
-        // Ignored
-      }
       results.push(t);
     }
 
@@ -3140,50 +2665,7 @@ export class RBACService {
       console.warn('Prisma getTaxConfig note:', e.message);
     }
 
-    try {
-      const configRef = doc(firestoreDb, 'businesses', businessId, 'tax_settings', 'default');
-      const snap = await getDoc(configRef);
-      if (snap.exists()) {
-        const d = snap.data();
-        const isInclusive = Boolean(
-          d.tax_inclusive ?? (Array.isArray(d.rates) && d.rates.some((r: any) => r.is_inclusive))
-        );
-        return {
-          ...d,
-          business_id: businessId,
-          tax_enabled: d.tax_enabled ?? true,
-          tax_inclusive: isInclusive,
-          currency: d.currency || 'Rs.',
-          currency_symbol: d.currency_symbol || 'Rs.',
-          rates: d.rates || [
-            {
-              id: 'vat',
-              name: 'VAT',
-              rate_percent: 13,
-              enabled: true,
-              is_inclusive: isInclusive,
-              description: 'Value Added Tax (13%)',
-            },
-            {
-              id: 'service_charge',
-              name: 'Service Charge',
-              rate_percent: 10,
-              enabled: false,
-              is_inclusive: isInclusive,
-              description: 'Hospitality Service Charge (10%)',
-            },
-          ],
-          invoice_prefix: d.invoice_prefix || 'INV-',
-          receipt_footer_note: d.receipt_footer_note || 'Thank you for your visit! Please dine with us again.',
-          pan_vat_number: d.pan_vat_number || '',
-          order_reset_interval: d.order_reset_interval || 'MANUAL',
-          last_order_reset_date: d.last_order_reset_date || null,
-          updated_at: d.updated_at || new Date().toISOString(),
-        };
-      }
-    } catch (e) {
-      console.warn('getTaxConfig note:', e);
-    }
+
 
     // Default configuration for business
     return {
@@ -3301,12 +2783,9 @@ export class RBACService {
       console.warn('Prisma updateTaxConfig error:', e.message);
     }
 
-    try {
-      const configRef = doc(firestoreDb, 'businesses', businessId, 'tax_settings', 'default');
-      await setDoc(configRef, updated);
-    } catch (e: any) {}
 
-    // Recalculate active unsettled table orders in Prisma and Firestore so live bills reflect the updated tax mode/rates
+
+    // Recalculate active unsettled table orders in Prisma so live bills reflect the updated tax mode/rates
     try {
       const activePrismaOrders = await prisma.tableOrder.findMany({
         where: {
@@ -3353,43 +2832,7 @@ export class RBACService {
       console.warn('Prisma active orders recalculate note:', e.message);
     }
 
-    try {
-      const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-      const orderUpdates: Promise<any>[] = [];
-      ordersSnap.forEach((oDoc) => {
-        const od = oDoc.data();
-        if (od.status !== 'COMPLETED' && od.status !== 'CANCELLED' && !od.settled && od.payment_status !== 'PAID') {
-          const activeItems = (od.items || []).filter((it: any) => it.status !== 'CANCELLED');
-          const itemsMenuTotal = activeItems.reduce(
-            (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
-            0
-          );
-          const {
-            subtotal: newSubtotal,
-            taxAmount: newTax,
-            computedTaxes,
-            totalAmount: preDiscountTotal,
-          } = this.calculateOrderTaxBreakdown(itemsMenuTotal, updated);
-          const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, od, updated);
-          const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
-          orderUpdates.push(
-            updateDoc(oDoc.ref, {
-              subtotal: newSubtotal,
-              tax_amount: newTax,
-              taxes: computedTaxes,
-              promo_discount: promoDiscount,
-              total_amount: newTotal,
-              updated_at: new Date().toISOString(),
-            }).catch(() => {})
-          );
-        }
-      });
-      if (orderUpdates.length > 0) {
-        await Promise.all(orderUpdates);
-      }
-    } catch (e) {
-      // Non-fatal
-    }
+
 
     realtimeEmitter.taxConfigUpdated(businessId, updated);
 
@@ -3579,40 +3022,6 @@ export class RBACService {
       console.warn('Prisma getGLAccounts note:', e.message);
     }
 
-    try {
-      const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'gl_accounts'));
-      if (!snap.empty) {
-        const accounts: GLAccountLink[] = [];
-        snap.forEach((docSnap) => {
-          const d = docSnap.data();
-          accounts.push({
-            id: docSnap.id,
-            business_id: d.business_id || businessId,
-            account_number: d.account_number || '',
-            account_name: d.account_name || '',
-            category: d.category || 'REVENUE',
-            mapping_key: d.mapping_key || '',
-            description: d.description || '',
-            customer_name: d.customer_name ?? null,
-            customer_address: d.customer_address ?? null,
-            customer_phone: d.customer_phone ?? null,
-            customer_extension: d.customer_extension ?? null,
-            customer_office_name: d.customer_office_name ?? null,
-            customer_designation: d.customer_designation ?? null,
-            is_active: d.is_active !== false,
-            created_at: d.created_at || new Date().toISOString(),
-            updated_at: d.updated_at || new Date().toISOString(),
-          });
-        });
-
-        // Sort by account_number ascending
-        accounts.sort((a, b) => a.account_number.localeCompare(b.account_number, undefined, { numeric: true }));
-        return accounts;
-      }
-    } catch (e: any) {
-      console.warn('getGLAccounts firestore read note:', e.message);
-    }
-
     // Seed defaults in background & return
     const defaults = this.getDefaultGLAccounts(businessId);
     (async () => {
@@ -3648,12 +3057,6 @@ export class RBACService {
       } catch (err: any) {}
     })().catch(() => {});
 
-    Promise.all(
-      defaults.map((acc) =>
-        setDoc(doc(firestoreDb, 'businesses', businessId, 'gl_accounts', acc.id), acc).catch(() => {})
-      )
-    ).catch(() => {});
-
     return defaults;
   }
 
@@ -3688,14 +3091,7 @@ export class RBACService {
         if (err.message && err.message.includes('already exists')) throw err;
       }
 
-      const existingSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'gl_accounts'));
-      let duplicate = false;
-      existingSnap.forEach((d) => {
-        if (String(d.data().account_number || '').trim() === accNumber) duplicate = true;
-      });
-      if (duplicate) {
-        throw new Error(`GL account number ${accNumber} already exists. Please use a different number.`);
-      }
+
     }
 
     const cleanOrNull = (v: any): string | null => {
@@ -3767,8 +3163,6 @@ export class RBACService {
       console.warn('Prisma createGLAccount error:', e.message);
     }
 
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'gl_accounts', id), newAccount);
-
     auditService.log({
       userId: user?.id || 'owner',
       email: user?.email || 'owner@serveflow.app',
@@ -3797,11 +3191,7 @@ export class RBACService {
       if (pExisting) existingData = pExisting;
     } catch (e) {}
 
-    const ref = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', accountId);
-    if (!existingData) {
-      const existingSnap = await getDoc(ref);
-      existingData = existingSnap.exists() ? existingSnap.data() : null;
-    }
+
 
     // If the field was sent, blank => null; if not sent, keep what is stored
     const pickCustomerField = (key: string): string | null => {
@@ -3854,8 +3244,6 @@ export class RBACService {
       console.warn('Prisma updateGLAccount error:', e.message);
     }
 
-    await setDoc(ref, updatedAccount);
-
     auditService.log({
       userId: user?.id || 'owner',
       email: user?.email || 'owner@serveflow.app',
@@ -3883,8 +3271,7 @@ export class RBACService {
       console.warn('Prisma deleteGLAccount error:', e.message);
     }
 
-    const ref = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', accountId);
-    await deleteDoc(ref);
+
 
     auditService.log({
       userId: user?.id || 'owner',
@@ -3908,16 +3295,6 @@ export class RBACService {
       });
     } catch (e: any) {
       console.warn('Prisma resetDefaultGLAccounts clear error:', e.message);
-    }
-
-    // Clear existing
-    try {
-      const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'gl_accounts'));
-      const delPromises: Promise<any>[] = [];
-      snap.forEach((d) => delPromises.push(deleteDoc(d.ref)));
-      await Promise.all(delPromises);
-    } catch (e: any) {
-      console.warn('resetDefaultGLAccounts clear error:', e.message);
     }
 
     const defaults = this.getDefaultGLAccounts(businessId);
@@ -3951,12 +3328,6 @@ export class RBACService {
         }).catch(() => {});
       }
     } catch (err: any) {}
-
-    await Promise.all(
-      defaults.map((acc) =>
-        setDoc(doc(firestoreDb, 'businesses', businessId, 'gl_accounts', acc.id), acc)
-      )
-    );
 
     auditService.log({
       userId: user?.id || 'owner',
@@ -4001,113 +3372,41 @@ export class RBACService {
         take: filters?.limit && filters.limit > 0 ? filters.limit : undefined,
       });
 
-      if (rows && rows.length > 0) {
-        return rows.map((d) => ({
-          id: d.id,
-          invoice_number: d.invoice_number || d.id,
-          order_number: d.order_number || undefined,
-          business_id: d.business_id,
-          order_id: d.order_id || undefined,
-          table_id: d.table_id || undefined,
-          table_number: d.table_number || undefined,
-          customer_name: d.customer_name || 'Guest',
-          customer_phone: d.customer_phone || '',
-          sale_type: (d.sale_type as any) || 'DINE_IN',
-          items: (d.items as any) || [],
-          subtotal: Number(d.subtotal) || 0,
-          discount_percent: Number(d.discount_percent) || 0,
-          discount_amount: Number(d.discount_amount) || 0,
-          promo_code: d.promo_code || undefined,
-          promo_discount: Number(d.promo_discount) || 0,
-          taxes: (d.taxes as any) || [],
-          total_tax: Number(d.total_tax) || 0,
-          service_charge: Number(d.service_charge) || 0,
-          total_amount: Number(d.total_amount) || 0,
-          currency: d.currency || 'Rs.',
-          payment_method: (d.payment_method as any) || 'CASH',
-          credit_gl_account_id: d.credit_gl_account_id || undefined,
-          credit_gl_account_number: d.credit_gl_account_number || undefined,
-          credit_gl_account_name: d.credit_gl_account_name || undefined,
-          payment_status: (d.payment_status as any) || 'PAID',
-          cashier_name: d.cashier_name || 'Staff',
-          cashier_id: d.cashier_id || undefined,
-          notes: d.notes || '',
-          created_at: d.created_at.toISOString(),
-          date_string: d.date_string,
-        }));
-      }
+      return rows.map((d) => ({
+        id: d.id,
+        invoice_number: d.invoice_number || d.id,
+        order_number: d.order_number || undefined,
+        business_id: d.business_id,
+        order_id: d.order_id || undefined,
+        table_id: d.table_id || undefined,
+        table_number: d.table_number || undefined,
+        customer_name: d.customer_name || 'Guest',
+        customer_phone: d.customer_phone || '',
+        sale_type: (d.sale_type as any) || 'DINE_IN',
+        items: (d.items as any) || [],
+        subtotal: Number(d.subtotal) || 0,
+        discount_percent: Number(d.discount_percent) || 0,
+        discount_amount: Number(d.discount_amount) || 0,
+        promo_code: d.promo_code || undefined,
+        promo_discount: Number(d.promo_discount) || 0,
+        taxes: (d.taxes as any) || [],
+        total_tax: Number(d.total_tax) || 0,
+        service_charge: Number(d.service_charge) || 0,
+        total_amount: Number(d.total_amount) || 0,
+        currency: d.currency || 'Rs.',
+        payment_method: (d.payment_method as any) || 'CASH',
+        credit_gl_account_id: d.credit_gl_account_id || undefined,
+        credit_gl_account_number: d.credit_gl_account_number || undefined,
+        credit_gl_account_name: d.credit_gl_account_name || undefined,
+        payment_status: (d.payment_status as any) || 'PAID',
+        cashier_name: d.cashier_name || 'Staff',
+        cashier_id: d.cashier_id || undefined,
+        notes: d.notes || '',
+        created_at: d.created_at.toISOString(),
+        date_string: d.date_string,
+      }));
     } catch (e: any) {
-      console.warn('Prisma getSales fallback note:', e.message);
-    }
-
-    try {
-      const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'sales'));
-      let sales: SaleRecord[] = [];
-      snap.forEach((docSnap) => {
-        const d = docSnap.data();
-        const createdIso = d.created_at || new Date().toISOString();
-        const dateStr = d.date_string || (createdIso ? new Date(createdIso).toISOString().split('T')[0] : '');
-        sales.push({
-          id: docSnap.id,
-          invoice_number: d.invoice_number || docSnap.id,
-          order_number: d.order_number || (d.order_id ? d.order_id.slice(0, 8).toUpperCase() : undefined),
-          business_id: d.business_id || businessId,
-          order_id: d.order_id,
-          table_id: d.table_id,
-          table_number: d.table_number,
-          customer_name: d.customer_name || 'Guest',
-          customer_phone: d.customer_phone || '',
-          sale_type: d.sale_type || 'DINE_IN',
-          items: d.items || [],
-          subtotal: Number(d.subtotal) || 0,
-          discount_percent: Number(d.discount_percent) || 0,
-          discount_amount: Number(d.discount_amount) || 0,
-          promo_code: d.promo_code || undefined,
-          promo_discount: Number(d.promo_discount) || 0,
-          taxes: d.taxes || [],
-          total_tax: Number(d.total_tax) || 0,
-          service_charge: Number(d.service_charge) || 0,
-          total_amount: Number(d.total_amount) || 0,
-          currency: d.currency || 'Rs.',
-          payment_method: d.payment_method || 'CASH',
-          credit_gl_account_id: d.credit_gl_account_id || undefined,
-          credit_gl_account_number: d.credit_gl_account_number || undefined,
-          credit_gl_account_name: d.credit_gl_account_name || undefined,
-          payment_status: d.payment_status || 'PAID',
-          cashier_name: d.cashier_name || 'Staff',
-          cashier_id: d.cashier_id,
-          notes: d.notes || '',
-          created_at: createdIso,
-          date_string: dateStr,
-        });
-      });
-
-      // Filter by exact date
-      if (filters?.date) {
-        sales = sales.filter((s) => s.date_string === filters.date);
-      }
-      // Filter by range
-      if (filters?.startDate) {
-        sales = sales.filter((s) => s.date_string >= filters.startDate!);
-      }
-      if (filters?.endDate) {
-        sales = sales.filter((s) => s.date_string <= filters.endDate!);
-      }
-      // Filter by payment method
-      if (filters?.paymentMethod && filters.paymentMethod !== 'ALL') {
-        sales = sales.filter((s) => s.payment_method === filters.paymentMethod);
-      }
-
-      // Sort newest first
-      sales.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-      if (filters?.limit && filters.limit > 0) {
-        sales = sales.slice(0, filters.limit);
-      }
-
-      return sales;
-    } catch (e: any) {
-      console.warn('getSales fallback error:', e.message);
+      console.warn('Prisma getSales error:', e.message);
       return [];
     }
   }
@@ -4177,61 +3476,10 @@ export class RBACService {
         },
       });
 
-      // Dual-write to firestore
-      try {
-        const counterRef = doc(firestoreDb, 'businesses', businessId, 'counters', type);
-        await setDoc(counterRef, {
-          current: nextVal,
-          ...((shouldReset || !lastReset) ? { last_reset_date: currentDateStr } : {}),
-        }, { merge: true });
-      } catch (e) {}
-
       return nextVal;
     } catch (e: any) {
-      console.warn('Prisma getNextSequenceNumber fallback note:', e.message);
-      // Fallback to firestore runTransaction
-      const counterRef = doc(firestoreDb, 'businesses', businessId, 'counters', type);
-      return await runTransaction(firestoreDb, async (transaction) => {
-        const docSnap = await transaction.get(counterRef);
-        let nextVal = '';
-        let shouldReset = false;
-        const now = new Date();
-        const currentDateStr = now.toISOString().split('T')[0];
-        const lastReset = docSnap.exists() ? docSnap.data().last_reset_date : null;
-
-        if (type === 'order' && taxConfig && taxConfig.order_reset_interval && taxConfig.order_reset_interval !== 'MANUAL') {
-          if (!lastReset) {
-            shouldReset = true;
-          } else {
-            const lastDate = new Date(lastReset);
-            if (taxConfig.order_reset_interval === 'DAILY' && currentDateStr !== lastReset) shouldReset = true;
-            if (taxConfig.order_reset_interval === 'WEEKLY' && (now.getTime() - lastDate.getTime()) > 7 * 24 * 60 * 60 * 1000) shouldReset = true;
-            if (taxConfig.order_reset_interval === 'MONTHLY' && (now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear())) shouldReset = true;
-            if (taxConfig.order_reset_interval === 'YEARLY' && now.getFullYear() !== lastDate.getFullYear()) shouldReset = true;
-          }
-        }
-
-        if (providedVal) {
-          nextVal = providedVal;
-        } else {
-          if (docSnap.exists() && docSnap.data().current && !shouldReset) {
-            nextVal = incrementSequence(docSnap.data().current);
-          } else {
-            if (type === 'order') {
-              const pref = (defaultPrefix && defaultPrefix !== 'A') ? defaultPrefix : 'ORD-0';
-              nextVal = pref === 'ORD-0' ? 'ORD-01' : (pref.endsWith('-') ? `${pref}01` : (pref.endsWith('0') ? `${pref}1` : `${pref}-01`));
-            } else {
-              nextVal = defaultPrefix + '1';
-            }
-          }
-        }
-
-        transaction.set(counterRef, {
-          current: nextVal,
-          ...((shouldReset || !lastReset) ? { last_reset_date: currentDateStr } : {}),
-        }, { merge: true });
-        return nextVal;
-      });
+      console.warn('Prisma getNextSequenceNumber error:', e.message);
+      return providedVal || (type === 'order' ? 'ORD-01' : 'INV-1');
     }
   }
 
@@ -4262,13 +3510,7 @@ export class RBACService {
         if (pGl) glData = pGl;
       } catch (e) {}
 
-      if (!glData) {
-        const glRef = doc(firestoreDb, 'businesses', businessId, 'gl_accounts', saleData.credit_gl_account_id);
-        const glSnap = await getDoc(glRef);
-        if (glSnap.exists()) {
-          glData = glSnap.data();
-        }
-      }
+
 
       if (!glData) {
         throw new Error('Selected customer credit GL account does not exist.');
@@ -4301,14 +3543,7 @@ export class RBACService {
             orderNumber = pOrder.order_number;
           }
         } catch (e) {}
-        if (!orderNumber) {
-          try {
-            const oDoc = await getDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', saleData.order_id));
-            if (oDoc.exists() && oDoc.data().order_number) {
-              orderNumber = oDoc.data().order_number;
-            }
-          } catch (e) {}
-        }
+
       }
       if (!orderNumber) {
         orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
@@ -4405,10 +3640,7 @@ export class RBACService {
       console.warn('Prisma createSale error:', e.message);
     }
 
-    // Mirror to Firestore (delete null keys for clean Firestore document representation)
-    const firestoreSale = { ...newSale };
-    Object.keys(firestoreSale).forEach((key) => firestoreSale[key] === null && delete firestoreSale[key]);
-    await setDoc(doc(firestoreDb, 'businesses', businessId, 'sales', id), firestoreSale);
+
 
     // If linked to a table order or table, complete all associated active orders and reset table
     if (!options?.skipOrderCompletion && (saleData.order_id || saleData.table_id || saleData.table_number)) {
@@ -4437,82 +3669,28 @@ export class RBACService {
         console.warn('Prisma order completion note:', e.message);
       }
 
+      // Automatically resolve any associated BILL_REQUEST service requests so the card in Waiter Station disappears
       try {
-        const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
-        const batchUpdates: Promise<any>[] = [];
-        ordersSnap.forEach((oDoc) => {
-          const od = oDoc.data();
-          const matches = (saleData.order_id && oDoc.id === saleData.order_id) ||
-                          (saleData.table_id && od.table_id === saleData.table_id) ||
-                          (saleData.table_number && od.table_number === saleData.table_number);
-          if (matches && od.status !== 'COMPLETED' && od.status !== 'CANCELLED') {
-            batchUpdates.push(
-              updateDoc(oDoc.ref, {
-                status: 'COMPLETED',
-                payment_status: 'PAID',
-                invoice_id: id,
-                bill_requested: false,
-                settled: true,
-                completed_at: now.toISOString(),
-                updated_at: now.toISOString(),
-              }).catch(() => {})
-            );
-          }
+        await prisma.serviceRequest.updateMany({
+          where: {
+            business_id: businessId,
+            OR: [
+              saleData.order_id ? { order_id: saleData.order_id } : undefined,
+              saleData.table_id ? { table_id: saleData.table_id } : undefined,
+              saleData.table_number ? { table_number: saleData.table_number } : undefined,
+            ].filter(Boolean) as any,
+            type: 'BILL_REQUEST',
+            status: 'PENDING',
+          },
+          data: {
+            status: 'RESOLVED',
+            resolved_at: now,
+            resolved_by: 'POS_CASHIER_SETTLED',
+          },
         });
-        if (batchUpdates.length > 0) {
-          await Promise.all(batchUpdates);
-        }
-
-        // Automatically resolve any associated BILL_REQUEST service requests so the card in Waiter Station disappears
-        try {
-          await prisma.serviceRequest.updateMany({
-            where: {
-              business_id: businessId,
-              OR: [
-                saleData.order_id ? { order_id: saleData.order_id } : undefined,
-                saleData.table_id ? { table_id: saleData.table_id } : undefined,
-                saleData.table_number ? { table_number: saleData.table_number } : undefined,
-              ].filter(Boolean) as any,
-              type: 'BILL_REQUEST',
-              status: 'PENDING',
-            },
-            data: {
-              status: 'RESOLVED',
-              resolved_at: now,
-              resolved_by: 'POS_CASHIER_SETTLED',
-            },
-          });
-        } catch (e) {}
-
-        try {
-          const srvSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'service_requests'));
-          const srvUpdates: Promise<any>[] = [];
-          srvSnap.forEach((sDoc) => {
-            const sd = sDoc.data();
-            const isRelated =
-              (saleData.order_id && (sd.order_id === saleData.order_id || sDoc.id === `bill-${saleData.order_id}`)) ||
-              (saleData.table_id && sd.table_id === saleData.table_id) ||
-              (saleData.table_number && String(sd.table_number) === String(saleData.table_number));
-            if (isRelated && (sd.type === 'BILL_REQUEST' || sd.status === 'PENDING')) {
-              srvUpdates.push(
-                updateDoc(sDoc.ref, {
-                  status: 'RESOLVED',
-                  resolved_at: now.toISOString(),
-                  resolved_by: 'POS_CASHIER_SETTLED',
-                  updated_at: now.toISOString(),
-                }).catch(() => {})
-              );
-            }
-          });
-          if (srvUpdates.length > 0) {
-            await Promise.all(srvUpdates);
-          }
-        } catch (e) {
-          console.warn('Service requests resolution note:', e);
-        }
       } catch (e) {}
 
-      // Reset Table in Prisma & Firestore
+      // Reset Table in Prisma
       try {
         if (saleData.table_id) {
           await prisma.restaurantTable.updateMany({
@@ -4537,32 +3715,7 @@ export class RBACService {
         }
       } catch (e) {}
 
-      const tableResetPayload = {
-        status: 'ACTIVE' as TableStatus,
-        current_session_id: null,
-        host_token: null,
-        last_scanned_at: null,
-        updated_at: now.toISOString(),
-      };
 
-      if (saleData.table_id) {
-        try {
-          await updateDoc(doc(firestoreDb, 'businesses', businessId, 'tables', saleData.table_id), tableResetPayload);
-        } catch (e) {}
-      } else if (saleData.table_number) {
-        try {
-          const q = query(
-            collection(firestoreDb, 'businesses', businessId, 'tables'),
-            where('table_number', '==', saleData.table_number)
-          );
-          const qSnap = await getDocs(q);
-          qSnap.forEach(async (tDoc) => {
-            try {
-              await updateDoc(tDoc.ref, tableResetPayload);
-            } catch {}
-          });
-        } catch (e) {}
-      }
 
       realtimeEmitter.tableUpdated(businessId, {
         id: saleData.table_id || '',
@@ -4601,8 +3754,7 @@ export class RBACService {
       console.warn('Prisma deleteSale error:', e.message);
     }
 
-    const saleRef = doc(firestoreDb, 'businesses', businessId, 'sales', saleId);
-    await deleteDoc(saleRef);
+
 
     auditService.log({
       userId: user?.id || 'admin',
@@ -4631,30 +3783,15 @@ export class RBACService {
       console.warn('Prisma deleteSalesByDate error:', e.message);
     }
 
-    const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'sales'));
-    let count = 0;
-    const promises: Promise<any>[] = [];
-
-    snap.forEach((docSnap) => {
-      const d = docSnap.data();
-      const saleDate = d.date_string || (d.created_at ? new Date(d.created_at).toISOString().split('T')[0] : '');
-      if (saleDate === dateString) {
-        count++;
-        promises.push(deleteDoc(docSnap.ref));
-      }
-    });
-
-    await Promise.all(promises);
-
     auditService.log({
       userId: user?.id || 'admin',
       email: user?.email || 'admin@serveflow.app',
       businessId,
       eventType: 'SALES_HISTORY_DELETED_BY_DATE',
-      status: `DELETED_DATE_${dateString}_COUNT_${Math.max(count, prismaCount)}`,
+      status: `DELETED_DATE_${dateString}_COUNT_${prismaCount}`,
     });
 
-    return { deletedCount: Math.max(count, prismaCount) };
+    return { deletedCount: prismaCount };
   }
 
   /**
@@ -4671,32 +3808,21 @@ export class RBACService {
       console.warn('Prisma deleteAllSales error:', e.message);
     }
 
-    const snap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'sales'));
-    let count = 0;
-    const promises: Promise<any>[] = [];
-
-    snap.forEach((docSnap) => {
-      count++;
-      promises.push(deleteDoc(docSnap.ref));
-    });
-
-    await Promise.all(promises);
-
     auditService.log({
       userId: user?.id || 'admin',
       email: user?.email || 'admin@serveflow.app',
       businessId,
       eventType: 'ALL_SALES_HISTORY_CLEARED',
-      status: `CLEARED_ALL_COUNT_${Math.max(count, prismaCount)}`,
+      status: `CLEARED_ALL_COUNT_${prismaCount}`,
     });
 
-    return { deletedCount: Math.max(count, prismaCount) };
+    return { deletedCount: prismaCount };
   }
 
   /**
    * Automatic daily maintenance:
    * 1. Deletes table_orders older than 24 hours (or past day's completed/cancelled orders)
-   *    so Firebase doesn't accumulate excessive order payload items.
+   *    so the database doesn't accumulate excessive order payload items.
    * 2. Retains completed sales records for 30 days (ensuring History page monthly reports work smoothly),
    *    and purges sales older than 30 days to avoid long-term database bloat.
    */
@@ -4706,8 +3832,8 @@ export class RBACService {
       businessIds = [businessId];
     } else {
       try {
-        const bizSnap = await getDocs(collection(firestoreDb, 'businesses'));
-        businessIds = bizSnap.docs.map((d) => d.id);
+        const allBiz = await prisma.business.findMany({ select: { id: true } });
+        businessIds = allBiz.map((b) => b.id);
       } catch {
         const def = await db.getDefaultBusiness();
         if (def) businessIds = [def.id];
@@ -4722,51 +3848,39 @@ export class RBACService {
     let totalDeletedSales = 0;
 
     const now = Date.now();
-    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const twentyFourHoursAgo = new Date(now - 24 * 60 * 60 * 1000);
+    const fourHoursAgo = new Date(now - 4 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
 
     for (const bId of businessIds) {
       // 1. Clean table_orders (older than 24h OR completed/cancelled older than 4h)
       try {
-        const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', bId, 'table_orders'));
-        const orderDeletePromises: Promise<any>[] = [];
-
-        ordersSnap.forEach((docSnap) => {
-          const data = docSnap.data();
-          const createdAt = data.created_at ? new Date(data.created_at).getTime() : 0;
-          const status = data.status;
-
-          // If created more than 24h ago
-          const isOlderThan24h = createdAt > 0 && createdAt < twentyFourHoursAgo;
-          // Or if completed/cancelled more than 4 hours ago
-          const isCompletedAndStale = (status === 'COMPLETED' || status === 'CANCELLED') && (createdAt < (now - 4 * 60 * 60 * 1000));
-
-          if (isOlderThan24h || isCompletedAndStale) {
-            totalDeletedOrders++;
-            orderDeletePromises.push(deleteDoc(docSnap.ref));
-          }
+        const res = await prisma.tableOrder.deleteMany({
+          where: {
+            business_id: bId,
+            OR: [
+              { created_at: { lt: twentyFourHoursAgo } },
+              {
+                status: { in: ['COMPLETED', 'CANCELLED'] },
+                created_at: { lt: fourHoursAgo },
+              },
+            ],
+          },
         });
-
-        await Promise.all(orderDeletePromises);
+        totalDeletedOrders += res.count;
       } catch (err: any) {
         console.warn(`[Cleanup] Failed to clean table_orders for business ${bId}:`, err.message);
       }
 
-      // 2. Clean sales older than 30 days (rolling 30-day retention for monthly history)
+      // 2. Clean sales older than 30 days
       try {
-        const salesSnap = await getDocs(collection(firestoreDb, 'businesses', bId, 'sales'));
-        const salesDeletePromises: Promise<any>[] = [];
-
-        salesSnap.forEach((docSnap) => {
-          const data = docSnap.data();
-          const createdAt = data.created_at ? new Date(data.created_at).getTime() : 0;
-          if (createdAt > 0 && createdAt < thirtyDaysAgo) {
-            totalDeletedSales++;
-            salesDeletePromises.push(deleteDoc(docSnap.ref));
-          }
+        const res = await prisma.sale.deleteMany({
+          where: {
+            business_id: bId,
+            created_at: { lt: thirtyDaysAgo },
+          },
         });
-
-        await Promise.all(salesDeletePromises);
+        totalDeletedSales += res.count;
       } catch (err: any) {
         console.warn(`[Cleanup] Failed to clean sales for business ${bId}:`, err.message);
       }
@@ -4780,7 +3894,7 @@ export class RBACService {
         eventType: 'DAILY_STORAGE_CLEANUP',
         status: `DELETED_ORDERS_${totalDeletedOrders}_DELETED_SALES_${totalDeletedSales}`,
       });
-      console.log(`[Storage Maintenance] Auto-deleted ${totalDeletedOrders} orders (>24h) and ${totalDeletedSales} sales (>30d) from Firebase.`);
+      console.log(`[Storage Maintenance] Auto-deleted ${totalDeletedOrders} orders (>24h) and ${totalDeletedSales} sales (>30d).`);
     }
 
     return { deletedOrders: totalDeletedOrders, deletedSales: totalDeletedSales };
@@ -4790,19 +3904,18 @@ export class RBACService {
    * Purge completed/settled table orders immediately on demand
    */
   public async purgeCompletedTableOrders(businessId: string): Promise<{ deletedCount: number }> {
-    const ordersSnap = await getDocs(collection(firestoreDb, 'businesses', businessId, 'table_orders'));
     let deletedCount = 0;
-    const promises: Promise<any>[] = [];
-
-    ordersSnap.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data.status === 'COMPLETED' || data.status === 'CANCELLED') {
-        deletedCount++;
-        promises.push(deleteDoc(docSnap.ref));
-      }
-    });
-
-    await Promise.all(promises);
+    try {
+      const res = await prisma.tableOrder.deleteMany({
+        where: {
+          business_id: businessId,
+          status: { in: ['COMPLETED', 'CANCELLED'] },
+        },
+      });
+      deletedCount = res.count;
+    } catch (e: any) {
+      console.warn('Prisma purgeCompletedTableOrders error:', e.message);
+    }
 
     auditService.log({
       userId: 'staff',
@@ -4956,17 +4069,15 @@ export class RBACService {
     cashierName: string,
     notes?: string
   ): Promise<void> {
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId);
-    
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error('Order not found');
-    const order = snap.data();
+    const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (!existingOrder) throw new Error('Order not found');
+    const order: any = existingOrder;
     
     if (!order.pay_first) throw new Error('Not a pay-first order');
     if (order.status !== 'AWAITING_PAYMENT') throw new Error('Order is not awaiting payment');
     if (order.payment_status === 'PAID') throw new Error('Order is already paid');
     
-    const activeItems = (order.items || []).filter((it: any) => it.status !== 'CANCELLED');
+    const activeItems = ((order.items as any[]) || []).filter((it: any) => it.status !== 'CANCELLED');
     const itemsMenuTotal = activeItems.reduce(
       (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
       0
@@ -5064,22 +4175,6 @@ export class RBACService {
       console.warn('Prisma confirmTableOrderPayment error:', e.message);
     }
 
-    try {
-      await updateDoc(docRef, {
-        status: 'RECEIVED',
-        subtotal: calcSubtotal,
-        tax_amount: calcTax,
-        taxes: computedTaxes,
-        promo_discount: promoDiscount,
-        total_amount: finalTotal,
-        payment_status: 'PAID',
-        payment_confirmed_at: new Date().toISOString(),
-        payment_confirmed_by: cashierName,
-        sale_id: createdSale.id,
-        updated_at: new Date().toISOString()
-      });
-    } catch (e: any) {}
-
     realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'RECEIVED', payment_status: 'PAID', sale_id: createdSale.id });
   }
 
@@ -5089,10 +4184,9 @@ export class RBACService {
     reason: string,
     cashierName: string
   ): Promise<void> {
-    const docRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error('Order not found');
-    const order = snap.data();
+    const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (!existingOrder) throw new Error('Order not found');
+    const order: any = existingOrder;
     
     if (!order.pay_first) throw new Error('Not a pay-first order');
     if (order.status !== 'AWAITING_PAYMENT') throw new Error('Order is not awaiting payment');
@@ -5109,15 +4203,6 @@ export class RBACService {
     } catch (e: any) {
       console.warn('Prisma rejectTableOrderPayment error:', e.message);
     }
-
-    try {
-      await updateDoc(docRef, {
-        status: 'CANCELLED',
-        payment_rejected_reason: reason || 'Payment rejected',
-        payment_status: 'CANCELLED',
-        updated_at: new Date().toISOString()
-      });
-    } catch (e: any) {}
 
     realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'CANCELLED', payment_status: 'CANCELLED' });
   }
@@ -5186,14 +4271,7 @@ export class RBACService {
         console.warn('Prisma acknowledgeOrderBillFolio notice:', e.message);
       }
 
-      try {
-        await updateDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId), {
-          bill_acknowledged: true,
-          folio_delivered: true,
-          folio_delivered_at: now.toISOString(),
-          updated_at: now.toISOString(),
-        });
-      } catch (e: any) {}
+
     }
 
     const targetReqId = requestId || (orderId ? `bill-${orderId}` : undefined);
@@ -5208,13 +4286,7 @@ export class RBACService {
         });
       } catch (e: any) {}
 
-      try {
-        await updateDoc(doc(firestoreDb, 'businesses', businessId, 'service_requests', targetReqId), {
-          status: 'ATTENDED',
-          attended_at: now.toISOString(),
-          resolved_at: now.toISOString(),
-        });
-      } catch (e: any) {}
+
     }
 
     if (updatedOrderPayload) {

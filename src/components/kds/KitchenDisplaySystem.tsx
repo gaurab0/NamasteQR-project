@@ -2,8 +2,7 @@ import { renderFormattedDate, DateFormatMode } from '../../utils/dateFormatter';
 import { useAuth } from '../../context/AuthContext';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { TableOrder, OrderStatus, TableOrderItem, ServiceRequest, RestaurantTable } from '../../types/rbac';
-import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+
 import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
 import { determineItemStation } from '../../utils/menuUtils';
@@ -196,154 +195,137 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     } catch (e) {}
   };
 
-  // Real-time Firestore onSnapshot subscription to live table orders & service requests
+  // Real-time REST + Socket.io subscriptions to live tables, table orders & service requests
   useEffect(() => {
     if (!businessId) return;
 
     setLoading(true);
-    let unsubTables: (() => void) | null = null;
-    let unsubOrders: (() => void) | null = null;
-    let unsubRequests: (() => void) | null = null;
+    socketService.joinBusiness(businessId);
 
-    try {
-      // 0. Tables Listener (for Waiter assignment)
-      const tablesColRef = collection(db, 'businesses', businessId, 'tables');
-      const unsubTables = onSnapshot(tablesColRef, (snapshot) => {
-        const liveTables: RestaurantTable[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          liveTables.push({
-            id: docSnap.id,
-            ...d
-          } as RestaurantTable);
-        });
-        setTables(liveTables);
-      });
+    const loadData = async () => {
+      try {
+        const [tablesRes, ordersRes, srvRes] = await Promise.all([
+          rbacService.getTablesApi(businessId).catch(() => []),
+          rbacService.getTableOrdersApi(undefined, businessId).catch(() => []),
+          rbacService.getServiceRequestsApi(businessId).catch(() => []),
+        ]);
 
-      // 1. Table Orders Listener
-      const ordersColRef = collection(db, 'businesses', businessId, 'table_orders');
-      unsubOrders = onSnapshot(ordersColRef, (snapshot) => {
-        const liveOrders: TableOrder[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          if (d.status === 'AWAITING_PAYMENT') return; // Hide unverified pay-first orders from KDS
-          liveOrders.push({
-            id: docSnap.id,
-            order_number: d.order_number,
-            business_id: d.business_id || businessId,
-            table_id: d.table_id || 'table-general',
-            table_number: d.table_number || 'Table',
-            floor: d.floor ?? null,
-            building: d.building ?? null,
-            items: (d.items || []).map((it: any) => ({
-              ...it,
-              station: it.station || determineItemStation(it),
-            })),
-            subtotal: d.subtotal || 0,
-            tax_amount: d.tax_amount || 0,
-            total_amount: d.total_amount || 0,
-            currency: d.currency || 'Rs.',
-            customer_name: d.customer_name || 'Guest',
-            customer_phone: d.customer_phone || '',
-            order_notes: d.order_notes || '',
-            status: d.status || 'RECEIVED',
-            ready_at: d.ready_at ? new Date(d.ready_at) : null,
-            served_at: d.served_at ? new Date(d.served_at) : null,
-            bill_requested: Boolean(d.bill_requested),
-            bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
-            payment_method: d.payment_method || null,
-            promo_code: d.promo_code || null,
-            promo_discount: d.promo_discount || 0,
-            taxes: d.taxes || [],
-            created_at: d.created_at ? new Date(d.created_at) : new Date(),
-            updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
-          });
-        });
-
-        // Trigger KOT printing for freshly placed orders (if KdsPrintMode dictates printing)
-        if (kdsPrintMode !== 'DISPLAY_ONLY') {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === 'added') {
-              const d = change.doc.data();
-              const createdAt = d.created_at?.toDate ? d.created_at.toDate().getTime() : (d.created_at ? new Date(d.created_at).getTime() : 0);
-              const now = Date.now();
-              // Only trigger print if the order was created in the last 15 seconds
-              if (now - createdAt < 15000) {
-                dispatchPrint('KOT', {
-                  id: change.doc.id,
-                  ...d
-                });
-              }
-            }
-          });
+        if (tablesRes && Array.isArray(tablesRes)) {
+          setTables(tablesRes);
         }
 
-        // Sort: newest first
-        liveOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        setOrders(liveOrders);
+        if (ordersRes && Array.isArray(ordersRes)) {
+          const liveOrders = ordersRes
+            .filter((d) => d.status !== 'AWAITING_PAYMENT')
+            .map((d) => ({
+              ...d,
+              items: (d.items || []).map((it: any) => ({
+                ...it,
+                station: it.station || determineItemStation(it),
+              })),
+              created_at: d.created_at ? new Date(d.created_at) : new Date(),
+              updated_at: d.updated_at ? new Date(d.updated_at) : new Date(),
+              ready_at: d.ready_at ? new Date(d.ready_at) : null,
+              served_at: d.served_at ? new Date(d.served_at) : null,
+              bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
+            }));
+          liveOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setOrders(liveOrders);
+        }
+
+        if (srvRes && Array.isArray(srvRes)) {
+          const sortedReqs = [...srvRes].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setServiceRequests(sortedReqs);
+          prevBillPingsRef.current = sortedReqs.filter((r) => r.status === 'PENDING' && r.type === 'BILL_REQUEST').length;
+        }
+      } catch (err) {
+        console.warn('Live KDS load note:', err);
+      } finally {
         setLoading(false);
-      }, (err) => {
-        console.warn('Live KDS listener note:', err.message);
-        loadFallbackOrders();
-      });
-
-      // 2. Service Requests & Waiter Bill Pings Listener
-      const srvColRef = collection(db, 'businesses', businessId, 'service_requests');
-      unsubRequests = onSnapshot(srvColRef, (snapshot) => {
-        const liveReqs: ServiceRequest[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          liveReqs.push({
-            id: docSnap.id,
-            type: d.type || 'BILL_REQUEST',
-            business_id: d.business_id || businessId,
-            order_id: d.order_id,
-            order_number: d.order_number,
-            table_id: d.table_id || '',
-            table_number: String(d.table_number || 'Table'),
-            payment_method: d.payment_method,
-            total_amount: Number(d.total_amount) || 0,
-            currency: d.currency || 'Rs.',
-            status: d.status || 'PENDING',
-            created_at: d.created_at || new Date().toISOString(),
-            notes: d.notes,
-          });
-        });
-        liveReqs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        setServiceRequests(liveReqs);
-
-        // Ping sound is handled by the unifiedBillRequests useEffect which respects waiter assignments
-        prevBillPingsRef.current = liveReqs.filter((r) => r.status === 'PENDING' && r.type === 'BILL_REQUEST').length;
-      }, (err) => {
-        console.warn('Live service_requests note:', err.message);
-      });
-
-      return () => {
-        if (unsubTables) unsubTables();
-      if (unsubOrders) unsubOrders();
-        if (unsubRequests) unsubRequests();
-      };
-    } catch (err) {
-      console.warn('Live KDS setup note:', err);
-      loadFallbackOrders();
-    }
-  }, [businessId]);
-
-  // Socket.io Real-time WebSocket Subscription for instant updates
-  useEffect(() => {
-    if (!businessId) return;
-    socketService.joinBusiness(businessId);
-    const unsubOrders = socketService.subscribeToOrders(() => {
-      loadFallbackOrders();
-    });
-    const unsubTables = socketService.subscribeToTables(() => {
-      rbacService.getTablesApi().then(setTables).catch(() => {});
-    });
-    return () => {
-      unsubOrders();
-      unsubTables();
+      }
     };
-  }, [businessId]);
+
+    loadData();
+
+    // 0. Tables Listener
+    const unsubTables = socketService.subscribeToTables((updatedTable: any) => {
+      if (!updatedTable || !updatedTable.id) return;
+      setTables((prev) => {
+        const idx = prev.findIndex((t) => t.id === updatedTable.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...updatedTable };
+          return next;
+        }
+        return [...prev, updatedTable];
+      });
+    });
+
+    // 1. Orders Listener
+    const unsubOrders = socketService.subscribeToOrders((updatedOrder: any) => {
+      if (!updatedOrder || !updatedOrder.id) return;
+      if (updatedOrder.status === 'AWAITING_PAYMENT') {
+        setOrders((prev) => prev.filter((o) => o.id !== updatedOrder.id));
+        return;
+      }
+
+      const formattedOrder: TableOrder = {
+        ...updatedOrder,
+        items: (updatedOrder.items || []).map((it: any) => ({
+          ...it,
+          station: it.station || determineItemStation(it),
+        })),
+        created_at: updatedOrder.created_at ? new Date(updatedOrder.created_at) : new Date(),
+        updated_at: updatedOrder.updated_at ? new Date(updatedOrder.updated_at) : new Date(),
+        ready_at: updatedOrder.ready_at ? new Date(updatedOrder.ready_at) : null,
+        served_at: updatedOrder.served_at ? new Date(updatedOrder.served_at) : null,
+        bill_requested_at: updatedOrder.bill_requested_at ? new Date(updatedOrder.bill_requested_at) : null,
+      };
+
+      setOrders((prev) => {
+        const idx = prev.findIndex((o) => o.id === updatedOrder.id);
+        let next: TableOrder[];
+        if (idx >= 0) {
+          next = [...prev];
+          next[idx] = { ...next[idx], ...formattedOrder };
+        } else {
+          next = [formattedOrder, ...prev];
+          // KOT printing for new orders
+          if (kdsPrintMode !== 'DISPLAY_ONLY') {
+            const createdAtTime = formattedOrder.created_at ? new Date(formattedOrder.created_at).getTime() : 0;
+            if (Date.now() - createdAtTime < 15000) {
+              dispatchPrint('KOT', formattedOrder);
+            }
+          }
+        }
+        return next.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      });
+    });
+
+    // 2. Service Requests Listener
+    const unsubRequests = socketService.subscribeToServiceRequests((updatedReq: any) => {
+      if (!updatedReq || !updatedReq.id) return;
+      setServiceRequests((prev) => {
+        const idx = prev.findIndex((r) => r.id === updatedReq.id);
+        let next: ServiceRequest[];
+        if (idx >= 0) {
+          next = [...prev];
+          next[idx] = { ...next[idx], ...updatedReq };
+        } else {
+          next = [updatedReq, ...prev];
+        }
+        next.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        prevBillPingsRef.current = next.filter((r) => r.status === 'PENDING' && r.type === 'BILL_REQUEST').length;
+        return next;
+      });
+    });
+
+    return () => {
+      unsubTables();
+      unsubOrders();
+      unsubRequests();
+    };
+  }, [businessId, kdsPrintMode]);
 
   // Acknowledge a pending bill request / waiter ping (Folio Delivered)
   const handleAcknowledgeBillRequest = async (requestId: string, orderId?: string) => {
@@ -367,27 +349,8 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         );
       }
 
-      // Call backend API (updates PostgreSQL via Prisma + mirrors to Firestore + emits Socket.io)
+      // Call backend API (updates PostgreSQL via Prisma + emits Socket.io)
       await rbacService.acknowledgeBillFolioApi(businessId, orderId, requestId);
-
-      // Direct Firestore write as fallback
-      try {
-        await updateDoc(doc(db, 'businesses', businessId, 'service_requests', requestId), {
-          status: 'ATTENDED',
-          attended_at: new Date().toISOString(),
-        });
-      } catch {}
-
-      if (orderId) {
-        try {
-          await updateDoc(doc(db, 'businesses', businessId, 'table_orders', orderId), {
-            bill_acknowledged: true,
-            folio_delivered: true,
-            folio_delivered_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-        } catch {}
-      }
     } catch (err) {
       console.error('Error acknowledging bill request:', err);
     }
@@ -493,23 +456,14 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         nextOrderStatus = 'PREPARING';
       }
 
-      try {
-        const orderDocRef = doc(db, 'businesses', businessId, 'table_orders', orderId);
-        await updateDoc(orderDocRef, {
-          items: updatedItems,
-          status: nextOrderStatus,
-          ready_at: nextOrderStatus === 'READY' && !order.ready_at ? now.toISOString() : (order.ready_at || null),
-          served_at: nextOrderStatus === 'SERVED' && !order.served_at ? now.toISOString() : (order.served_at || null),
-          updated_at: now.toISOString(),
-        });
-      } catch (directErr) {
-        // Fallback to server API
-        await rbacService.updateTableOrderItemStatusApi(
-          orderId,
-          { index: fullOrderIndex, itemKey: itemKeyOrIdOrIndex.itemKey, itemId: itemKeyOrIdOrIndex.itemId },
-          newStatus,
-          businessId
-        );
+      await rbacService.updateTableOrderItemStatusApi(
+        orderId,
+        { index: fullOrderIndex, itemKey: itemKeyOrIdOrIndex.itemKey, itemId: itemKeyOrIdOrIndex.itemId },
+        newStatus,
+        businessId
+      );
+      if (nextOrderStatus !== order.status) {
+        await rbacService.updateTableOrderStatusApi(orderId, nextOrderStatus, businessId);
       }
 
       playChime();
@@ -560,16 +514,12 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       const allReadyOrServed = updatedItems.every((it) => it.status === 'READY' || it.status === 'SERVED');
       const nextOrderStatus: OrderStatus = allReadyOrServed ? 'READY' : 'PREPARING';
 
-      try {
-        const orderDocRef = doc(db, 'businesses', businessId, 'table_orders', order.id);
-        await updateDoc(orderDocRef, {
-          items: updatedItems,
-          status: nextOrderStatus,
-          ready_at: nextOrderStatus === 'READY' ? now.toISOString() : (order.ready_at || null),
-          updated_at: now.toISOString(),
-        });
-      } catch (directErr) {
-        await rbacService.updateTableOrderStatusApi(order.id, nextOrderStatus, businessId);
+      const itemsReady = updatedItems.filter((i, idx) => stationItemKeys.has(i.item_key || `${i.item_id}_${idx}`));
+      for (const it of itemsReady) {
+        await rbacService.updateTableOrderItemStatusApi(order.id, { itemKey: it.item_key, itemId: it.item_id }, 'READY', businessId);
+      }
+      if (allReadyOrServed) {
+        await rbacService.updateTableOrderStatusApi(order.id, 'READY', businessId);
       }
 
       playChime();
@@ -631,24 +581,16 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         else if (allReadyOrServed) nextOrderStatus = 'READY';
         else if (anyReady || anyPreparing) nextOrderStatus = 'PREPARING';
 
-        try {
-          const orderDocRef = doc(db, 'businesses', businessId, 'table_orders', orderId);
-          await updateDoc(orderDocRef, {
-            items: updatedItems,
-            status: nextOrderStatus,
-            ready_at: nextOrderStatus === 'READY' && !order.ready_at ? now.toISOString() : (order.ready_at || null),
-            served_at: nextOrderStatus === 'SERVED' && !order.served_at ? now.toISOString() : (order.served_at || null),
-            updated_at: now.toISOString(),
-          });
-        } catch (directErr) {
-          for (const itemTarget of itemsToUpdate) {
-            await rbacService.updateTableOrderItemStatusApi(
-              orderId,
-              { index: itemTarget.itemIndex, itemKey: itemTarget.itemKey, itemId: itemTarget.itemId },
-              newStatus,
-              businessId
-            );
-          }
+        for (const itemTarget of itemsToUpdate) {
+          await rbacService.updateTableOrderItemStatusApi(
+            orderId,
+            { index: itemTarget.itemIndex, itemKey: itemTarget.itemKey, itemId: itemTarget.itemId },
+            newStatus,
+            businessId
+          );
+        }
+        if (nextOrderStatus !== order.status) {
+          await rbacService.updateTableOrderStatusApi(orderId, nextOrderStatus, businessId);
         }
       }
 
@@ -856,10 +798,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   const handleAcknowledgeTableCall = async (tableId: string) => {
     try {
       setActionInProgress(tableId);
-      const tableRef = doc(db, 'businesses', businessId, 'tables', tableId);
-      await updateDoc(tableRef, {
-        'waiter_ping.active': false,
-      });
+      await rbacService.acknowledgeTablePingApi(tableId, businessId);
     } catch (err: any) {
       alert(`Could not acknowledge table call: ${err.message}`);
     } finally {
@@ -2527,7 +2466,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
               onClick={handlePurgeCompletedOrders}
               disabled={isPurging}
               className="p-2.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-              title="Clear served/completed table tickets from Firebase"
+              title="Clear served/completed table tickets"
             >
               <Trash2 className={`w-4 h-4 text-zinc-500 ${isPurging ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">{isPurging ? 'Clearing...' : 'Clear Completed'}</span>

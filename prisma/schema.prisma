@@ -33,6 +33,8 @@ model Business {
   menu_theme_config   Json?
   date_format_nav     String   @default("BOTH")
   date_format_billing String   @default("BOTH")
+  operations_config   Json?
+  current_operational_day Json?
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
 
@@ -46,9 +48,33 @@ model Business {
   service_requests ServiceRequest[]
   counters         Counter[]
   tax_config       TaxConfig?
+  operational_days OperationalDay[]
+  check_ins        CheckIn[]
 
   @@index([parent_business_id])
   @@map("businesses")
+}
+
+// -------------------------------------------------------------
+// 1.1 Operational Days & Shift History
+// -------------------------------------------------------------
+model OperationalDay {
+  id           String    @id @default(cuid())
+  business_id  String
+  businessDate String
+  status       String    @default("OPEN")
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+  openedBy     String?
+  closedBy     String?
+  data         Json?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id, businessDate])
+  @@map("operational_days")
 }
 
 // -------------------------------------------------------------
@@ -417,4 +443,27 @@ model PasswordResetToken {
 
   @@index([user_id])
   @@map("password_reset_tokens")
+}
+
+model CheckIn {
+  id                    String    @id @default(uuid())
+  business_id           String
+  guest_name            String
+  guest_phone           String?   @default("")
+  guest_email           String?   @default("")
+  room_or_table_number  String
+  check_in_date         DateTime  @default(now())
+  check_out_date        DateTime?
+  status                String    @default("CHECKED_IN")
+  total_amount          Float     @default(0)
+  deposit_paid          Float     @default(0)
+  notes                 String?
+  handled_by_user_id    String?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  business              Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@map("check_ins")
 }

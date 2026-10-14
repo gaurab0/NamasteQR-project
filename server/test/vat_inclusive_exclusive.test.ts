@@ -7,7 +7,8 @@
 import { calculateBillTotals } from '../../src/utils/taxCalculations';
 import { buildSalesWorkbookData } from '../../src/utils/excelExport';
 import { rbacService } from '../src/services/rbac.service';
-import { firestoreDb, doc, setDoc, getDoc, deleteDoc } from '../src/config/firebase';
+import { prisma } from '../src/lib/prisma';
+import { db } from '../src/services/db.service';
 import type { BusinessTaxConfig } from '../../src/types/rbac';
 
 let passed = 0;
@@ -272,30 +273,31 @@ async function main() {
     bevRow
   );
 
-  console.log('\n🧪 3. Testing Server-Side Tax & Promo Recalculation (rbacService + Firestore)');
+  console.log('\n🧪 3. Testing Server-Side Tax & Promo Recalculation (rbacService + PostgreSQL)');
   const BIZ = `test-vat-mode-${Date.now()}`;
   const orderId = `ORD-TEST-${Date.now()}`;
   try {
+    await db.ensureBusiness(BIZ);
     // Seed an unsettled order with Rs. 400 menu items and WELCOME10 promo applied
-    await setDoc(doc(firestoreDb, 'businesses', BIZ, 'table_orders', orderId), {
-      id: orderId,
-      order_number: 'ORD-01',
-      business_id: BIZ,
-      table_id: 'tbl-1',
-      table_number: 'Table 1',
-      items: [
-        { item_id: 'd1', name: 'Chicken Momo', price: 200, quantity: 2, status: 'SERVED', station: 'KITCHEN' },
-      ],
-      subtotal: 400,
-      tax_amount: 52,
-      taxes: [{ id: 'vat', name: 'VAT', rate_percent: 13, amount: 52, is_inclusive: false }],
-      promo_code: 'WELCOME10',
-      promo_discount: 45.2,
-      total_amount: 406.8,
-      status: 'SERVED',
-      settled: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    await prisma.tableOrder.create({
+      data: {
+        id: orderId,
+        order_number: 'ORD-01',
+        business_id: BIZ,
+        table_id: null,
+        table_number: 'Table 1',
+        items: [
+          { item_id: 'd1', name: 'Chicken Momo', price: 200, quantity: 2, status: 'SERVED', station: 'KITCHEN' },
+        ],
+        subtotal: 400,
+        tax_amount: 52,
+        taxes: [{ id: 'vat', name: 'VAT', rate_percent: 13, amount: 52, is_inclusive: false }],
+        promo_code: 'WELCOME10',
+        promo_discount: 45.2,
+        total_amount: 406.8,
+        status: 'SERVED',
+        payment_status: 'UNPAID',
+      },
     });
 
     // Switch business to Inclusive of VAT% mode
@@ -312,14 +314,13 @@ async function main() {
 
     check('updateTaxConfig persists tax_inclusive=true and syncs rates', updatedCfg.tax_inclusive === true && updatedCfg.rates[0].is_inclusive === true);
 
-    const orderSnap1 = await getDoc(doc(firestoreDb, 'businesses', BIZ, 'table_orders', orderId));
-    const od1 = orderSnap1.data()!;
+    const od1 = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     check(
       'Switching to Inclusive mode recalculates unsettled order: Subtotal=353.98, VAT=46.02, WELCOME10 Promo=40.00, Total=360.00',
-      od1.subtotal === 353.98 &&
-        od1.tax_amount === 46.02 &&
-        od1.promo_discount === 40 &&
-        od1.total_amount === 360,
+      Number(od1?.subtotal) === 353.98 &&
+        Number(od1?.tax_amount) === 46.02 &&
+        Number(od1?.promo_discount) === 40 &&
+        Number(od1?.total_amount) === 360,
       od1
     );
 
@@ -332,19 +333,19 @@ async function main() {
       ],
     });
 
-    const orderSnap2 = await getDoc(doc(firestoreDb, 'businesses', BIZ, 'table_orders', orderId));
-    const od2 = orderSnap2.data()!;
+    const od2 = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     check(
       'Switching back to Exclusive mode recalculates unsettled order: Subtotal=400, VAT=52, WELCOME10 Promo=45.20, Total=406.80',
-      od2.subtotal === 400 &&
-        od2.tax_amount === 52 &&
-        od2.promo_discount === 45.2 &&
-        od2.total_amount === 406.8,
+      Number(od2?.subtotal) === 400 &&
+        Number(od2?.tax_amount) === 52 &&
+        Number(od2?.promo_discount) === 45.2 &&
+        Number(od2?.total_amount) === 406.8,
       od2
     );
   } finally {
-    await deleteDoc(doc(firestoreDb, 'businesses', BIZ, 'table_orders', orderId)).catch(() => {});
-    await deleteDoc(doc(firestoreDb, 'businesses', BIZ, 'tax_settings', 'default')).catch(() => {});
+    await prisma.tableOrder.deleteMany({ where: { id: orderId } }).catch(() => {});
+    await prisma.taxConfig.deleteMany({ where: { business_id: BIZ } }).catch(() => {});
+    await prisma.business.deleteMany({ where: { id: BIZ } }).catch(() => {});
   }
 
   console.log(`\n📊 Summary: ${passed} passed, ${failed} failed.`);

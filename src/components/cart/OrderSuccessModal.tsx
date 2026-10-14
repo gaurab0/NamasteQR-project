@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateBillTotals } from '../../utils/taxCalculations';
 import { TableOrder, OrderStatus, TableStatus, BusinessTaxConfig, SaleRecord, SaleTaxBreakdown, SalePaymentMethod } from '../../types/rbac';
-import { doc, onSnapshot, updateDoc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 import { rbacService } from '../../services/rbac.service';
-import { sanitizeFirestorePayload } from '../../utils/firestoreUtils';
+import { socketService } from '../../services/socket.service';
 import { 
   CheckCircle2, 
   ChefHat, 
@@ -96,119 +94,60 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     }
   }, [order]);
 
-  // Subscribe to real-time status changes in Firestore
+  // Subscribe to real-time status changes via Socket.io
   useEffect(() => {
     if (!order?.id || !order?.business_id) return;
 
-    try {
-      const orderDocRef = doc(db, 'businesses', order.business_id, 'table_orders', order.id);
-      const unsubscribe = onSnapshot(orderDocRef, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setLiveOrder((prev) => ({
-            ...(prev || order),
-            order_number: data.order_number ?? prev?.order_number ?? order.order_number,
-            items: data.items || prev?.items || [],
-            subtotal: Number(data.subtotal ?? prev?.subtotal ?? 0),
-            total_amount: Number(data.total_amount ?? prev?.total_amount ?? 0),
-            currency: data.currency || prev?.currency || 'Rs.',
-            order_notes: data.order_notes ?? prev?.order_notes,
-            status: data.status || prev?.status || 'RECEIVED',
-            pay_first: data.pay_first ?? prev?.pay_first,
-            payment_confirmed_at: data.payment_confirmed_at ?? prev?.payment_confirmed_at,
-            payment_confirmed_by: data.payment_confirmed_by ?? prev?.payment_confirmed_by,
-            sale_id: data.sale_id ?? prev?.sale_id,
-            payment_rejected_reason: data.payment_rejected_reason ?? prev?.payment_rejected_reason,
-            bill_requested: data.bill_requested ?? prev?.bill_requested,
-            bill_requested_at: data.bill_requested_at ?? prev?.bill_requested_at,
-            payment_method: data.payment_method ?? prev?.payment_method,
-            payment_status: data.payment_status ?? prev?.payment_status,
-            promo_code: data.promo_code ?? prev?.promo_code,
-            promo_discount: data.promo_discount ?? prev?.promo_discount,
-            taxes: data.taxes ?? prev?.taxes,
-            tax_amount: data.tax_amount != null ? Number(data.tax_amount) : prev?.tax_amount,
-            ready_at: data.ready_at ? new Date(data.ready_at) : prev?.ready_at,
-            served_at: data.served_at ? new Date(data.served_at) : prev?.served_at,
-            updated_at: data.updated_at ? new Date(data.updated_at) : prev?.updated_at || new Date(),
-          }));
-
-          if (data.bill_requested) {
-            setBillRequested(true);
-          }
-          if (data.status === 'AWAITING_PAYMENT') {
-            setViewMode('payment');
-          } else if (data.status !== 'AWAITING_PAYMENT' && viewMode === 'payment') {
-            setViewMode('tracker');
-            if (data.status === 'CANCELLED') {
-               alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
-            }
-          }
-          // For pay-first, wait until the order is COMPLETED (delivered).
-          // For non-pay-first, PAID or COMPLETED usually means the bill is settled.
-          const isActuallySettled = data.pay_first 
-            ? data.status === 'COMPLETED'
-            : (data.payment_status === 'PAID' || data.status === 'COMPLETED');
-
-          if (isActuallySettled) {
-            setIsPaid(true);
-            if (onSettled) {
-              onSettled(order.id, data.table_number || order.table_number, { ...order, ...data } as TableOrder);
-            }
-          }
-        }
-      }, (err) => {
-        console.warn('Live order status subscription note:', err.message);
-      });
-
-      return () => unsubscribe();
-    } catch (e) {
-      console.warn('Firestore subscription fallback:', e);
+    socketService.joinBusiness(order.business_id);
+    if (order.table_id) {
+      socketService.joinTable(order.business_id, order.table_id);
     }
-  }, [order?.id, order?.business_id]);
+
+    const unsubscribe = socketService.subscribeToOrders((data) => {
+      if (!data || data.id !== order.id) return;
+      setLiveOrder((prev) => ({
+        ...(prev || order),
+        ...data,
+        subtotal: Number(data.subtotal ?? prev?.subtotal ?? 0),
+        total_amount: Number(data.total_amount ?? prev?.total_amount ?? 0),
+      }));
+
+      if (data.bill_requested) {
+        setBillRequested(true);
+      }
+      if (data.status === 'AWAITING_PAYMENT') {
+        setViewMode('payment');
+      } else if (data.status !== 'AWAITING_PAYMENT' && viewMode === 'payment') {
+        setViewMode('tracker');
+        if (data.status === 'CANCELLED') {
+           alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
+        }
+      }
+      // For pay-first, wait until the order is COMPLETED (delivered).
+      // For non-pay-first, PAID or COMPLETED usually means the bill is settled.
+      const isActuallySettled = data.pay_first 
+        ? data.status === 'COMPLETED'
+        : (data.payment_status === 'PAID' || data.status === 'COMPLETED');
+
+      if (isActuallySettled) {
+        setIsPaid(true);
+        if (onSettled) {
+          onSettled(order.id, data.table_number || order.table_number, { ...order, ...data } as TableOrder);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [order?.id, order?.business_id, viewMode, onSettled]);
 
   // Load configured tax settings for the business in real time
   useEffect(() => {
     const bizId = liveOrder?.business_id || order?.business_id;
     if (!bizId) return;
 
-    let unsub: (() => void) | undefined;
-    try {
-      const taxDocRef = doc(db, 'businesses', bizId, 'tax_settings', 'default');
-      unsub = onSnapshot(taxDocRef, (snap) => {
-        if (snap.exists()) {
-          const d = snap.data();
-          const isInclusive = Boolean(
-            d.tax_inclusive ?? (Array.isArray(d.rates) && d.rates.some((r: any) => r.is_inclusive))
-          );
-          setTaxConfig({
-            business_id: bizId,
-            tax_enabled: d.tax_enabled ?? true,
-            tax_inclusive: isInclusive,
-            currency: d.currency || 'Rs.',
-            currency_symbol: d.currency_symbol || d.currency || 'Rs.',
-            rates: d.rates || [],
-            invoice_prefix: d.invoice_prefix || 'INV-',
-            receipt_footer_note: d.receipt_footer_note || '',
-            pan_vat_number: d.pan_vat_number || '',
-            active_promo_enabled: d.active_promo_enabled ?? true,
-            active_promo_code: d.active_promo_code || '',
-            active_promo_percent: d.active_promo_percent ?? 10,
-            active_promo_description: d.active_promo_description || '',
-            updated_at: d.updated_at || new Date().toISOString(),
-          });
-        } else {
-          rbacService.getTaxConfigApi(bizId).then(setTaxConfig).catch(() => {});
-        }
-      }, () => {
-        rbacService.getTaxConfigApi(bizId).then(setTaxConfig).catch(() => {});
-      });
-    } catch {
-      rbacService.getTaxConfigApi(bizId).then(setTaxConfig).catch(() => {});
-    }
-
-    return () => {
-      if (unsub) unsub();
-    };
+    rbacService.getTaxConfigApi(bizId).then((cfg) => {
+      if (cfg) setTaxConfig(cfg);
+    }).catch(() => {});
   }, [liveOrder?.business_id, order?.business_id]);
 
   // Promo Code Actions (Respecting Business Tax/Promo Configuration)
@@ -225,15 +164,8 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     if (!liveOrder?.business_id || !liveOrder?.table_id) return;
     setIsCallingWaiter(true);
     try {
-      const tableRef = doc(db, 'businesses', liveOrder.business_id, 'tables', liveOrder.table_id);
-      await updateDoc(tableRef, {
-        waiter_ping: {
-          active: true,
-          timestamp: new Date().toISOString()
-        }
-      });
       const pingId = `call-${liveOrder.table_id || liveOrder.id}`;
-      await setDoc(doc(db, 'businesses', liveOrder.business_id, 'service_requests', pingId), sanitizeFirestorePayload({
+      await rbacService.createServiceRequestApi({
         id: pingId,
         type: 'CALL_WAITER',
         business_id: liveOrder.business_id,
@@ -243,8 +175,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         order_number: liveOrder.order_number,
         customer_name: liveOrder.customer_name || 'Table Guest',
         status: 'PENDING',
-        created_at: new Date().toISOString()
-      }));
+      });
       setWaiterCooldown(60);
     } catch (err) {
       console.error('Failed to call waiter', err);
@@ -398,50 +329,12 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
 
   /**
    * Resets the table back to default settings (status: 'ACTIVE', current_session_id: null)
-   * in both backend API and Firestore real-time collection
    */
   const resetTableToDefaultSettings = async (businessId: string, tableId?: string, tableNumber?: string) => {
-    // 1. Call server API
     try {
       await rbacService.resetTableStatusApi(businessId, tableId, tableNumber);
     } catch (err) {
       console.warn('API resetTableStatus note:', err);
-    }
-
-    // 2. Direct Firestore update for immediate listener reactivity
-    try {
-      const payload = {
-        status: 'ACTIVE' as TableStatus,
-        current_session_id: null,
-        updated_at: new Date().toISOString(),
-      };
-
-      if (tableId) {
-        try {
-          await updateDoc(doc(db, 'businesses', businessId, 'tables', tableId), payload);
-        } catch {
-          await setDoc(doc(db, 'businesses', businessId, 'tables', tableId), payload, { merge: true });
-        }
-      }
-
-      if (tableNumber) {
-        try {
-          const q = query(
-            collection(db, 'businesses', businessId, 'tables'),
-            where('table_number', '==', tableNumber)
-          );
-          const snap = await getDocs(q);
-          snap.forEach(async (dSnap) => {
-            try {
-              await updateDoc(dSnap.ref, payload);
-            } catch {}
-          });
-        } catch (e) {
-          console.warn('Table query update note:', e);
-        }
-      }
-    } catch (err) {
-      console.warn('Direct Firestore resetTable error:', err);
     }
   };
 
@@ -454,54 +347,14 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     setRequestingBill(true);
 
     try {
-      const paymentLabel = 
-        selectedPaymentMode === 'cash' ? 'Cash at Table' :
-        selectedPaymentMode === 'qr' ? 'QR Code Payment' : 'Card / POS Terminal';
-
-      const orderDocRef = doc(db, 'businesses', liveOrder.business_id, 'table_orders', liveOrder.id);
-      
-      const updateData = {
-        bill_requested: true,
-        bill_requested_at: new Date().toISOString(),
+      await rbacService.requestBillApi(liveOrder.business_id, liveOrder.id, {
         payment_method: selectedPaymentMode,
-        subtotal: itemsSubtotal,
         promo_code: appliedPromo?.code || null,
         promo_discount: promoDiscountAmount,
-        tax_amount: totalTax,
-        taxes: taxesList,
         total_amount: totalAmount,
         currency: currencySymbol,
-        order_notes: ((liveOrder.order_notes ? liveOrder.order_notes + ' • ' : '') + `[WAITER BILL REQUESTED - ${currencySymbol} ${totalAmount.toLocaleString()}]`).trim(),
-        updated_at: new Date().toISOString(),
-      };
-
-      await updateDoc(orderDocRef, updateData);
-
-      // Create service request ping for Waiter Station
-      try {
-        const pingId = `bill-${liveOrder.id}`;
-        await setDoc(doc(db, 'businesses', liveOrder.business_id, 'service_requests', pingId), sanitizeFirestorePayload({
-          id: pingId,
-          type: 'BILL_REQUEST',
-          order_id: liveOrder.id,
-          order_number: liveOrder.order_number || undefined,
-          table_id: liveOrder.table_id || '',
-          table_number: liveOrder?.table_number || '',
-          floor: liveOrder.floor || null,
-          building: liveOrder.building || null,
-          customer_name: liveOrder.customer_name || 'Table Guest',
-          customer_phone: liveOrder.customer_phone || '',
-          payment_method: selectedPaymentMode,
-          total_amount: totalAmount,
-          currency: currencySymbol,
-          promo_code: appliedPromo?.code || null,
-          items_count: liveOrder.items.length,
-          status: 'PENDING',
-          created_at: new Date().toISOString(),
-        }), { merge: true });
-      } catch (e) {
-        console.warn('Service request ping note:', e);
-      }
+        notes: `[WAITER BILL REQUESTED - ${currencySymbol} ${totalAmount.toLocaleString()}]`,
+      });
 
       setBillRequested(true);
       setBillSuccessMessage(
@@ -531,51 +384,14 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         selectedPaymentMode === 'cash' ? 'Cash at Table' :
         selectedPaymentMode === 'qr' ? 'QR Code Payment' : 'Card / POS Terminal';
 
-      const orderDocRef = doc(db, 'businesses', liveOrder.business_id, 'table_orders', liveOrder.id);
-      
-      const updateData = {
-        bill_requested: true,
-        bill_requested_at: new Date().toISOString(),
-        payment_method: selectedPaymentMode,
-        subtotal: itemsSubtotal,
+      await rbacService.requestBillApi(liveOrder.business_id, liveOrder.id, {
+        payment_method: selectedPaymentMode.toUpperCase(),
         promo_code: appliedPromo?.code || null,
         promo_discount: promoDiscountAmount,
-        tax_amount: totalTax,
-        taxes: taxesList,
         total_amount: totalAmount,
         currency: currencySymbol,
-        order_notes: ((liveOrder.order_notes ? liveOrder.order_notes + ' • ' : '') + `[PAYMENT SETTLEMENT REQUESTED: ${paymentLabel} - ${currencySymbol} ${totalAmount.toLocaleString()}]`).trim(),
-        updated_at: new Date().toISOString(),
-      };
-
-      await updateDoc(orderDocRef, updateData);
-
-      // Create / Update service request ping for Waiter Station
-      try {
-        const pingId = `bill-${liveOrder.id}`;
-        await setDoc(doc(db, 'businesses', liveOrder.business_id, 'service_requests', pingId), sanitizeFirestorePayload({
-          id: pingId,
-          type: 'BILL_REQUEST',
-          order_id: liveOrder.id,
-          order_number: liveOrder.order_number || undefined,
-          table_id: liveOrder.table_id || '',
-          table_number: liveOrder?.table_number || '',
-          floor: liveOrder.floor || null,
-          building: liveOrder.building || null,
-          customer_name: liveOrder.customer_name || 'Table Guest',
-          customer_phone: liveOrder.customer_phone || '',
-          payment_method: selectedPaymentMode.toUpperCase(),
-          total_amount: totalAmount,
-          currency: currencySymbol,
-          promo_code: appliedPromo?.code || null,
-          items_count: liveOrder.items.length,
-          status: 'PENDING',
-          notes: `Guest requested settlement via ${paymentLabel}`,
-          created_at: new Date().toISOString(),
-        }), { merge: true });
-      } catch (e) {
-        console.warn('Service request ping note:', e);
-      }
+        notes: `[PAYMENT SETTLEMENT REQUESTED: ${paymentLabel} - ${currencySymbol} ${totalAmount.toLocaleString()}]`,
+      });
 
       // Empty cart and notify callbacks
       if (onClearCart) onClearCart();

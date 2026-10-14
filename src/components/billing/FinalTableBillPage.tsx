@@ -2,9 +2,7 @@ import { renderFormattedDate, DateFormatMode } from '../../utils/dateFormatter';
 import { calculateBillTotals } from '../../utils/taxCalculations';
 import React, { useState, useEffect, useMemo } from 'react';
 import { TableOrder, BusinessTaxConfig } from '../../types/rbac';
-import { doc, onSnapshot, updateDoc, setDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
-import { sanitizeFirestorePayload } from '../../utils/firestoreUtils';
+import { socketService } from '../../services/socket.service';
 import {
   Receipt,
   Printer,
@@ -113,55 +111,40 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
 
   useEffect(() => {
     if (!targetBizId || !liveOrder.id) return;
-    const unsub = onSnapshot(
-      doc(db, 'businesses', targetBizId, 'table_orders', liveOrder.id),
-      (snap) => {
-        if (snap.exists()) {
-          const data = { id: snap.id, ...snap.data() } as TableOrder;
-          setLiveOrder(data);
-          if (data.bill_requested) {
-            setBillRequested(true);
-          }
-          if (data.status === 'COMPLETED' || data.payment_status === 'PAID' || (data as any).settled) {
-            onDoneReturnToMenu();
-          }
-        }
-      },
-      (err) => {
-        console.warn('Real-time order sync note:', err.message);
+
+    socketService.joinBusiness(targetBizId);
+    if (liveOrder.table_id) {
+      socketService.joinTable(targetBizId, liveOrder.table_id);
+    }
+
+    const unsub = socketService.subscribeToOrders((data) => {
+      if (!data || data.id !== liveOrder.id) return;
+      setLiveOrder((prev) => ({
+        ...(prev || liveOrder),
+        ...data,
+        subtotal: Number(data.subtotal ?? prev?.subtotal ?? 0),
+        total_amount: Number(data.total_amount ?? prev?.total_amount ?? 0),
+      }));
+      if (data.bill_requested) {
+        setBillRequested(true);
       }
-    );
+      if (data.status === 'COMPLETED' || data.payment_status === 'PAID' || (data as any).settled) {
+        onDoneReturnToMenu();
+      }
+    });
+
     return () => unsub();
-  }, [targetBizId, liveOrder.id]);
+  }, [targetBizId, liveOrder.id, onDoneReturnToMenu]);
 
   // Load Business Tax Config
   useEffect(() => {
     if (!targetBizId) return;
 
-    // Immediately fetch tax config from backend API as well to guarantee availability without Firestore delay
     rbacService.getTaxConfigApi(targetBizId).then((cfg) => {
       if (cfg) setTaxConfig(cfg);
-    }).catch(() => {});
-
-    const unsub = onSnapshot(
-      doc(db, 'businesses', targetBizId, 'tax_settings', 'default'),
-      (snap) => {
-        if (snap.exists()) {
-          setTaxConfig(snap.data() as BusinessTaxConfig);
-        } else {
-          rbacService.getTaxConfigApi(targetBizId).then((cfg) => {
-            if (cfg) setTaxConfig(cfg);
-          }).catch(() => {});
-        }
-      },
-      (err) => {
-        console.warn('Tax config sync note:', err.message);
-        rbacService.getTaxConfigApi(targetBizId).then((cfg) => {
-          if (cfg) setTaxConfig(cfg);
-        }).catch(() => {});
-      }
-    );
-    return () => unsub();
+    }).catch((err) => {
+      console.warn('Tax config load note:', err);
+    });
   }, [targetBizId]);
 
   // Promo Code Actions
@@ -285,11 +268,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
           ? 'QR Code Payment'
           : 'Card / POS Terminal';
 
-      const orderDocRef = doc(db, 'businesses', targetBizId, 'table_orders', liveOrder.id);
-
-      const updateData = {
-        bill_requested: true,
-        bill_requested_at: new Date().toISOString(),
+      await rbacService.requestBillApi(targetBizId, liveOrder.id, {
         payment_method: selectedPaymentMode,
         subtotal: itemsSubtotal,
         promo_code: appliedPromo?.code || null,
@@ -302,40 +281,14 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
           (liveOrder.order_notes ? liveOrder.order_notes + ' • ' : '') +
           `[WAITER BILL REQUESTED - ${currencySymbol} ${totalAmount.toLocaleString()}]`
         ).trim(),
-        updated_at: new Date().toISOString(),
-      };
-
-      await updateDoc(orderDocRef, updateData);
-
-      // Create service request ping for Waiter Station
-      try {
-        const pingId = `bill-${liveOrder.id}`;
-        await setDoc(
-          doc(db, 'businesses', targetBizId, 'service_requests', pingId),
-          sanitizeFirestorePayload({
-            id: pingId,
-            type: 'BILL_REQUEST',
-            order_id: liveOrder.id,
-            order_number: liveOrder.order_number || undefined,
-            table_id: liveOrder.table_id || '',
-            table_number: liveOrder?.table_number || '',
-            floor: liveOrder.floor || null,
-            building: liveOrder.building || null,
-            customer_name: liveOrder.customer_name || 'Table Guest',
-            customer_phone: liveOrder.customer_phone || '',
-            payment_method: selectedPaymentMode,
-            total_amount: totalAmount,
-            currency: currencySymbol,
-            promo_code: appliedPromo?.code || null,
-            items_count: liveOrder.items.length,
-            status: 'PENDING',
-            created_at: new Date().toISOString(),
-          }),
-          { merge: true }
-        );
-      } catch (e) {
-        console.warn('Service request ping note:', e);
-      }
+        table_id: liveOrder.table_id || '',
+        table_number: liveOrder?.table_number || '',
+        floor: liveOrder.floor || null,
+        building: liveOrder.building || null,
+        customer_name: liveOrder.customer_name || 'Table Guest',
+        customer_phone: liveOrder.customer_phone || '',
+        items_count: liveOrder.items.length,
+      });
 
       setBillRequested(true);
       setBillSuccessMessage(
@@ -370,12 +323,8 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
           ? 'QR Code Payment'
           : 'Card / POS Terminal';
 
-      const orderDocRef = doc(db, 'businesses', targetBizId, 'table_orders', liveOrder.id);
-
-      const updateData = {
-        bill_requested: true,
-        bill_requested_at: new Date().toISOString(),
-        payment_method: selectedPaymentMode,
+      await rbacService.requestBillApi(targetBizId, liveOrder.id, {
+        payment_method: selectedPaymentMode.toUpperCase(),
         subtotal: itemsSubtotal,
         promo_code: appliedPromo?.code || null,
         promo_discount: promoDiscountAmount,
@@ -387,41 +336,15 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
           (liveOrder.order_notes ? liveOrder.order_notes + ' • ' : '') +
           `[PAYMENT SETTLEMENT REQUESTED: ${paymentLabel} - ${currencySymbol} ${totalAmount.toLocaleString()}]`
         ).trim(),
-        updated_at: new Date().toISOString(),
-      };
-
-      await updateDoc(orderDocRef, updateData);
-
-      // Create / Update service request ping for Waiter Station
-      try {
-        const pingId = `bill-${liveOrder.id}`;
-        await setDoc(
-          doc(db, 'businesses', targetBizId, 'service_requests', pingId),
-          sanitizeFirestorePayload({
-            id: pingId,
-            type: 'BILL_REQUEST',
-            order_id: liveOrder.id,
-            order_number: liveOrder.order_number || undefined,
-            table_id: liveOrder.table_id || '',
-            table_number: liveOrder?.table_number || '',
-            floor: liveOrder.floor || null,
-            building: liveOrder.building || null,
-            customer_name: liveOrder.customer_name || 'Table Guest',
-            customer_phone: liveOrder.customer_phone || '',
-            payment_method: selectedPaymentMode.toUpperCase(),
-            total_amount: totalAmount,
-            currency: currencySymbol,
-            promo_code: appliedPromo?.code || null,
-            items_count: liveOrder.items.length,
-            status: 'PENDING',
-            notes: `Guest requested settlement via ${paymentLabel}`,
-            created_at: new Date().toISOString(),
-          }),
-          { merge: true }
-        );
-      } catch (e) {
-        console.warn('Service request ping note:', e);
-      }
+        table_id: liveOrder.table_id || '',
+        table_number: liveOrder?.table_number || '',
+        floor: liveOrder.floor || null,
+        building: liveOrder.building || null,
+        customer_name: liveOrder.customer_name || 'Table Guest',
+        customer_phone: liveOrder.customer_phone || '',
+        items_count: liveOrder.items.length,
+        notes: `Guest requested settlement via ${paymentLabel}`,
+      });
 
       setBillRequested(true);
       setBillSuccessMessage(

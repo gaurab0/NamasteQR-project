@@ -162,9 +162,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center mb-4">
               <Layers className="w-5 h-5" />
             </div>
-            <h3 className="text-lg font-bold text-zinc-900 mb-2">Google Firebase Cloud Core</h3>
+            <h3 className="text-lg font-bold text-zinc-900 mb-2">Enterprise PostgreSQL & Socket.io Core</h3>
             <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed">
-              Managed Firestore schema separating businesses, multi-role staff, phone verifications, and live audit trails. Scalable for multi-venue chains and staff roles.
+              High-performance Supabase PostgreSQL database separating businesses, multi-role staff, real-time Socket.io websockets, and live audit trails. Scalable for multi-venue chains and staff roles.
             </p>
 
           </div>

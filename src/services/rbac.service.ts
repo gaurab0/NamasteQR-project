@@ -1,14 +1,4 @@
-import { 
-  collection, 
-  doc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where 
-} from 'firebase/firestore';
-import { db } from '../lib/firebase';
+
 import { 
   AppRole, 
   MenuItem, 
@@ -104,27 +94,15 @@ export class ClientRBACService {
 
 
   // =========================================================================
-  // FIRESTORE COLLECTIONS (Client-Side Helper Methods)
+  // REST & SOCKET COLLECTIONS (Client-Side Helper Methods)
   // =========================================================================
 
-  public async fetchMenus(businessId: string, userRole: string): Promise<MenuItem[]> {
-    const q = query(collection(db, 'menus'), where('business_id', '==', businessId));
-    const snap = await getDocs(q);
-    const items: MenuItem[] = [];
-    snap.forEach((docSnap) => {
-      items.push({ id: docSnap.id, ...(docSnap.data() as any) });
-    });
-    return items;
+  public async fetchMenus(businessId: string, userRole?: string): Promise<MenuItem[]> {
+    return this.getMenuItemsApi(businessId);
   }
 
-  public async fetchCheckIns(businessId: string, userRole: string): Promise<CheckIn[]> {
-    const q = query(collection(db, 'check_ins'), where('business_id', '==', businessId));
-    const snap = await getDocs(q);
-    const checkIns: CheckIn[] = [];
-    snap.forEach((docSnap) => {
-      checkIns.push({ id: docSnap.id, ...(docSnap.data() as any) });
-    });
-    return checkIns;
+  public async fetchCheckIns(businessId: string, userRole?: string): Promise<CheckIn[]> {
+    return this.getCheckInsApi(businessId);
   }
 
   public getAuthHeaders(extra?: Record<string, string>, businessId?: string): HeadersInit {
@@ -502,25 +480,15 @@ export class ClientRBACService {
   }
 
   public async deleteTableApi(id: string, businessId?: string): Promise<void> {
-    try {
-      const url = businessId ? `/api/rbac/tables/${id}?businessId=${encodeURIComponent(businessId)}` : `/api/rbac/tables/${id}`;
-      const res = await fetch(url, {
-        method: 'DELETE',
-        headers: this.getAuthHeaders(undefined, businessId),
-        credentials: 'include',
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error?.message || 'Failed to delete table via server');
-      }
-    } catch (err: any) {
-      // Fallback: Delete directly in Firestore if server request fails
-      try {
-        const docRef = doc(db, 'tables', id);
-        await deleteDoc(docRef);
-      } catch (firestoreErr: any) {
-        throw new Error(err.message || firestoreErr.message || 'Failed to delete table');
-      }
+    const url = businessId ? `/api/rbac/tables/${id}?businessId=${encodeURIComponent(businessId)}` : `/api/rbac/tables/${id}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders(undefined, businessId),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error?.message || 'Failed to delete table via server');
     }
   }
 
@@ -1033,6 +1001,93 @@ export class ClientRBACService {
     } catch {
       return false;
     }
+  }
+
+  public async getOperationsDataApi(businessId: string): Promise<{ operations_config: any; current_operational_day: any; history: any[] }> {
+    const res = await fetch(`/api/rbac/businesses/${businessId}/operations`, {
+      headers: this.getAuthHeaders(),
+      credentials: 'include',
+    });
+    const result = await res.json();
+    return result.data || { operations_config: null, current_operational_day: null, history: [] };
+  }
+
+  public async saveOperationsConfigApi(businessId: string, config: any): Promise<void> {
+    const res = await fetch(`/api/rbac/businesses/${businessId}/operations/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ config }),
+    });
+    const result = await res.json();
+    if (!res.ok || !result.success) throw new Error(result.error || 'Failed to save config');
+  }
+
+  public async createOperationalDayApi(businessId: string, day: any): Promise<any> {
+    const res = await fetch(`/api/rbac/businesses/${businessId}/operations/days`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify(day),
+    });
+    const result = await res.json();
+    if (!res.ok || !result.success) throw new Error(result.error || 'Failed to create operational day');
+    return result.data;
+  }
+
+  public async updateOperationalDayApi(businessId: string, dayId: string, day: any): Promise<any> {
+    const res = await fetch(`/api/rbac/businesses/${businessId}/operations/days/${dayId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify(day),
+    });
+    const result = await res.json();
+    if (!res.ok || !result.success) throw new Error(result.error || 'Failed to update operational day');
+    return result.data;
+  }
+
+  public async createServiceRequestApi(payload: any): Promise<any> {
+    const res = await fetch(`/api/rbac/service-requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    const result = await res.json();
+    return result.data;
+  }
+
+  public async getServiceRequestsApi(businessId: string): Promise<any[]> {
+    const res = await fetch(`/api/rbac/service-requests?businessId=${encodeURIComponent(businessId)}`, {
+      headers: this.getAuthHeaders(),
+      credentials: 'include',
+    });
+    const result = await res.json();
+    return result.data || [];
+  }
+
+  public async acknowledgeTablePingApi(businessId: string, tableId: string): Promise<boolean> {
+    const res = await fetch(`/api/rbac/tables/${encodeURIComponent(tableId)}/acknowledge-ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ businessId }),
+    });
+    const result = await res.json();
+    return result.success ?? false;
+  }
+
+  public async requestBillApi(businessId: string, orderId: string, payload?: any): Promise<any> {
+    const res = await fetch(`/api/rbac/orders/${orderId}/request-bill`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ businessId, ...payload }),
+    });
+    const result = await res.json();
+    if (!res.ok || !result.success) throw new Error(result.error?.message || 'Failed to request bill');
+    return result.data;
   }
 
 }

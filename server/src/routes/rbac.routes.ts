@@ -1216,7 +1216,7 @@ router.post('/orders/cleanup', async (req: Request, res: Response) => {
 
 /**
  * DELETE /api/rbac/orders/completed
- * Purge all completed and cancelled table tickets from Firebase on demand
+ * Purge all completed and cancelled table tickets from database on demand
  */
 router.delete('/orders/completed', async (req: Request, res: Response) => {
   try {
@@ -1299,12 +1299,6 @@ router.post('/orders/:id/payment-method', optionalAuthenticate, async (req: Requ
       console.warn('Prisma payment-method update note:', e.message);
     }
 
-    try {
-      const { doc, updateDoc, firestoreDb } = require('../config/firebase');
-      const orderRef = doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId);
-      await updateDoc(orderRef, { payment_method });
-    } catch (e: any) {}
-
     realtimeEmitter.orderUpdated(businessId, { id: orderId, payment_method });
     
     return res.json({ success: true, message: 'Payment method updated' });
@@ -1330,6 +1324,67 @@ router.post(['/orders/:id/acknowledge-bill', '/orders/:id/folio-delivered'], opt
     return res.status(400).json({
       success: false,
       error: { code: 'BILL_ACKNOWLEDGE_FAILED', message: err.message }
+    });
+  }
+});
+
+router.post('/orders/:id/request-bill', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
+    const orderId = req.params.id;
+    const { payment_method, promo_code, promo_discount, total_amount, currency, notes } = req.body;
+
+    if (!businessId) throw new Error('businessId required');
+
+    const now = new Date();
+    const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (!existingOrder) throw new Error(`Order ${orderId} not found`);
+
+    const updatedOrder = await prisma.tableOrder.update({
+      where: { id: orderId },
+      data: {
+        bill_requested: true,
+        bill_requested_at: now,
+        payment_method: payment_method || existingOrder.payment_method || undefined,
+        promo_code: promo_code || existingOrder.promo_code || undefined,
+        promo_discount: promo_discount != null ? Number(promo_discount) : undefined,
+        total_amount: total_amount != null ? Number(total_amount) : undefined,
+      },
+    });
+
+    const pingId = `bill-${orderId}`;
+    const srv = await prisma.serviceRequest.upsert({
+      where: { id: pingId },
+      update: {
+        status: 'PENDING',
+        payment_method: payment_method || existingOrder.payment_method || 'CASH',
+        total_amount: total_amount != null ? Number(total_amount) : Number(existingOrder.total_amount),
+        currency: currency || existingOrder.currency || 'Rs.',
+      },
+      create: {
+        id: pingId,
+        business_id: businessId,
+        type: 'BILL_REQUEST',
+        order_id: orderId,
+        table_id: existingOrder.table_id || '',
+        table_number: existingOrder.table_number || '',
+        order_number: existingOrder.order_number,
+        payment_method: payment_method || existingOrder.payment_method || 'CASH',
+        total_amount: total_amount != null ? Number(total_amount) : Number(existingOrder.total_amount),
+        currency: currency || existingOrder.currency || 'Rs.',
+        status: 'PENDING',
+        notes: notes || undefined,
+      },
+    });
+
+    realtimeEmitter.orderUpdated(businessId, updatedOrder);
+    realtimeEmitter.serviceRequestUpdated(businessId, srv);
+
+    return res.json({ success: true, data: updatedOrder, message: 'Bill requested' });
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'BILL_REQUEST_FAILED', message: err.message },
     });
   }
 });
@@ -1596,6 +1651,260 @@ router.delete('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, 
       success: false,
       error: { code: 'SALES_BATCH_DELETE_FAILED', message: err.message }
     });
+  }
+});
+
+/**
+ * GET /api/rbac/businesses/:businessId/operations
+ * Retrieve business operational preferences, current day status, and recent shift history
+ */
+router.get('/businesses/:businessId/operations', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { operations_config: true, current_operational_day: true },
+    });
+
+    const history = await prisma.operationalDay.findMany({
+      where: { business_id: businessId },
+      orderBy: { businessDate: 'desc' },
+      take: 20,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        operations_config: biz?.operations_config || null,
+        current_operational_day: biz?.current_operational_day || null,
+        history: history.map((h) => ({
+          id: h.id,
+          businessDate: h.businessDate,
+          status: h.status,
+          openedAt: h.openedAt?.toISOString(),
+          closedAt: h.closedAt?.toISOString(),
+          openedBy: h.openedBy,
+          closedBy: h.closedBy,
+          ...(h.data && typeof h.data === 'object' ? h.data : {}),
+        })),
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/rbac/businesses/:businessId/operations/config
+ * Save automatic schedule & operational preferences
+ */
+router.put('/businesses/:businessId/operations/config', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const { config } = req.body;
+    await db.ensureBusiness(businessId);
+    await prisma.business.update({
+      where: { id: businessId },
+      data: { operations_config: config },
+    });
+    return res.json({ success: true, message: 'Operations config saved' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/rbac/businesses/:businessId/operations/days
+ * Start or record a new business operational day
+ */
+router.post('/businesses/:businessId/operations/days', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const { businessId } = req.params;
+    const dayData = req.body;
+    await db.ensureBusiness(businessId);
+
+    const created = await prisma.operationalDay.create({
+      data: {
+        id: dayData.id || undefined,
+        business_id: businessId,
+        businessDate: dayData.businessDate,
+        status: dayData.status || 'OPEN',
+        openedAt: dayData.openedAt ? new Date(dayData.openedAt) : new Date(),
+        openedBy: dayData.openedBy || null,
+        data: dayData,
+      },
+    });
+
+    const fullRecord = { ...dayData, id: created.id };
+    await prisma.business.update({
+      where: { id: businessId },
+      data: { current_operational_day: fullRecord },
+    });
+
+    return res.json({ success: true, data: fullRecord });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * PUT /api/rbac/businesses/:businessId/operations/days/:dayId
+ * Update an existing operational day (close, reopen, override date)
+ */
+router.put('/businesses/:businessId/operations/days/:dayId', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const { businessId, dayId } = req.params;
+    const dayData = req.body;
+
+    await prisma.operationalDay.update({
+      where: { id: dayId },
+      data: {
+        status: dayData.status || undefined,
+        closedAt: dayData.closedAt ? new Date(dayData.closedAt) : undefined,
+        closedBy: dayData.closedBy || undefined,
+        businessDate: dayData.businessDate || undefined,
+        data: dayData,
+      },
+    }).catch(() => {});
+
+    await prisma.business.update({
+      where: { id: businessId },
+      data: { current_operational_day: dayData },
+    });
+
+    return res.json({ success: true, data: dayData });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/rbac/service-requests
+ * Create or submit a guest waiter call or service request
+ */
+router.post('/service-requests', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const { id, type, business_id, table_id, table_number, order_id, order_number, customer_name, total_amount, currency } = req.body;
+    const businessId = business_id || (req.query.businessId as string);
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id is required' });
+
+    const reqId = id || `req-${Date.now()}`;
+    await db.ensureBusiness(businessId);
+
+    const srv = await prisma.serviceRequest.upsert({
+      where: { id: reqId },
+      update: {
+        type: type || 'CALL_WAITER',
+        order_id: order_id || null,
+        order_number: order_number || null,
+        status: 'PENDING',
+        total_amount: total_amount != null ? Number(total_amount) : null,
+      },
+      create: {
+        id: reqId,
+        business_id: businessId,
+        type: type || 'CALL_WAITER',
+        table_id: table_id || '',
+        table_number: String(table_number || 'Table'),
+        order_id: order_id || null,
+        order_number: order_number || null,
+        total_amount: total_amount != null ? Number(total_amount) : null,
+        currency: currency || 'Rs.',
+        status: 'PENDING',
+      },
+    });
+
+    if (table_id) {
+      await prisma.restaurantTable.update({
+        where: { id: table_id },
+        data: {
+          waiter_ping: {
+            active: true,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      }).catch(() => {});
+
+      realtimeEmitter.tableUpdated(businessId, {
+        id: table_id,
+        waiter_ping: { active: true, timestamp: new Date().toISOString() },
+      });
+    }
+
+    realtimeEmitter.serviceRequestUpdated(businessId, srv);
+
+    return res.json({ success: true, data: srv });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * GET /api/rbac/service-requests
+ * Fetch all pending service requests for a business
+ */
+router.get('/service-requests', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const businessId = (req.query.businessId as string) || (req.query.business_id as string);
+    if (!businessId) return res.status(400).json({ success: false, error: 'businessId required' });
+
+    const requests = await prisma.serviceRequest.findMany({
+      where: {
+        business_id: businessId,
+        status: { in: ['PENDING', 'ATTENDED'] },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+    });
+
+    return res.json({
+      success: true,
+      data: requests.map((r) => ({
+        ...r,
+        total_amount: r.total_amount ? Number(r.total_amount) : 0,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * POST /api/rbac/tables/:tableId/acknowledge-ping
+ * Acknowledge / dismiss active waiter ping on a table
+ */
+router.post('/tables/:tableId/acknowledge-ping', optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const { tableId } = req.params;
+    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
+
+    if (tableId) {
+      await prisma.restaurantTable.update({
+        where: { id: tableId },
+        data: { waiter_ping: { active: false } },
+      }).catch(() => {});
+
+      if (businessId) {
+        await prisma.serviceRequest.updateMany({
+          where: {
+            table_id: tableId,
+            business_id: businessId,
+            type: 'CALL_WAITER',
+            status: 'PENDING',
+          },
+          data: {
+            status: 'ATTENDED',
+            resolved_at: new Date(),
+          },
+        }).catch(() => {});
+
+        realtimeEmitter.tableUpdated(businessId, { id: tableId, waiter_ping: { active: false } });
+      }
+    }
+
+    return res.json({ success: true, message: 'Waiter ping acknowledged' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

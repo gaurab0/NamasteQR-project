@@ -1,7 +1,6 @@
 import { Bell } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { doc, getDoc, onSnapshot, collection, updateDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+
 import { MenuItem, MenuCategory, CartItem, TableOrder, CustomerTableSession, MenuItemVariant, MenuStatus, FoodType } from '../types/rbac';
 import { Business } from '../types/auth';
 import { useAuth } from '../context/AuthContext';
@@ -574,7 +573,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         }
       } catch {}
 
-      // Register live table check-in / mark occupied in Firestore & retrieve authoritative sessionId and Host status
+      // Register live table check-in / mark occupied in database & retrieve authoritative sessionId and Host status
       if (urlTableId) {
         rbacService.scanTableCheckInApi(urlTableId, {
           business_id: urlBizId,
@@ -675,19 +674,16 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               sessionId: activeSessionId,
             });
 
-            // Verify with Firestore table record in background
+            // Verify table session with backend in background
             if (activeBizId && activeTableId) {
-              const tableDocRef = doc(db, 'businesses', activeBizId, 'tables', activeTableId);
-              getDoc(tableDocRef).then((snap) => {
-                if (snap.exists()) {
-                  const data = snap.data();
-                  if (activeSessionId && data.current_session_id && data.current_session_id !== activeSessionId) {
-                    sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-                    setSessionExpired(true);
-                    setSessionExpiredReason(
-                      `A new session has started on Table #${savedSession.tableNumber || ''}. Please scan the table QR code to join the current session.`
-                    );
-                  }
+              rbacService.getTablesApi(activeBizId).then((tables) => {
+                const table = tables.find((t) => t.id === activeTableId);
+                if (table && activeSessionId && table.current_session_id && table.current_session_id !== activeSessionId) {
+                  sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
+                  setSessionExpired(true);
+                  setSessionExpiredReason(
+                    `A new session has started on Table #${savedSession.tableNumber || ''}. Please scan the table QR code to join the current session.`
+                  );
                 }
               }).catch(() => {});
             }
@@ -732,61 +728,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
 // Table status is managed securely via session verification
 
-  // Real-time Firestore listener for active table order status & settlement
-  useEffect(() => {
-    const targetBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
-    if (!isStoreOpen || !targetBizId || !activeOrder?.id) return;
-
-    const orderRef = doc(db, 'businesses', targetBizId, 'table_orders', activeOrder.id);
-    let isInitialFetch = true;
-    const unsub = onSnapshot(orderRef, (snap) => {
-      if (snap.exists()) {
-        const latestOrder = { id: snap.id, ...snap.data() } as TableOrder;
-        
-        const isSettled = latestOrder.pay_first
-          ? latestOrder.status === 'COMPLETED'
-          : (latestOrder.status === 'COMPLETED' ||
-             latestOrder.payment_status === 'PAID' ||
-             Boolean((latestOrder as any).settled));
-
-        if (isInitialFetch && isSettled) {
-          setActiveOrder(undefined);
-          try {
-            localStorage.removeItem(`serveflow_active_order_${targetBizId}_${tableParams.tableNumber || tableParams.tableId || 'default'}`);
-          } catch {}
-          return;
-        }
-        isInitialFetch = false;
-
-        setActiveOrder(latestOrder);
-        if (latestOrder.bill_requested) {
-          setIsFinalBillPageOpen(true);
-        }
-
-        if (isSettled) {
-          sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-          setSessionExpired(true);
-          setIsTableBillConcluded(true);
-          setSessionExpiredReason(
-            'Your table order and billing process has been concluded. Thank you for dining with us!'
-          );
-          setIsFinalBillPageOpen(false);
-          try {
-            localStorage.setItem('serveflow_table_bill_concluded', 'true');
-          } catch {}
-          handleOrderSettled(latestOrder.id, tableParams.tableNumber, latestOrder);
-        }
-      }
-    }, (err) => {
-      console.warn('Real-time order sync note:', err.message);
-    });
-
-    return () => unsub();
-  }, [tableParams.businessId, user?.business?.id, activeOrder?.id, tableParams.tableNumber]);
-
   // Socket.io Real-time WebSocket Subscription for guest table and order events
   useEffect(() => {
-    const targetBizId = tableParams.businessId || user?.business?.id;
+    const targetBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
     const tableId = tableParams.tableId;
     if (!targetBizId) return;
 
@@ -799,12 +743,25 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     const unsubOrder = socketService.subscribeToOrders((updatedOrder) => {
       if (activeOrder?.id && updatedOrder.id === activeOrder.id) {
         setActiveOrder((prev) => prev ? { ...prev, ...updatedOrder } : prev);
-        if (updatedOrder.status === 'COMPLETED' || updatedOrder.payment_status === 'PAID') {
+        if (updatedOrder.bill_requested) {
+          setIsFinalBillPageOpen(true);
+        }
+        const isSettled = updatedOrder.pay_first
+          ? updatedOrder.status === 'COMPLETED'
+          : (updatedOrder.status === 'COMPLETED' ||
+             updatedOrder.payment_status === 'PAID' ||
+             Boolean((updatedOrder as any).settled));
+
+        if (isSettled) {
           sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
           setSessionExpired(true);
           setIsTableBillConcluded(true);
           setSessionExpiredReason('Your table order and billing process has been concluded. Thank you for dining with us!');
           setIsFinalBillPageOpen(false);
+          try {
+            localStorage.setItem('serveflow_table_bill_concluded', 'true');
+          } catch {}
+          handleOrderSettled(updatedOrder.id, tableParams.tableNumber, updatedOrder);
         }
       }
     });
@@ -824,182 +781,20 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       unsubOrder();
       unsubTable();
     };
-  }, [tableParams.businessId, user?.business?.id, tableParams.tableId, activeOrder?.id, tableParams.sessionId]);
+  }, [tableParams.businessId, user?.business?.id, activeOrder?.business_id, tableParams.tableId, activeOrder?.id, tableParams.sessionId, tableParams.tableNumber]);
 
-  // Real-time Firestore listener for table settlement (if table session reset to ACTIVE / session_id cleared)
+  // Real-time Socket.io listener for Menu Items and Categories
   useEffect(() => {
-    const targetBizId = tableParams.businessId || user?.business?.id;
-    const tableId = tableParams.tableId;
-    if (!isStoreOpen || !targetBizId || !tableId) return;
+    const targetBizId = tableParams.businessId || user?.business?.id || businessProfile?.id;
+    if (!targetBizId) return;
 
-    const tableRef = doc(db, 'businesses', targetBizId, 'tables', tableId);
-    const unsub = onSnapshot(tableRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (tableParams.sessionId && (!data.current_session_id || data.current_session_id !== tableParams.sessionId)) {
-          if (!kickOutTimeoutRef.current) {
-            kickOutTimeoutRef.current = setTimeout(() => {
-              sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-              setSessionExpired(true);
-              setIsTableBillConcluded(true);
-              setSessionExpiredReason(
-                'Your table order and billing process has been concluded. Thank you for dining with us!'
-              );
-              setIsFinalBillPageOpen(false);
-              try {
-                localStorage.setItem('serveflow_table_bill_concluded', 'true');
-              } catch {}
-              handleOrderSettled(undefined, tableParams.tableNumber, activeOrder || successOrderData);
-            }, 3000);
-          }
-        } else {
-          if (kickOutTimeoutRef.current) {
-            clearTimeout(kickOutTimeoutRef.current);
-            kickOutTimeoutRef.current = null;
-          }
-        }
-      }
-    }, (err) => {
-      console.warn('Real-time table sync note:', err.message);
+    const unsubMenu = socketService.subscribeToMenu(() => {
+      loadData(targetBizId);
     });
 
     return () => {
-      unsub();
-      if (kickOutTimeoutRef.current) clearTimeout(kickOutTimeoutRef.current);
+      unsubMenu();
     };
-  }, [tableParams.businessId, user?.business?.id, tableParams.tableId, tableParams.sessionId, tableParams.tableNumber]);
-
-  // Real-time Firestore listener for Business Profile & Theme changes
-  useEffect(() => {
-    const targetBizId = tableParams.businessId || user?.business?.id || businessProfile?.id;
-    if (!targetBizId) return;
-
-    try {
-      const bizDocRef = doc(db, 'businesses', targetBizId);
-      const unsubscribe = onSnapshot(
-        bizDocRef,
-        (snap) => {
-          if (snap.exists()) {
-            const data = snap.data() as any;
-            setBusinessProfile((prev) => {
-              const updated: Business = {
-                id: snap.id,
-                name: data.name || prev?.name || 'Restaurant',
-                type: data.business_type || prev?.type || 'RESTAURANT',
-                status: data.status || prev?.status || 'ACTIVE',
-                tagline: data.tagline || prev?.tagline,
-                location: data.location || prev?.location,
-                kitchen_hours: data.kitchen_hours || prev?.kitchen_hours,
-                phone: data.phone || prev?.phone,
-                show_menu_images: data.show_menu_images !== false,
-                menu_theme_config: data.menu_theme_config || prev?.menu_theme_config,
-                operations_config: data.operations_config || prev?.operations_config,
-                current_operational_day: data.current_operational_day || prev?.current_operational_day,
-              };
-              try {
-                localStorage.setItem('serveflow_customer_business_profile', JSON.stringify(updated));
-                localStorage.setItem(`serveflow_biz_${targetBizId}`, JSON.stringify(updated));
-              } catch {}
-              return updated;
-            });
-          }
-        },
-        (err) => {
-          console.warn('Real-time business profile listener notice:', err);
-        }
-      );
-
-      return () => unsubscribe();
-    } catch (e) {
-      console.warn('Business listener setup notice:', e);
-    }
-  }, [tableParams.businessId, user?.business?.id, businessProfile?.id]);
-
-  // Real-time Firestore listener for Menu Items and Categories (instant live updates on customer screen)
-  useEffect(() => {
-    const targetBizId = tableParams.businessId || user?.business?.id || businessProfile?.id;
-    if (!targetBizId) return;
-
-    try {
-      const menusColRef = collection(db, 'businesses', targetBizId, 'menus');
-      const unsubscribeMenus = onSnapshot(
-        menusColRef,
-        (snap) => {
-          if (!snap.empty) {
-            const items: MenuItem[] = [];
-            snap.forEach((docSnap) => {
-              const d = docSnap.data();
-              const itemStatus: MenuStatus = d.status || (d.is_available === false ? 'unavailable' : 'available');
-              const additionalCats = Array.isArray(d.additional_categories)
-                ? d.additional_categories.filter((c: any) => typeof c === 'string' && c.trim().length > 0)
-                : [];
-              items.push({
-                id: docSnap.id,
-                business_id: d.business_id || targetBizId,
-                name: d.name || '',
-                category: d.category || 'General',
-                additional_categories: additionalCats,
-                category_id: d.category_id || null,
-                price: Number(d.price) || 0,
-                currency: d.currency || 'Rs.',
-                description: d.description || '',
-                image_url: d.image_url || '',
-                food_type: (d.food_type as FoodType) || 'none',
-                status: itemStatus,
-                is_available: itemStatus === 'available',
-                has_variants: Boolean(d.has_variants || (Array.isArray(d.variants) && d.variants.length > 0)),
-                variants: Array.isArray(d.variants) ? d.variants : [],
-                variant_group_name: d.variant_group_name || undefined,
-                display_style: d.display_style || 'auto',
-                show_image: d.show_image !== undefined ? Boolean(d.show_image) : true,
-                promo_badge: d.promo_badge || undefined,
-                order_index: d.order_index,
-                preparation_time_mins: d.preparation_time_mins || 15,
-                created_by: d.created_by || 'system',
-                created_at: new Date(d.created_at || Date.now()),
-                updated_at: new Date(d.updated_at || Date.now()),
-              });
-            });
-            setMenuItems(items);
-          }
-        },
-        (err) => {
-          console.warn('Real-time menus listener note:', err);
-        }
-      );
-
-      const catsColRef = collection(db, 'businesses', targetBizId, 'menu_categories');
-      const unsubscribeCats = onSnapshot(
-        catsColRef,
-        (snap) => {
-          if (!snap.empty) {
-            const cats: MenuCategory[] = [];
-            snap.forEach((d) => {
-              const data = d.data();
-              cats.push({
-                id: d.id,
-                business_id: data.business_id || targetBizId,
-                name: data.name,
-                order: typeof data.order === 'number' ? data.order : undefined,
-                created_at: new Date(data.created_at || Date.now()),
-                updated_at: new Date(data.updated_at || Date.now()),
-              });
-            });
-            setCategories(cats);
-          }
-        },
-        (err) => {
-          console.warn('Real-time categories listener note:', err);
-        }
-      );
-
-      return () => {
-        unsubscribeMenus();
-        unsubscribeCats();
-      };
-    } catch (e) {
-      console.warn('Menu/category listener setup note:', e);
-    }
   }, [tableParams.businessId, user?.business?.id, businessProfile?.id]);
 
   const loadData = async (bId?: string) => {
@@ -1207,12 +1002,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       return;
     }
     try {
-      const tableRef = doc(db, 'businesses', tableParams.businessId, 'tables', tableParams.tableId);
-      await updateDoc(tableRef, {
-        waiter_ping: {
-          active: true,
-          timestamp: new Date().toISOString()
-        }
+      await rbacService.createServiceRequestApi({
+        business_id: tableParams.businessId,
+        table_id: tableParams.tableId,
+        table_number: tableParams.tableNumber || '',
+        floor: tableParams.floor || null,
+        building: tableParams.building || null,
+        type: 'WAITER_CALL',
+        status: 'PENDING',
+        notes: `Guest called waiter at Table #${tableParams.tableNumber || ''}`,
       });
       alert('Waiter called! Please wait a moment.');
     } catch (err: any) {

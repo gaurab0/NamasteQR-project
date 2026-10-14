@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { db } from '../../lib/firebase';
-import { doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs, updateDoc } from 'firebase/firestore';
+import { rbacService } from '../../services/rbac.service';
 import { BusinessOperatingHours, OperationalDayRecord, OperationalStatus } from '../../types/auth';
 import { getEffectiveBusinessDate } from '../../utils/operationalDay';
 import {
@@ -73,26 +72,16 @@ export const OperationsManagementTab: React.FC = () => {
     setLoading(true);
     setError('');
     try {
-      // Get Business Settings
-      const bizRef = doc(db, 'businesses', activeBizId);
-      const bizSnap = await getDoc(bizRef);
-      if (bizSnap.exists()) {
-        const data = bizSnap.data();
-        if (data.operations_config) {
-          setConfig(data.operations_config);
-        }
-        if (data.current_operational_day) {
-          setCurrentDay(data.current_operational_day);
-        }
+      const data = await rbacService.getOperationsDataApi(activeBizId);
+      if (data.operations_config) {
+        setConfig(data.operations_config);
       }
-
-      // Get History
-      const histRef = collection(db, 'businesses', activeBizId, 'operational_days');
-      const q = query(histRef, orderBy('businessDate', 'desc'), limit(15));
-      const histSnap = await getDocs(q);
-      const histData = histSnap.docs.map(d => ({ id: d.id, ...d.data() } as OperationalDayRecord));
-      setHistory(histData);
-
+      if (data.current_operational_day) {
+        setCurrentDay(data.current_operational_day);
+      }
+      if (Array.isArray(data.history)) {
+        setHistory(data.history as OperationalDayRecord[]);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load operations data.');
     } finally {
@@ -104,10 +93,7 @@ export const OperationsManagementTab: React.FC = () => {
     try {
       setSaving(true);
       setError('');
-      const bizRef = doc(db, 'businesses', activeBizId);
-      await updateDoc(bizRef, {
-        operations_config: config
-      });
+      await rbacService.saveOperationsConfigApi(activeBizId, config);
       setSuccessMsg('Automatic schedule & operational preferences saved successfully.');
     } catch (err: any) {
       setError(err.message || 'Failed to save settings.');
@@ -132,18 +118,10 @@ export const OperationsManagementTab: React.FC = () => {
         updatedAt: new Date().toISOString(),
       };
 
-      const dayRef = doc(collection(db, 'businesses', activeBizId, 'operational_days'));
-      newDay.id = dayRef.id;
-
-      await setDoc(dayRef, newDay);
-      
-      const bizRef = doc(db, 'businesses', activeBizId);
-      await updateDoc(bizRef, {
-        current_operational_day: newDay
-      });
-
-      setCurrentDay(newDay);
-      setHistory(prev => [newDay, ...prev]);
+      const created = await rbacService.createOperationalDayApi(activeBizId, newDay);
+      const dayRecord = created || newDay;
+      setCurrentDay(dayRecord);
+      setHistory(prev => [dayRecord, ...prev]);
       setSuccessMsg(`Business Day started successfully for ${dateToUse}.`);
     } catch (err: any) {
       setError(err.message || 'Failed to start business day.');
@@ -170,13 +148,7 @@ export const OperationsManagementTab: React.FC = () => {
         updatedAt: new Date().toISOString(),
       };
 
-      const dayRef = doc(db, 'businesses', activeBizId, 'operational_days', currentDay.id);
-      await updateDoc(dayRef, updatedDay as any);
-
-      const bizRef = doc(db, 'businesses', activeBizId);
-      await updateDoc(bizRef, {
-        current_operational_day: updatedDay
-      });
+      await rbacService.updateOperationalDayApi(activeBizId, currentDay.id, updatedDay);
 
       setCurrentDay(updatedDay);
       setHistory(prev => prev.map(h => h.id === currentDay.id ? updatedDay : h));
@@ -209,13 +181,7 @@ export const OperationsManagementTab: React.FC = () => {
         updatedAt: new Date().toISOString(),
       };
 
-      const dayRef = doc(db, 'businesses', activeBizId, 'operational_days', currentDay.id);
-      await updateDoc(dayRef, updatedDay as any);
-
-      const bizRef = doc(db, 'businesses', activeBizId);
-      await updateDoc(bizRef, {
-        current_operational_day: updatedDay
-      });
+      await rbacService.updateOperationalDayApi(activeBizId, currentDay.id, updatedDay);
 
       setCurrentDay(updatedDay);
       setHistory(prev => prev.map(h => h.id === currentDay.id ? updatedDay : h));
@@ -230,7 +196,7 @@ export const OperationsManagementTab: React.FC = () => {
 
   const handleManualDateSet = async () => {
     if (!manualDate) return;
-    if (!currentDay) {
+    if (!currentDay || !currentDay.id) {
       setError('Please start a business day first before overriding the date.');
       return;
     }
@@ -240,13 +206,7 @@ export const OperationsManagementTab: React.FC = () => {
       setError('');
       const updatedDay = { ...currentDay, businessDate: manualDate, updatedAt: new Date().toISOString() };
       
-      const dayRef = doc(db, 'businesses', activeBizId, 'operational_days', currentDay.id!);
-      await updateDoc(dayRef, updatedDay as any);
-
-      const bizRef = doc(db, 'businesses', activeBizId);
-      await updateDoc(bizRef, {
-        current_operational_day: updatedDay
-      });
+      await rbacService.updateOperationalDayApi(activeBizId, currentDay.id, updatedDay);
 
       setCurrentDay(updatedDay);
       setHistory(prev => prev.map(h => h.id === currentDay.id ? updatedDay : h));

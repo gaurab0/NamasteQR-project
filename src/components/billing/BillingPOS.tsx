@@ -2,8 +2,7 @@ import { CreditAccountSelectionModal } from './CreditAccountSelectionModal';
 import { calculateBillTotals } from '../../utils/taxCalculations';
 import { renderFormattedDate } from '../../utils/dateFormatter';
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, doc, updateDoc, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+
 import { usePrinter } from '../../contexts/PrinterContext';
 import {
   Receipt,
@@ -158,20 +157,98 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     }
   };
 
+  const parseOrderDate = (val: any) => {
+    if (!val) return new Date();
+    if (val.toDate && typeof val.toDate === 'function') return val.toDate();
+    if (val.seconds) return new Date(val.seconds * 1000);
+    const parsed = new Date(val);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+
+  const processIncomingOrders = (rawOrders: any[]) => {
+    const liveOrders: TableOrder[] = rawOrders.map((d: any) => ({
+      id: d.id,
+      order_number: d.order_number,
+      business_id: d.business_id || business.id,
+      table_id: d.table_id || 'table-general',
+      table_number: d.table_number || 'Table',
+      floor: d.floor ?? null,
+      building: d.building ?? null,
+      items: d.items || [],
+      subtotal: d.subtotal || 0,
+      tax_amount: d.tax_amount || 0,
+      total_amount: d.total_amount || 0,
+      currency: d.currency || 'Rs.',
+      customer_name: d.customer_name || 'Guest',
+      customer_phone: d.customer_phone || '',
+      order_notes: d.order_notes || '',
+      status: d.status || 'RECEIVED',
+      pay_first: d.pay_first ?? false,
+      payment_confirmed_at: d.payment_confirmed_at ? parseOrderDate(d.payment_confirmed_at) : null,
+      payment_confirmed_by: d.payment_confirmed_by || null,
+      sale_id: d.sale_id || null,
+      payment_status: d.payment_status || null,
+      payment_rejected_reason: d.payment_rejected_reason || null,
+      ready_at: d.ready_at ? parseOrderDate(d.ready_at) : null,
+      served_at: d.served_at ? parseOrderDate(d.served_at) : null,
+      bill_requested: Boolean(d.bill_requested),
+      bill_requested_at: d.bill_requested_at ? parseOrderDate(d.bill_requested_at) : null,
+      bill_acknowledged: Boolean(d.bill_acknowledged),
+      folio_delivered: Boolean(d.folio_delivered),
+      folio_delivered_at: d.folio_delivered_at ? parseOrderDate(d.folio_delivered_at) : null,
+      payment_method: d.payment_method || null,
+      promo_code: d.promo_code || null,
+      promo_discount: d.promo_discount || 0,
+      taxes: d.taxes || [],
+      created_at: parseOrderDate(d.created_at),
+      updated_at: parseOrderDate(d.updated_at),
+    } as TableOrder));
+
+    const unsettled = liveOrders.filter(
+      (o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && !(o as any).settled && o.status !== 'AWAITING_PAYMENT' && !(o.pay_first && o.payment_status === 'PAID')
+    );
+    const awaitingPayment = liveOrders.filter(
+      (o) => o.status === 'AWAITING_PAYMENT'
+    ).sort((a, b) => {
+       const timeA = a.created_at instanceof Date ? a.created_at.getTime() : new Date(a.created_at || 0).getTime();
+       const timeB = b.created_at instanceof Date ? b.created_at.getTime() : new Date(b.created_at || 0).getTime();
+       return timeA - timeB; // Oldest first
+    });
+    setPayFirstOrders(awaitingPayment);
+    unsettled.sort((a, b) => {
+      const aFolio = Boolean(a.folio_delivered || (a as any).bill_acknowledged);
+      const bFolio = Boolean(b.folio_delivered || (b as any).bill_acknowledged);
+      if (aFolio && !bFolio) return -1;
+      if (!aFolio && bFolio) return 1;
+
+      if (a.bill_requested && !b.bill_requested) return -1;
+      if (!a.bill_requested && b.bill_requested) return 1;
+
+      const timeA = a.created_at instanceof Date ? a.created_at.getTime() : new Date(a.created_at || 0).getTime();
+      const timeB = b.created_at instanceof Date ? b.created_at.getTime() : new Date(b.created_at || 0).getTime();
+      return timeB - timeA;
+    });
+    setPendingOrders(unsettled);
+  };
+
   const loadBillingData = async () => {
     try {
       setLoading(true);
-      const [configData, salesData, tablesData, glData] = await Promise.all([
+      const [configData, salesData, tablesData, glData, ordersData] = await Promise.all([
         rbacService.getTaxConfigApi(business.id).catch(() => null),
         rbacService.getSalesApi({}, business.id).catch(() => []),
         rbacService.getTablesApi(business.id).catch(() => []),
         rbacService.getGLAccountsApi(business.id).catch(() => []),
+        rbacService.getTableOrdersApi(undefined, business.id).catch(() => []),
       ]);
 
       if (configData) setTaxConfig(configData);
       setSales(salesData || []);
       setTables(tablesData || []);
       setGlAccounts(glData || []);
+      if (ordersData && Array.isArray(ordersData)) {
+        processIncomingOrders(ordersData);
+      }
     } catch (err: any) {
       console.error('Failed to load billing data:', err);
       showStatus('Failed to load billing data. Please refresh.', 'error');
@@ -180,119 +257,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     }
   };
 
-  // Real-time Firestore onSnapshot for tax configuration (Exclusive vs Inclusive mode updates)
+  // Real-time Socket.io listener for instant Folio Delivered & Order updates
   useEffect(() => {
     if (!business.id) return;
-    const taxRef = doc(db, 'businesses', business.id, 'tax_settings', 'default');
-    const unsubTax = onSnapshot(
-      taxRef,
-      (snap) => {
-        if (snap.exists()) {
-          const d = snap.data();
-          const isInclusive = Boolean(
-            d.tax_inclusive ?? (Array.isArray(d.rates) && d.rates.some((r: any) => r.is_inclusive))
-          );
-          setTaxConfig((prev) => ({
-            ...(prev || ({} as BusinessTaxConfig)),
-            ...(d as any),
-            business_id: business.id,
-            tax_enabled: d.tax_enabled ?? true,
-            tax_inclusive: isInclusive,
-            currency: d.currency || 'Rs.',
-            currency_symbol: d.currency_symbol || 'Rs.',
-            rates: Array.isArray(d.rates) ? d.rates : prev?.rates || [],
-          }));
-        }
-      },
-      () => {}
-    );
-    return () => unsubTax();
-  }, [business.id]);
+    socketService.joinBusiness(business.id);
 
-  // Real-time Firestore onSnapshot for live table orders
-  useEffect(() => {
-    if (!business.id) return;
-    const ordersColRef = collection(db, 'businesses', business.id, 'table_orders');
-    const parseDate = (val: any) => {
-      if (!val) return new Date();
-      if (val.toDate && typeof val.toDate === 'function') return val.toDate();
-      if (val.seconds) return new Date(val.seconds * 1000);
-      const parsed = new Date(val);
-      return isNaN(parsed.getTime()) ? new Date() : parsed;
-    };
-
-    const unsub = onSnapshot(ordersColRef, (snapshot) => {
-      const liveOrders: TableOrder[] = [];
-      snapshot.forEach((docSnap) => {
-        const d = docSnap.data();
-        liveOrders.push({
-          id: docSnap.id,
-          order_number: d.order_number,
-          business_id: d.business_id || business.id,
-          table_id: d.table_id || 'table-general',
-          table_number: d.table_number || 'Table',
-          floor: d.floor ?? null,
-          building: d.building ?? null,
-          items: d.items || [],
-          subtotal: d.subtotal || 0,
-          tax_amount: d.tax_amount || 0,
-          total_amount: d.total_amount || 0,
-          currency: d.currency || 'Rs.',
-          customer_name: d.customer_name || 'Guest',
-          customer_phone: d.customer_phone || '',
-          order_notes: d.order_notes || '',
-          status: d.status || 'RECEIVED',
-          pay_first: d.pay_first ?? false,
-          payment_confirmed_at: d.payment_confirmed_at ? parseDate(d.payment_confirmed_at) : null,
-          payment_confirmed_by: d.payment_confirmed_by || null,
-          sale_id: d.sale_id || null,
-          payment_status: d.payment_status || null,
-          payment_rejected_reason: d.payment_rejected_reason || null,
-          ready_at: d.ready_at ? parseDate(d.ready_at) : null,
-          served_at: d.served_at ? parseDate(d.served_at) : null,
-          bill_requested: Boolean(d.bill_requested),
-          bill_requested_at: d.bill_requested_at ? parseDate(d.bill_requested_at) : null,
-          bill_acknowledged: Boolean(d.bill_acknowledged),
-          folio_delivered: Boolean(d.folio_delivered),
-          folio_delivered_at: d.folio_delivered_at ? parseDate(d.folio_delivered_at) : null,
-          payment_method: d.payment_method || null,
-          promo_code: d.promo_code || null,
-          promo_discount: d.promo_discount || 0,
-          taxes: d.taxes || [],
-          created_at: parseDate(d.created_at),
-          updated_at: parseDate(d.updated_at),
-        } as TableOrder);
-      });
-      const unsettled = liveOrders.filter(
-        (o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && !(o as any).settled && o.status !== 'AWAITING_PAYMENT' && !(o.pay_first && o.payment_status === 'PAID')
-      );
-      const awaitingPayment = liveOrders.filter(
-        (o) => o.status === 'AWAITING_PAYMENT'
-      ).sort((a, b) => {
-         const timeA = a.created_at instanceof Date ? a.created_at.getTime() : new Date(a.created_at || 0).getTime();
-         const timeB = b.created_at instanceof Date ? b.created_at.getTime() : new Date(b.created_at || 0).getTime();
-         return timeA - timeB; // Oldest first
-      });
-      setPayFirstOrders(awaitingPayment);
-      unsettled.sort((a, b) => {
-        const aFolio = Boolean(a.folio_delivered || (a as any).bill_acknowledged);
-        const bFolio = Boolean(b.folio_delivered || (b as any).bill_acknowledged);
-        if (aFolio && !bFolio) return -1;
-        if (!aFolio && bFolio) return 1;
-
-        if (a.bill_requested && !b.bill_requested) return -1;
-        if (!a.bill_requested && b.bill_requested) return 1;
-
-        const timeA = a.created_at instanceof Date ? a.created_at.getTime() : new Date(a.created_at || 0).getTime();
-        const timeB = b.created_at instanceof Date ? b.created_at.getTime() : new Date(b.created_at || 0).getTime();
-        return timeB - timeA;
-      });
-      setPendingOrders(unsettled);
-    }, (err) => {
-      console.warn('Live Orders listener note:', err.message);
-    });
-
-    // Real-time Socket.io listener for instant Folio Delivered & Order updates
     const unsubSocket = socketService.subscribeToOrders((updatedOrder: any) => {
       if (!updatedOrder || !updatedOrder.id) return;
       const parsedUpdatedOrder: TableOrder = {
@@ -300,9 +269,9 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         bill_requested: Boolean(updatedOrder.bill_requested),
         bill_acknowledged: Boolean(updatedOrder.bill_acknowledged),
         folio_delivered: Boolean(updatedOrder.folio_delivered),
-        folio_delivered_at: updatedOrder.folio_delivered_at ? parseDate(updatedOrder.folio_delivered_at) : null,
-        created_at: parseDate(updatedOrder.created_at),
-        updated_at: parseDate(updatedOrder.updated_at),
+        folio_delivered_at: updatedOrder.folio_delivered_at ? parseOrderDate(updatedOrder.folio_delivered_at) : null,
+        created_at: parseOrderDate(updatedOrder.created_at),
+        updated_at: parseOrderDate(updatedOrder.updated_at),
       } as TableOrder;
 
       setPendingOrders((prev) => {
@@ -356,7 +325,6 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     });
 
     return () => {
-      unsub();
       unsubSocket();
     };
   }, [business.id]);
@@ -569,7 +537,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       const res = await rbacService.cleanupDailyOrdersApi(business.id);
       await loadBillingData();
       showStatus(
-        `Daily cleanup complete: ${res.deletedOrders} past order(s) (>24h) removed from Firebase. Monthly sales history preserved (${res.deletedSales} expired sales purged).`
+        `Daily cleanup complete: ${res.deletedOrders} past order(s) (>24h) archived from database. Monthly sales history preserved (${res.deletedSales} expired sales purged).`
       );
     } catch (err: any) {
       showStatus(err.message || 'Failed to perform daily order cleanup.', 'error');
@@ -797,7 +765,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       {/* ========================================================================= */}
       {activeSubTab === 'pos' && (
         <div className="space-y-6 animate-in fade-in duration-150">
-          {/* Firebase Database Storage Retention Banner */}
+          {/* Database Storage Retention Banner */}
           <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
             <div className="flex items-start sm:items-center gap-3">
               <div className="p-2 rounded-xl bg-emerald-100 text-emerald-800 shrink-0">
@@ -811,7 +779,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-emerald-800 mt-0.5">
-                  Live table orders and ordered item payloads are automatically deleted daily to prevent Firebase bloat. Monthly business sales records are safely preserved for the History reports.
+                  Live table orders and ordered item payloads are automatically deleted daily to keep the system responsive. Monthly business sales records are safely preserved for the History reports.
                 </p>
               </div>
             </div>
@@ -2599,33 +2567,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       setIsSubmitting(true);
       const created = await rbacService.createSaleApi(salePayload, business.id);
 
-      // Instant client-side resolution of pending bill requests for real-time Waiter Station dismissal
-      try {
-        if (selectedOrderId) {
-          await updateDoc(doc(db, 'businesses', business.id, 'service_requests', `bill-${selectedOrderId}`), {
-            status: 'RESOLVED',
-            resolved_at: new Date().toISOString(),
-            resolved_by: 'POS_CASHIER_SETTLED',
-          }).catch(() => {});
-        }
-        if (selectedTableId) {
-          const srvSnap = await getDocs(
-            query(
-              collection(db, 'businesses', business.id, 'service_requests'),
-              where('table_id', '==', selectedTableId),
-              where('status', '==', 'PENDING')
-            )
-          );
-          srvSnap.forEach((sDoc) => {
-            updateDoc(sDoc.ref, {
-              status: 'RESOLVED',
-              resolved_at: new Date().toISOString(),
-              resolved_by: 'POS_CASHIER_SETTLED',
-            }).catch(() => {});
-          });
-        }
-      } catch (srvErr) {
-        console.warn('POS service request resolve note:', srvErr);
+      // Instant server-side resolution of table waiter pings & service requests
+      if (selectedTableId) {
+        rbacService.acknowledgeTablePingApi(selectedTableId, business.id).catch(() => {});
       }
 
       onSaleCreated(created);

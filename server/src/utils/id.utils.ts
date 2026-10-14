@@ -1,5 +1,5 @@
 /**
- * Helper to produce clean, URL-safe and human-readable document IDs for Firestore
+ * Helper to produce clean, URL-safe and human-readable IDs
  */
 export function slugify(text: string): string {
   if (!text) return 'item';
@@ -20,7 +20,7 @@ export function sanitizePhoneId(phone: string): string {
 }
 
 /**
- * Generates a clean Firestore document ID for a menu item based on dish name
+ * Generates a clean ID for a menu item based on dish name
  */
 export function generateMenuDocId(dishName: string): string {
   const base = slugify(dishName) || 'menu-item';
@@ -28,7 +28,7 @@ export function generateMenuDocId(dishName: string): string {
 }
 
 /**
- * Generates a clean Firestore document ID for a user based on business name and role/email
+ * Generates a clean ID for a user based on business name and role/email
  */
 export function generateUserDocId(businessName: string, roleOrEmail?: string): string {
   const baseBiz = slugify(businessName) || 'business';
@@ -38,7 +38,7 @@ export function generateUserDocId(businessName: string, roleOrEmail?: string): s
 }
 
 /**
- * Generates a clean Firestore document ID for a menu category based on name
+ * Generates a clean ID for a menu category based on name
  */
 export function generateCategoryDocId(categoryName: string): string {
   return slugify(categoryName) || 'category';
