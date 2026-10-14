@@ -1229,4 +1229,28 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-12 by Antigravity (tab-based RBAC rewrite completed and audited across all 6 parts)*
+## 20. Pay-First Mode & Payment Confirmation Flow Fix (2026-10-14)
+
+### 20.1 Customer Screen Initial View Fix
+- **Issue**: When placing a digital order in Pay-First mode, the modal (`OrderSuccessModal.tsx`) remained on the live tracker screen instead of showing the "Pay to Confirm Order" view.
+- **Root Cause**: `viewMode` was initialized statically to `'tracker'`, and `prevOrderIdRef` was initialized to `useRef(order?.id || null)`. On initial mount, `order.id !== prevOrderIdRef.current` was `false`, skipping `setViewMode('payment')`.
+- **Fix**:
+  1. `viewMode` state initializer now returns `'payment'` if `order?.status === 'AWAITING_PAYMENT'`.
+  2. `prevOrderIdRef` initialized to `null`.
+  3. `useEffect([order])` explicitly switches to `'payment'` if `order?.status === 'AWAITING_PAYMENT'`, and transitions to `'tracker'` once payment is confirmed.
+
+### 20.2 Cashier Payment Confirmation & Session Stability Fix
+- **Issue**: After cashier clicks "Payment Confirmed" on the POS, the customer view erroneously skipped to the "Thank You for Dining with Us" session-concluded page instead of staying on the live order tracker while dishes are prepared.
+- **Root Cause**:
+  1. Server `confirmTableOrderPayment` emitted `{ id: orderId, status: 'RECEIVED', payment_status: 'PAID', sale_id: createdSale.id }` over WebSocket without `pay_first: true`.
+  2. Client `CustomerMenuPreviewPage.tsx` and `OrderSuccessModal.tsx` checked `updatedOrder.pay_first ? ... : (payment_status === 'PAID')`. Since `pay_first` was `undefined`, it fell back to regular dine-in settlement where `payment_status === 'PAID'` triggered immediate session conclusion.
+- **Fix**:
+  1. Server `confirmTableOrderPayment` now fetches and emits the full updated order including `pay_first: true`, `status: 'RECEIVED'`, `payment_status: 'PAID'`, table information, and sale reference.
+  2. Server `updateTableOrderStatus` now includes `pay_first`, `payment_status`, and `payment_method` in the returned and emitted `TableOrder`.
+  3. Client checks preserve `pay_first` with `Boolean(updatedOrder.pay_first ?? activeOrder?.pay_first)`.
+  4. For Pay-First orders, settlement (`isSettled` / `isActuallySettled`) is gated strictly on `status === 'COMPLETED'`. When payment is confirmed, the order moves to `status: 'RECEIVED'`, keeping the customer session active and transitioning the modal to the Live Tracker.
+  5. Verified with 17/17 automated test assertions in `server/test/pay_first_flow.test.ts`.
+
+---
+
+*Last updated: 2026-10-14 by Antigravity (Pay-First complete flow, initial viewMode, and session stability fixed and verified)*

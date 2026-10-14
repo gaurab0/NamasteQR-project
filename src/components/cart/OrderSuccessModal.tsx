@@ -55,7 +55,11 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   onSettled,
 }) => {
   const [liveOrder, setLiveOrder] = useState<TableOrder | null>(order);
-  const [viewMode, setViewMode] = useState<'tracker' | 'bill' | 'payment'>('tracker');
+  const [viewMode, setViewMode] = useState<'tracker' | 'bill' | 'payment'>(() => {
+    if (order?.status === 'AWAITING_PAYMENT') return 'payment';
+    if (order?.bill_requested) return 'bill';
+    return 'tracker';
+  });
   const [selectedPaymentMode, setSelectedPaymentMode] = useState<'cash' | 'qr' | 'card'>('cash');
   const [billRequested, setBillRequested] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
@@ -77,20 +81,32 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   const [promoError, setPromoError] = useState<string | null>(null);
 
   // Track previous order ID to only reset tab views when switching to a completely new order
-  const prevOrderIdRef = useRef<string | null>(order?.id || null);
+  const prevOrderIdRef = useRef<string | null>(null);
 
-  // Sync initial order and enforce tracker view unless bill was already requested
+  // Sync initial order and enforce payment view for pay-first or tracker view unless bill was already requested
   useEffect(() => {
     setLiveOrder(order);
-    if (order?.id && order.id !== prevOrderIdRef.current) {
+    if (!order) return;
+
+    if (order.status === 'AWAITING_PAYMENT') {
+      setViewMode('payment');
       prevOrderIdRef.current = order.id;
-      // When a new order or appended items arrive, ALWAYS open in tracker view unless bill was explicitly already requested
-      setViewMode(order.status === 'AWAITING_PAYMENT' ? 'payment' : (order.bill_requested ? 'bill' : 'tracker'));
-      setBillRequested(Boolean(order.bill_requested));
-      setIsPaid(order.payment_status === 'PAID' || order.status === 'COMPLETED');
-      setBillSuccessMessage(null);
-    } else if (order?.bill_requested) {
-      setBillRequested(true);
+    } else {
+      // If order is no longer awaiting payment, switch away from payment view to tracker view
+      setViewMode((curr) => (curr === 'payment' ? 'tracker' : curr));
+      if (order.id !== prevOrderIdRef.current) {
+        prevOrderIdRef.current = order.id;
+        setViewMode(order.bill_requested ? 'bill' : 'tracker');
+        setBillRequested(Boolean(order.bill_requested));
+        const isPayFirst = Boolean(order.pay_first);
+        const isActuallySettled = isPayFirst
+          ? order.status === 'COMPLETED'
+          : (order.payment_status === 'PAID' || order.status === 'COMPLETED');
+        setIsPaid(isActuallySettled);
+        setBillSuccessMessage(null);
+      } else if (order.bill_requested) {
+        setBillRequested(true);
+      }
     }
   }, [order]);
 
@@ -117,15 +133,16 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
       }
       if (data.status === 'AWAITING_PAYMENT') {
         setViewMode('payment');
-      } else if (data.status !== 'AWAITING_PAYMENT' && viewMode === 'payment') {
-        setViewMode('tracker');
+      } else {
+        setViewMode((currMode) => (currMode === 'payment' ? 'tracker' : currMode));
         if (data.status === 'CANCELLED') {
-           alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
+          alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
         }
       }
       // For pay-first, wait until the order is COMPLETED (delivered).
       // For non-pay-first, PAID or COMPLETED usually means the bill is settled.
-      const isActuallySettled = data.pay_first 
+      const isPayFirst = Boolean(data.pay_first ?? liveOrder?.pay_first ?? order.pay_first);
+      const isActuallySettled = isPayFirst 
         ? data.status === 'COMPLETED'
         : (data.payment_status === 'PAID' || data.status === 'COMPLETED');
 
@@ -138,7 +155,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     });
 
     return () => unsubscribe();
-  }, [order?.id, order?.business_id, viewMode, onSettled]);
+  }, [order?.id, order?.business_id, onSettled]);
 
   // Load configured tax settings for the business in real time
   useEffect(() => {

@@ -741,12 +741,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     }
 
     const unsubOrder = socketService.subscribeToOrders((updatedOrder) => {
-      if (activeOrder?.id && updatedOrder.id === activeOrder.id) {
-        setActiveOrder((prev) => prev ? { ...prev, ...updatedOrder } : prev);
+      const targetOrderId = activeOrder?.id || successOrderData?.id;
+      if (targetOrderId && updatedOrder.id === targetOrderId) {
+        setActiveOrder((prev) => (prev ? { ...prev, ...updatedOrder } : (updatedOrder as any)));
+        setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updatedOrder } : (updatedOrder as any)));
         if (updatedOrder.bill_requested) {
           setIsFinalBillPageOpen(true);
         }
-        const isSettled = updatedOrder.pay_first
+        const isPayFirst = Boolean(updatedOrder.pay_first ?? activeOrder?.pay_first ?? successOrderData?.pay_first);
+        const isSettled = isPayFirst
           ? updatedOrder.status === 'COMPLETED'
           : (updatedOrder.status === 'COMPLETED' ||
              updatedOrder.payment_status === 'PAID' ||
@@ -781,7 +784,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       unsubOrder();
       unsubTable();
     };
-  }, [tableParams.businessId, user?.business?.id, activeOrder?.business_id, tableParams.tableId, activeOrder?.id, tableParams.sessionId, tableParams.tableNumber]);
+  }, [tableParams.businessId, user?.business?.id, activeOrder?.business_id, tableParams.tableId, activeOrder?.id, successOrderData?.id, tableParams.sessionId, tableParams.tableNumber]);
 
   // Real-time Socket.io listener for Menu Items and Categories
   useEffect(() => {

@@ -2230,6 +2230,10 @@ export class RBACService {
       customer_phone: updated.customer_phone || '',
       order_notes: updated.order_notes || '',
       status: updated.status as OrderStatus,
+      pay_first: Boolean(updated.pay_first),
+      payment_status: (updated.payment_status as any) || null,
+      payment_method: updated.payment_method || null,
+      sale_id: updated.sale_id || null,
       ready_at: updated.ready_at ? new Date(updated.ready_at) : null,
       served_at: updated.served_at ? new Date(updated.served_at) : null,
       created_at: new Date(updated.created_at),
@@ -4174,7 +4178,19 @@ export class RBACService {
       console.warn('Prisma confirmTableOrderPayment error:', e.message);
     }
 
-    realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'RECEIVED', payment_status: 'PAID', sale_id: createdSale.id });
+    const updatedPrismaOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    realtimeEmitter.orderUpdated(businessId, {
+      ...(existingOrder as any),
+      ...(updatedPrismaOrder || {}),
+      id: orderId,
+      pay_first: true,
+      status: 'RECEIVED' as const,
+      payment_status: 'PAID' as const,
+      payment_method: paymentMethod || (existingOrder as any).payment_method || 'CASH',
+      payment_confirmed_by: cashierName,
+      payment_confirmed_at: new Date(),
+      sale_id: createdSale.id,
+    });
   }
 
   public async rejectTableOrderPayment(
@@ -4203,7 +4219,14 @@ export class RBACService {
       console.warn('Prisma rejectTableOrderPayment error:', e.message);
     }
 
-    realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'CANCELLED', payment_status: 'CANCELLED' });
+    realtimeEmitter.orderUpdated(businessId, {
+      ...(existingOrder as any),
+      id: orderId,
+      pay_first: true,
+      status: 'CANCELLED' as const,
+      payment_status: 'CANCELLED' as const,
+      payment_rejected_reason: reason || 'Payment rejected',
+    });
   }
 
   /**
