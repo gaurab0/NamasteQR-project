@@ -1290,4 +1290,25 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-14 by Antigravity (Removal of Open Waiter View from Orders section verified)*
+## 23. Resolution of Recurring Prisma Pooler Idle Connection Errors (Code 10053 / WSAECONNABORTED)
+
+- **Issue**: Terminal was periodically spammed with:
+  ```
+  Prisma Error: Error in PostgreSQL connection: Error { kind: Io, cause: Some(Os { code: 10053, kind: ConnectionAborted, message: "An established connection was aborted by the software in your host machine." }) }
+  Prisma Error: Invalid `prisma.$queryRaw()` invocation: Can't reach database server at `aws-0-ap-south-1.pooler.supabase.com:6543`
+  ```
+- **Root Cause**:
+  1. An artificial `keepAliveTimer` in `server/src/services/db.service.ts` was executing `prisma.$queryRaw`SELECT 1`` every 2 minutes.
+  2. Supabase's transaction pooler (PgBouncer on port 6543) intentionally closes idle client connections after ~60 seconds of inactivity.
+  3. On Windows host machines, an idle socket terminated by the remote pooler is reported by the Windows networking stack as code `10053` (`WSAECONNABORTED`: "An established connection was aborted by the software in your host machine").
+  4. Because 2 minutes is longer than the pooler's 60s idle timeout, every tick of `keepAliveTimer` attempted to send `SELECT 1` through a dead, aborted socket.
+  5. The Prisma error listener in `server/src/lib/prisma.ts` only filtered code `10054` (`WSAECONNRESET`), letting `10053` and the resulting `Can't reach database server` log to `console.error` every 2 minutes.
+- **Fix**:
+  1. **Removed `keepAliveTimer`**: Eliminated the unnecessary `setInterval` running `SELECT 1` in `db.service.ts`. Cloud poolers manage transaction lifecycles on demand; periodic keepalive heartbeats against transaction poolers are counter-productive.
+  2. **Filtered Benign Pooler Disconnects**: Expanded the filter in `server/src/lib/prisma.ts` to cleanly ignore transient idle socket drops (`10053`, `10054`, `10060`, `ConnectionAborted`, `ConnectionReset`, `ECONNABORTED`, `ECONNRESET`, and temporary pooler reconnection notices).
+  3. When an actual application query runs after an idle period, Prisma automatically and transparently opens a fresh connection without terminal errors or interruptions.
+  4. Verified with `npm run lint` and `auth.test.ts` & `menu_clone.test.ts`.
+
+---
+
+*Last updated: 2026-10-14 by Antigravity (Recurring Prisma pooler idle disconnect errors resolved)*
