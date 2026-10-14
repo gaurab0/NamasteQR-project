@@ -345,9 +345,32 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     };
   }, [businessId]);
 
-  // Acknowledge a pending bill request / waiter ping
+  // Acknowledge a pending bill request / waiter ping (Folio Delivered)
   const handleAcknowledgeBillRequest = async (requestId: string, orderId?: string) => {
     try {
+      // Optimistically update local state immediately so UI updates with 0 latency
+      setServiceRequests((prev) =>
+        prev.map((r) =>
+          r.id === requestId || (orderId && r.order_id === orderId)
+            ? { ...r, status: 'ATTENDED', attended_at: new Date().toISOString() }
+            : r
+        )
+      );
+
+      if (orderId) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === orderId
+              ? { ...o, bill_acknowledged: true, folio_delivered: true, folio_delivered_at: new Date() }
+              : o
+          )
+        );
+      }
+
+      // Call backend API (updates PostgreSQL via Prisma + mirrors to Firestore + emits Socket.io)
+      await rbacService.acknowledgeBillFolioApi(businessId, orderId, requestId);
+
+      // Direct Firestore write as fallback
       try {
         await updateDoc(doc(db, 'businesses', businessId, 'service_requests', requestId), {
           status: 'ATTENDED',
@@ -359,6 +382,8 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         try {
           await updateDoc(doc(db, 'businesses', businessId, 'table_orders', orderId), {
             bill_acknowledged: true,
+            folio_delivered: true,
+            folio_delivered_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           });
         } catch {}
@@ -882,7 +907,9 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
             targetOrder.status === 'COMPLETED' ||
             targetOrder.status === 'CANCELLED' ||
             Boolean((targetOrder as any).settled) ||
-            (targetOrder as any).payment_status === 'PAID';
+            (targetOrder as any).payment_status === 'PAID' ||
+            targetOrder.folio_delivered ||
+            targetOrder.bill_acknowledged;
           if (isSettled) {
             return;
           }
@@ -910,11 +937,13 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         });
       });
 
-    // 2. Process table_orders that have bill_requested: true and are not completed/cancelled/settled
+    // 2. Process table_orders that have bill_requested: true and are not yet attended/delivered/completed/settled
     orders
       .filter(
         (o) =>
           o.bill_requested &&
+          !o.bill_acknowledged &&
+          !o.folio_delivered &&
           o.status !== 'COMPLETED' &&
           o.status !== 'CANCELLED' &&
           !Boolean((o as any).settled) &&

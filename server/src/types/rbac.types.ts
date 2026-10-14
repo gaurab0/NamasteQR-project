@@ -178,6 +178,9 @@ export interface TableOrder {
   session_id?: string | null;
   bill_requested?: boolean;
   bill_requested_at?: string | Date | null;
+  bill_acknowledged?: boolean;
+  folio_delivered?: boolean;
+  folio_delivered_at?: string | Date | null;
   payment_method?: string;
   payment_status?: string;
   promo_code?: string | null;

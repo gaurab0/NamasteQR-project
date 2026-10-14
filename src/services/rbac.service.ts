@@ -1020,6 +1020,21 @@ export class ClientRBACService {
     }
   }
 
+  public async acknowledgeBillFolioApi(businessId: string, orderId?: string, requestId?: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/rbac/orders/${orderId || 'general'}/acknowledge-bill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+        credentials: 'include',
+        body: JSON.stringify({ businessId, orderId, requestId }),
+      });
+      const result = await res.json();
+      return result.success ?? false;
+    } catch {
+      return false;
+    }
+  }
+
 }
 
 export const rbacService = new ClientRBACService();

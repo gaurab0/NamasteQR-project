@@ -500,9 +500,22 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
 
             <div className="text-right">
               <span className="text-[10px] uppercase font-bold text-zinc-400 block">Status</span>
-              <span className="inline-flex items-center gap-1 font-extrabold text-amber-400 bg-amber-500/20 border border-amber-500/30 px-2.5 py-0.5 rounded-md text-xs mt-0.5">
-                <Clock className="w-3 h-3" />
-                {billRequested ? 'Bill Requested' : 'Payment Due'}
+              <span className={`inline-flex items-center gap-1 font-extrabold px-2.5 py-0.5 rounded-md text-xs mt-0.5 ${
+                liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                  ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/30'
+                  : 'text-amber-400 bg-amber-500/20 border border-amber-500/30'
+              }`}>
+                {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged ? (
+                  <>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    Folio Delivered
+                  </>
+                ) : (
+                  <>
+                    <Clock className="w-3 h-3" />
+                    {billRequested ? 'Bill Requested' : 'Payment Due'}
+                  </>
+                )}
               </span>
             </div>
           </div>
@@ -775,21 +788,38 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <strong className="text-sm font-black text-emerald-950 uppercase tracking-wide">
-                          Bill Request Dispatched
+                          {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                            ? 'Bill Folio Delivered'
+                            : 'Bill Request Dispatched'}
                         </strong>
-                        <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-200 text-emerald-900 animate-pulse">
-                          Waiter Pinged
+                        <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                          liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-emerald-200 text-emerald-900 animate-pulse'
+                        }`}>
+                          {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                            ? 'Folio Delivered'
+                            : 'Waiter Pinged'}
                         </span>
                       </div>
                       <p className="text-xs sm:text-sm text-emerald-900 font-medium leading-relaxed">
-                        {billSuccessMessage || `Service staff at the Waiter Station has been notified! A waiter is bringing your bill folio folder to Table #${liveOrder?.table_number || ''}.`}
+                        {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                          ? `Your bill check folio has been delivered to Table #${liveOrder?.table_number || ''}! You can settle payment directly with your waiter or at the cashier counter.`
+                          : billSuccessMessage || `Service staff at the Waiter Station has been notified! A waiter is bringing your bill folio folder to Table #${liveOrder?.table_number || ''}.`}
                       </p>
 
-                      
-
                       <div className="text-xs text-emerald-800 font-semibold pt-1 border-t border-emerald-200/60 flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                        <span>Table #{liveOrder?.table_number || ''} • Service staff on the way</span>
+                        <span className={`w-2 h-2 rounded-full ${
+                          liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                            ? 'bg-emerald-600'
+                            : 'bg-emerald-500 animate-ping'
+                        }`} />
+                        <span>
+                          Table #{liveOrder?.table_number || ''} •{' '}
+                          {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
+                            ? 'Folio at table • Ready for settlement'
+                            : 'Service staff on the way'}
+                        </span>
                       </div>
                     </div>
                   </div>

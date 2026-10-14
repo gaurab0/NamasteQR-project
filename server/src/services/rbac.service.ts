@@ -5122,6 +5122,122 @@ export class RBACService {
     realtimeEmitter.orderUpdated(businessId, { id: orderId, status: 'CANCELLED', payment_status: 'CANCELLED' });
   }
 
+  /**
+   * Mark a table order's bill folio as delivered to the customer, and attend any associated service request.
+   * Broadcasts to KDS, Waiter Station, and BillingPOS over Socket.io.
+   */
+  public async acknowledgeOrderBillFolio(
+    businessId: string,
+    orderId?: string,
+    requestId?: string
+  ): Promise<{ orderId?: string; requestId?: string; attended: boolean; order?: any }> {
+    const now = new Date();
+    let updatedOrderPayload: any = null;
+
+    if (orderId) {
+      try {
+        await prisma.tableOrder.updateMany({
+          where: { id: orderId, business_id: businessId },
+          data: {
+            bill_acknowledged: true,
+            folio_delivered: true,
+            folio_delivered_at: now,
+            updated_at: now,
+          },
+        });
+
+        const pOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+        if (pOrder) {
+          updatedOrderPayload = {
+            id: pOrder.id,
+            business_id: pOrder.business_id,
+            table_id: pOrder.table_id || '',
+            table_number: pOrder.table_number,
+            order_number: pOrder.order_number || undefined,
+            invoice_number: pOrder.invoice_number || undefined,
+            floor: pOrder.floor,
+            building: pOrder.building,
+            items: pOrder.items as any,
+            subtotal: Number(pOrder.subtotal),
+            tax_amount: Number(pOrder.tax_amount),
+            total_amount: Number(pOrder.total_amount),
+            currency: pOrder.currency,
+            customer_name: pOrder.customer_name || 'Guest',
+            customer_phone: pOrder.customer_phone || '',
+            order_notes: pOrder.order_notes || '',
+            status: pOrder.status as any,
+            pay_first: pOrder.pay_first,
+            bill_requested: pOrder.bill_requested,
+            bill_acknowledged: true,
+            folio_delivered: true,
+            folio_delivered_at: now,
+            payment_method: pOrder.payment_method,
+            payment_status: pOrder.payment_status,
+            promo_code: pOrder.promo_code,
+            promo_discount: Number(pOrder.promo_discount || 0),
+            taxes: pOrder.taxes as any,
+            ready_at: pOrder.ready_at,
+            served_at: pOrder.served_at,
+            created_at: pOrder.created_at,
+            updated_at: now,
+          };
+        }
+      } catch (e: any) {
+        console.warn('Prisma acknowledgeOrderBillFolio notice:', e.message);
+      }
+
+      try {
+        await updateDoc(doc(firestoreDb, 'businesses', businessId, 'table_orders', orderId), {
+          bill_acknowledged: true,
+          folio_delivered: true,
+          folio_delivered_at: now.toISOString(),
+          updated_at: now.toISOString(),
+        });
+      } catch (e: any) {}
+    }
+
+    const targetReqId = requestId || (orderId ? `bill-${orderId}` : undefined);
+    if (targetReqId) {
+      try {
+        await prisma.serviceRequest.updateMany({
+          where: { id: targetReqId, business_id: businessId },
+          data: {
+            status: 'ATTENDED',
+            resolved_at: now,
+          },
+        });
+      } catch (e: any) {}
+
+      try {
+        await updateDoc(doc(firestoreDb, 'businesses', businessId, 'service_requests', targetReqId), {
+          status: 'ATTENDED',
+          attended_at: now.toISOString(),
+          resolved_at: now.toISOString(),
+        });
+      } catch (e: any) {}
+    }
+
+    if (updatedOrderPayload) {
+      realtimeEmitter.orderUpdated(businessId, updatedOrderPayload);
+    } else if (orderId) {
+      realtimeEmitter.orderUpdated(businessId, {
+        id: orderId,
+        business_id: businessId,
+        bill_acknowledged: true,
+        folio_delivered: true,
+        folio_delivered_at: now,
+      });
+    }
+
+    return {
+      success: true,
+      orderId,
+      requestId: targetReqId,
+      attended: true,
+      order: updatedOrderPayload,
+    };
+  }
+
 }
 
 

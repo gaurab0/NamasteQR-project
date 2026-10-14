@@ -1316,6 +1316,24 @@ router.post('/orders/:id/payment-method', optionalAuthenticate, async (req: Requ
   }
 });
 
+router.post(['/orders/:id/acknowledge-bill', '/orders/:id/folio-delivered'], optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
+    const orderId = req.params.id;
+    const requestId = req.body.requestId || req.body.request_id;
+
+    if (!businessId) throw new Error("businessId required");
+
+    const result = await rbacService.acknowledgeOrderBillFolio(businessId, orderId, requestId);
+    return res.json({ success: true, data: result, message: 'Folio delivery acknowledged' });
+  } catch (err: any) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'BILL_ACKNOWLEDGE_FAILED', message: err.message }
+    });
+  }
+});
+
 // ============================================================================
 // BILLING, POS SALES & TAX CONFIGURATION
 // ============================================================================

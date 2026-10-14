@@ -53,6 +53,7 @@ import {
   ExcelSheetData 
 } from '../../utils/excelExport';
 import { rbacService } from '../../services/rbac.service';
+import { socketService } from '../../services/socket.service';
 import {
   SaleRecord,
   SaleItem,
@@ -251,6 +252,9 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           served_at: d.served_at ? parseDate(d.served_at) : null,
           bill_requested: Boolean(d.bill_requested),
           bill_requested_at: d.bill_requested_at ? parseDate(d.bill_requested_at) : null,
+          bill_acknowledged: Boolean(d.bill_acknowledged),
+          folio_delivered: Boolean(d.folio_delivered),
+          folio_delivered_at: d.folio_delivered_at ? parseDate(d.folio_delivered_at) : null,
           payment_method: d.payment_method || null,
           promo_code: d.promo_code || null,
           promo_discount: d.promo_discount || 0,
@@ -271,6 +275,14 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       });
       setPayFirstOrders(awaitingPayment);
       unsettled.sort((a, b) => {
+        const aFolio = Boolean(a.folio_delivered || (a as any).bill_acknowledged);
+        const bFolio = Boolean(b.folio_delivered || (b as any).bill_acknowledged);
+        if (aFolio && !bFolio) return -1;
+        if (!aFolio && bFolio) return 1;
+
+        if (a.bill_requested && !b.bill_requested) return -1;
+        if (!a.bill_requested && b.bill_requested) return 1;
+
         const timeA = a.created_at instanceof Date ? a.created_at.getTime() : new Date(a.created_at || 0).getTime();
         const timeB = b.created_at instanceof Date ? b.created_at.getTime() : new Date(b.created_at || 0).getTime();
         return timeB - timeA;
@@ -280,7 +292,73 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       console.warn('Live Orders listener note:', err.message);
     });
 
-    return () => unsub();
+    // Real-time Socket.io listener for instant Folio Delivered & Order updates
+    const unsubSocket = socketService.subscribeToOrders((updatedOrder: any) => {
+      if (!updatedOrder || !updatedOrder.id) return;
+      const parsedUpdatedOrder: TableOrder = {
+        ...updatedOrder,
+        bill_requested: Boolean(updatedOrder.bill_requested),
+        bill_acknowledged: Boolean(updatedOrder.bill_acknowledged),
+        folio_delivered: Boolean(updatedOrder.folio_delivered),
+        folio_delivered_at: updatedOrder.folio_delivered_at ? parseDate(updatedOrder.folio_delivered_at) : null,
+        created_at: parseDate(updatedOrder.created_at),
+        updated_at: parseDate(updatedOrder.updated_at),
+      } as TableOrder;
+
+      setPendingOrders((prev) => {
+        const isClosed =
+          parsedUpdatedOrder.status === 'COMPLETED' ||
+          parsedUpdatedOrder.status === 'CANCELLED' ||
+          Boolean((parsedUpdatedOrder as any).settled) ||
+          (parsedUpdatedOrder.pay_first && parsedUpdatedOrder.payment_status === 'PAID');
+        if (isClosed) {
+          return prev.filter((o) => o.id !== updatedOrder.id);
+        }
+        let next: TableOrder[];
+        const idx = prev.findIndex((o) => o.id === updatedOrder.id);
+        if (idx >= 0) {
+          next = [...prev];
+          next[idx] = { ...next[idx], ...parsedUpdatedOrder };
+        } else if (parsedUpdatedOrder.status !== 'AWAITING_PAYMENT') {
+          next = [parsedUpdatedOrder, ...prev];
+        } else {
+          return prev;
+        }
+
+        return next.sort((a, b) => {
+          const aFolio = Boolean(a.folio_delivered || (a as any).bill_acknowledged);
+          const bFolio = Boolean(b.folio_delivered || (b as any).bill_acknowledged);
+          if (aFolio && !bFolio) return -1;
+          if (!aFolio && bFolio) return 1;
+
+          if (a.bill_requested && !b.bill_requested) return -1;
+          if (!a.bill_requested && b.bill_requested) return 1;
+
+          const timeA = a.created_at instanceof Date ? a.created_at.getTime() : new Date(a.created_at || 0).getTime();
+          const timeB = b.created_at instanceof Date ? b.created_at.getTime() : new Date(b.created_at || 0).getTime();
+          return timeB - timeA;
+        });
+      });
+
+      if (parsedUpdatedOrder.status === 'AWAITING_PAYMENT') {
+        setPayFirstOrders((prev) => {
+          const idx = prev.findIndex((o) => o.id === updatedOrder.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...parsedUpdatedOrder };
+            return next;
+          }
+          return [...prev, parsedUpdatedOrder];
+        });
+      } else {
+        setPayFirstOrders((prev) => prev.filter((o) => o.id !== updatedOrder.id));
+      }
+    });
+
+    return () => {
+      unsub();
+      unsubSocket();
+    };
   }, [business.id]);
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
@@ -867,7 +945,13 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length > 0 && (
+                  <span className="text-xs font-black px-2.5 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 flex items-center gap-1.5 animate-pulse">
+                    <Check className="w-3.5 h-3.5 text-emerald-700" />
+                    {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length} Folio Delivered (Ready to Settle)
+                  </span>
+                )}
                 <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800">
                   {pendingOrders.length} Active Table{pendingOrders.length === 1 ? '' : 's'}
                 </span>
@@ -915,23 +999,37 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                     taxConfig,
                     flatDiscountAmount: Number(order.promo_discount) || 0,
                   }).grandTotal;
+                  const isFolioDelivered = Boolean(order.folio_delivered || (order as any).bill_acknowledged);
                   return (
                     <div
                       key={order.id}
-                      className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 hover:bg-amber-50/80 transition flex flex-col justify-between gap-3 shadow-2xs"
+                      className={`p-4 rounded-xl border transition flex flex-col justify-between gap-3 shadow-2xs ${
+                        isFolioDelivered
+                          ? 'border-emerald-400 bg-emerald-50/50 hover:bg-emerald-50/80 ring-1 ring-emerald-300'
+                          : 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/80'
+                      }`}
                     >
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-sm font-black text-zinc-900">{tableName}</span>
-                            {order.bill_requested && (
+                            {isFolioDelivered ? (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
+                                <Check className="w-2.5 h-2.5" />
+                                FOLIO DELIVERED
+                              </span>
+                            ) : order.bill_requested ? (
                               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
                                 BILL REQUESTED
                               </span>
-                            )}
+                            ) : null}
                           </div>
-                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
-                            {order.status || 'UNSETTLED'}
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                            isFolioDelivered
+                              ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                              : 'bg-amber-100 text-amber-900 border-amber-200'
+                          }`}>
+                            {isFolioDelivered ? 'READY TO SETTLE' : (order.status || 'UNSETTLED')}
                           </span>
                         </div>
                         <div className="flex items-center justify-between mt-1">
@@ -1787,7 +1885,13 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   <p className="text-xs text-zinc-400">Full-screen live overview: cancel dishes, print guest checks, and settle table tabs</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length > 0 && (
+                  <span className="text-xs font-black px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5 animate-pulse">
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length} Folio Delivered (Ready)
+                  </span>
+                )}
                 <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500 text-zinc-950">
                   {pendingOrders.length} Active Table{pendingOrders.length === 1 ? '' : 's'}
                 </span>
@@ -1819,23 +1923,37 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                     taxConfig,
                     flatDiscountAmount: Number(order.promo_discount) || 0,
                   }).grandTotal;
+                    const isFolioDelivered = Boolean(order.folio_delivered || (order as any).bill_acknowledged);
                     return (
                       <div
                         key={order.id}
-                        className="p-4 rounded-xl border border-amber-200 bg-white hover:border-amber-400 transition flex flex-col justify-between gap-3 shadow-sm"
+                        className={`p-4 rounded-xl border transition flex flex-col justify-between gap-3 shadow-sm ${
+                          isFolioDelivered
+                            ? 'border-emerald-400 bg-emerald-50/40 hover:border-emerald-500 ring-1 ring-emerald-300'
+                            : 'border-amber-200 bg-white hover:border-amber-400'
+                        }`}
                       >
                         <div>
                           <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="text-sm font-black text-zinc-900">{tableName}</span>
-                              {order.bill_requested && (
+                              {isFolioDelivered ? (
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
+                                  <Check className="w-2.5 h-2.5" />
+                                  FOLIO DELIVERED
+                                </span>
+                              ) : order.bill_requested ? (
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
                                   BILL REQUESTED
                                 </span>
-                              )}
+                              ) : null}
                             </div>
-                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
-                              {order.status || 'UNSETTLED'}
+                            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                              isFolioDelivered
+                                ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                : 'bg-amber-100 text-amber-900 border-amber-200'
+                            }`}>
+                              {isFolioDelivered ? 'READY TO SETTLE' : (order.status || 'UNSETTLED')}
                             </span>
                           </div>
                           <div className="flex items-center justify-between mt-1">

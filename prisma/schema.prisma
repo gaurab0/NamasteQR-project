@@ -184,6 +184,9 @@ model TableOrder {
   session_id              String?
   bill_requested          Boolean   @default(false)
   bill_requested_at       DateTime?
+  bill_acknowledged       Boolean   @default(false)
+  folio_delivered         Boolean   @default(false)
+  folio_delivered_at      DateTime?
   payment_method          String?
   payment_status          String?
   promo_code              String?
