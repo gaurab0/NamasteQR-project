@@ -141,7 +141,7 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
       // Footer branding
       ctx.fillStyle = '#a1a1aa';
       ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText('Powered by ServeFlow', 300, 720);
+      ctx.fillText('Powered by NamasteQR', 300, 720);
 
       // Download
       const link = document.createElement('a');

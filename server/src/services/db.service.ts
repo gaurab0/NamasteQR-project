@@ -121,7 +121,7 @@ class PostgresDatabaseStore {
           id: d.id,
           user_id: d.user_id || d.account_name,
           business_id: d.business_id || d.account_name,
-          account_name: d.account_name || 'ServeFlow Business',
+          account_name: d.account_name || 'NamasteQR Business',
           email: d.email || undefined,
           status: (d.status as any) || 'OFFLINE',
           event_type: d.event_type as any,

@@ -38,7 +38,7 @@ export class MetaWhatsAppProvider implements IWhatsAppService {
           type: 'text',
           text: {
             preview_url: false,
-            body: `Your ServeFlow verification code is: *${otp}*. Valid for 5 minutes. Please do not share this code with anyone.`,
+            body: `Your NamasteQR verification code is: *${otp}*. Valid for 5 minutes. Please do not share this code with anyone.`,
           },
         },
         {
@@ -103,9 +103,9 @@ export class TwilioWhatsAppProvider implements IWhatsAppService {
 
       if (this.contentSid) {
         params.append('ContentSid', this.contentSid);
-        params.append('ContentVariables', JSON.stringify({ '1': otp, '2': 'ServeFlow' }));
+        params.append('ContentVariables', JSON.stringify({ '1': otp, '2': 'NamasteQR' }));
       } else {
-        params.append('Body', `Your ServeFlow verification code is: ${otp}. Valid for 5 minutes.`);
+        params.append('Body', `Your NamasteQR verification code is: ${otp}. Valid for 5 minutes.`);
       }
 
       const response = await axios.post(url, params.toString(), {

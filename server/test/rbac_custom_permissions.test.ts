@@ -15,7 +15,7 @@ import {
 
 async function runTests() {
   console.log('====================================================');
-  console.log('🧪 SERVEFLOW TAB-BASED RBAC TEST RUNNER (PART 1)');
+  console.log('🧪 NAMASTEQR TAB-BASED RBAC TEST RUNNER (PART 1)');
   console.log('====================================================\n');
 
   let passed = 0;

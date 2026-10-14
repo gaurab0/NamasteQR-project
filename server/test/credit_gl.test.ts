@@ -10,7 +10,7 @@ import { firestoreDb, collection, doc, getDocs, getDoc, deleteDoc } from '../src
 import { buildSalesWorkbookData } from '../../src/utils/excelExport';
 
 const BIZ = `test-credit-gl-${Date.now()}`;
-const user = { id: 'tester', email: 'tester@serveflow.app', role: 'OWNER' };
+const user = { id: 'tester', email: 'tester@namasteqr.com', role: 'OWNER' };
 let passed = 0;
 let failed = 0;
 

@@ -9,7 +9,7 @@ import { config } from '../src/config/env';
 
 // Standalone automated test runner that can run via `npm test`
 async function runTests() {
-  console.log('🧪 Starting ServeFlow Authentication Test Suite...\n');
+  console.log('🧪 Starting NamasteQR Authentication Test Suite...\n');
   let passed = 0;
   let failed = 0;
 

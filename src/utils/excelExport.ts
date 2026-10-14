@@ -406,7 +406,7 @@ export function buildSalesWorkbookData(
 export function exportSheetsToExcel(
   sheets: ExcelSheetData[],
   filenamePrefix = 'Sales_GL_Register',
-  businessName = 'ServeFlow'
+  businessName = 'NamasteQR'
 ): void {
   if (!sheets || sheets.length === 0) {
     throw new Error('No sheets data provided for Excel export');
@@ -431,7 +431,7 @@ export function exportSheetsToExcel(
   }
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const sanitizedBusiness = (businessName || 'ServeFlow').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const sanitizedBusiness = (businessName || 'NamasteQR').replace(/[^a-zA-Z0-9_-]/g, '_');
   const fullFilename = `${sanitizedBusiness}_${filenamePrefix}_${dateStr}.xlsx`;
 
   XLSX.writeFile(workbook, fullFilename);

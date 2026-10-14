@@ -168,14 +168,14 @@ const guestContexts = new WeakSet<object>();
 
 /** Context for trusted server-internal operations (e.g. creating a sale from a confirmed order). */
 export function createSystemContext(): { id: string; role: string; email: string } {
-  const ctx = Object.freeze({ id: 'system', role: 'SYSTEM', email: 'system@serveflow.local' });
+  const ctx = Object.freeze({ id: 'system', role: 'SYSTEM', email: 'system@namasteqr.local' });
   systemContexts.add(ctx);
   return ctx;
 }
 
 /** Context for unauthenticated customers (QR menu). Public reads only. */
 export function createGuestContext(): { id: string; role: string; email: string } {
-  const ctx = Object.freeze({ id: 'public-guest', role: 'GUEST', email: 'guest@serveflow.app' });
+  const ctx = Object.freeze({ id: 'public-guest', role: 'GUEST', email: 'guest@namasteqr.com' });
   guestContexts.add(ctx);
   return ctx;
 }

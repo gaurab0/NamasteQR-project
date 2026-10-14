@@ -229,7 +229,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   const businessId = business?.id || user?.business?.id || 'default-biz';
   const [businessProfile, setBusinessProfile] = useState<Business>(business as Business);
   const activeBusiness = businessProfile || business || user?.business;
-  const businessName = business?.name || user?.business?.name || 'ServeFlow Business';
+  const businessName = business?.name || user?.business?.name || 'NamasteQR Business';
   const phoneE164 = business?.phone || user?.phone?.e164 || '';
   const isOwnerOrAdmin = !isViewOnly;
   const canCreateMenu = !isViewOnly;

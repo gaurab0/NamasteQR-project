@@ -1,5 +1,5 @@
 import React from 'react';
-import { UtensilsCrossed } from 'lucide-react';
+import namasteQrIcon from '../../assets/namasteqr-icon.png';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg';
@@ -16,39 +16,34 @@ export const Logo: React.FC<LogoProps> = ({
   dark = false,
   onClick,
 }) => {
-  const iconSize = size === 'sm' ? 'w-4 h-4' : size === 'lg' ? 'w-6 h-6' : 'w-5 h-5';
-  const containerSize = size === 'sm' ? 'p-1.5 rounded-lg' : size === 'lg' ? 'p-2.5 rounded-2xl' : 'p-2 rounded-xl';
+  const iconSize = size === 'sm' ? 'w-7 h-7' : size === 'lg' ? 'w-11 h-11' : 'w-9 h-9';
   const titleSize = size === 'sm' ? 'text-lg' : size === 'lg' ? 'text-2xl' : 'text-xl';
 
   return (
     <div
-      id="serveflow-brand-logo"
+      id="namasteqr-brand-logo"
       onClick={onClick}
       className={`flex items-center gap-2.5 select-none ${onClick ? 'cursor-pointer' : ''} ${className}`}
     >
-      <div
-        className={`flex items-center justify-center ${containerSize} transition-transform ${
-          dark
-            ? 'bg-amber-500 text-zinc-950 shadow-sm ring-1 ring-amber-400/40'
-            : 'bg-amber-600 text-white shadow-sm ring-1 ring-amber-500/30'
-        }`}
-      >
-        <UtensilsCrossed className={iconSize} />
-      </div>
+      <img
+        src={namasteQrIcon}
+        alt="NamasteQR"
+        className={`${iconSize} object-contain shrink-0 transition-transform`}
+      />
       <div className="flex flex-col">
         <div className="flex items-center gap-2 leading-none">
           <span
-            className={`font-extrabold tracking-tight ${
-              dark ? 'text-white' : 'text-zinc-900'
+            className={`font-black tracking-tight ${
+              dark ? 'text-white' : 'text-zinc-950'
             } ${titleSize}`}
           >
-            ServeFlow
+            Namaste<span className="text-blue-600">QR</span>
           </span>
           <span
-            className={`inline-block px-1.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase rounded-full ${
+            className={`inline-block px-1.5 py-0.5 text-[10px] font-bold tracking-wider uppercase rounded-full ${
               dark
-                ? 'text-amber-300 bg-amber-400/10 border border-amber-400/20'
-                : 'text-amber-800 bg-amber-50 border border-amber-200'
+                ? 'text-blue-300 bg-blue-500/20 border border-blue-400/30'
+                : 'text-blue-700 bg-blue-50 border border-blue-200'
             }`}
           >
             Portal
@@ -56,7 +51,7 @@ export const Logo: React.FC<LogoProps> = ({
         </div>
         {showSubtitle && (
           <span
-            className={`text-xs font-medium ${
+            className={`text-xs font-semibold ${
               dark ? 'text-zinc-400' : 'text-zinc-500'
             }`}
           >

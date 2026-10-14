@@ -1311,4 +1311,38 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-14 by Antigravity (Recurring Prisma pooler idle disconnect errors resolved)*
+## 24. Brand Rebranding to "NamasteQR" & Official Logo Integration
+
+- **Objective**: Fully migrate application branding from "ServeFlow" to "NamasteQR", including logo iconography, browser favicons, user-facing interfaces, receipt engines, email templates, WhatsApp communications, and audit trails.
+- **Logo Processing**:
+  - Cleaned user-provided brand asset (`media_1791984571994_0a94c512.jpg`) using Pillow: wiped screenshot artifacts (gallery heart icon) seamlessly matching background colors.
+  - Generated high-resolution transparent PNGs and ICO files:
+    - `src/assets/namasteqr-logo.png` & `public/namasteqr-logo.png` (full horizontal brand lockup).
+    - `src/assets/namasteqr-icon.png` & `public/namasteqr-icon.png` (circular emblem with plate and crossed cutlery).
+    - `public/favicon.ico` (multi-size browser tab icon: 16x16, 32x32, 48x48, 64x64).
+    - `src/vite-env.d.ts` (ambient module declarations for image imports in TypeScript/Vite).
+- **Core UI Updates**:
+  - `src/components/ui/Logo.tsx`: Replaced generic icon with official NamasteQR emblem, updated typography to "NamasteQR" with royal blue accent on "QR" matching the brand palette.
+  - `src/components/layout/Sidebar.tsx`: Integrated NamasteQR logo for expanded state and circular icon for collapsed rail navigation.
+  - `index.html`: Updated page title to "NamasteQR - Restaurant & Hotel Management Portal", favicon links, and OpenGraph metadata.
+  - `src/App.tsx`: Updated session restoration splash text to "Restoring NamasteQR Session...".
+  - `src/components/layout/Navbar.tsx` & `src/components/layout/Footer.tsx`: Updated brand links, support email (`support@namasteqr.com`), and copyright notices to "NamasteQR Inc.".
+  - `src/components/billing/BillingPOS.tsx`: Updated receipt footer engine branding to "Powered by NamasteQR Restaurant POS Engine".
+  - `src/components/tables/TableQrCardModal.tsx`: Updated table QR printable card footer to "Powered by NamasteQR".
+  - `src/pages/CustomerMenuPreviewPage.tsx`: Updated digital guest menu footer to "NamasteQR Hospitality • Real-Time Dining System".
+- **Backend & Communication Updates**:
+  - `server/src/app.ts`: Health check service name updated to "NamasteQR Core API".
+  - `server/src/config/env.ts` & `.env` / `.env.example`: Updated fallback JWT secrets and `EMAIL_FROM` sender to "NamasteQR Support" / `no-reply@namasteqr.com`.
+  - `server/src/services/email.service.ts`: Updated registration OTP and password reset email subjects, HTML header lockups, and footer copyrights.
+  - `server/src/services/whatsapp.service.ts`: Updated Meta and Twilio OTP templates to reference NamasteQR.
+  - `server/src/services/audit.service.ts` & `server/src/services/db.service.ts`: Updated fallback audit user-agents and account names to "NamasteQR Web Client" / "NamasteQR Business".
+  - `metadata.json` & `README.md`: Updated application display title and documentation.
+- **Verification**:
+  - `npm run lint` (`tsc --noEmit`): PASSED with 0 errors.
+  - `npm run build` (Vite + esbuild bundle): PASSED with 0 errors (`dist/server.cjs` and client bundles generated).
+  - `server/test/auth.test.ts`: PASSED (6 passed, 0 failed).
+  - `server/test/rbac_security_audit.test.ts`: PASSED (18 passed, 0 failed).
+
+---
+
+*Last updated: 2026-10-14 by Antigravity (NamasteQR brand migration and logo integration complete)*

@@ -18,7 +18,7 @@ import {
 import { TabPermissionId, AppRole } from '../src/types/rbac.types';
 
 console.log('\n====================================================');
-console.log('🛡️  SERVEFLOW PART 6 — RBAC SECURITY & AUDIT SUITE');
+console.log('🛡️  NAMASTEQR PART 6 — RBAC SECURITY & AUDIT SUITE');
 console.log('====================================================\n');
 
 let passed = 0;

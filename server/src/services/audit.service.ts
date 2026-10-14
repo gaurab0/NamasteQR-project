@@ -20,7 +20,7 @@ export class AuditService {
         ipStr = ipStr.split(',')[0].trim();
       }
       const ipAddress = ipStr.replace('::ffff:', '').trim().slice(0, 45);
-      const rawUserAgent = data.req?.headers['user-agent'] || 'ServeFlow Web Client';
+      const rawUserAgent = data.req?.headers['user-agent'] || 'NamasteQR Web Client';
       const userAgent = (Array.isArray(rawUserAgent) ? rawUserAgent[0] : rawUserAgent.toString()).slice(0, 255);
 
       await db.upsertAccountAuditLog({
@@ -53,7 +53,7 @@ export class AuditService {
 
       const user = await db.findUserById(data.userId);
       const business = user?.business_id ? await db.findBusinessById(user.business_id) : null;
-      const accountName = data.accountName || business?.name || user?.email || 'ServeFlow Account';
+      const accountName = data.accountName || business?.name || user?.email || 'NamasteQR Account';
       const email = data.email || user?.email || null;
       
       let status = data.status;

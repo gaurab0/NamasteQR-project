@@ -108,7 +108,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
   return (
     <AuthLayout
       title="Create your business account"
-      subtitle="Join restaurants and hotels using ServeFlow for modern order management."
+      subtitle="Join restaurants and hotels using NamasteQR for modern order management."
       onNavigate={onNavigate}
     >
       {serverError && (

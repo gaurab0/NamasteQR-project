@@ -99,7 +99,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute }) => {
                   rbacService.setCurrentStaffSession(session);
                   setIsRoleModalOpen(false);
                 }}
-                businessName={user?.business?.name || 'ServeFlow'}
+                businessName={user?.business?.name || 'NamasteQR'}
                 businessId={user?.business?.id || ''}
                 businessOwnerEmail={user?.email}
               />

@@ -300,7 +300,7 @@ export const StaffRoleLoginModal: React.FC<StaffRoleLoginModalProps> = ({
                     id="input-staff-email"
                     type="text"
                     required
-                    placeholder="e.g., owner@serveflow.app"
+                    placeholder="e.g., owner@namasteqr.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-white border border-zinc-300 rounded-lg text-xs font-medium text-zinc-900 focus:outline-hidden focus:ring-2 focus:ring-amber-500"

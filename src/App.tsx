@@ -103,7 +103,7 @@ function AppContent() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 text-zinc-900">
         <Loader2 className="w-7 h-7 animate-spin text-amber-600 mb-3" />
-        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Restoring ServeFlow Session...</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Restoring NamasteQR Session...</p>
       </div>
     );
   }

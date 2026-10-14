@@ -37,7 +37,7 @@ export function createApp() {
   app.get('/api/health', (req, res) => {
     res.json({ 
       status: 'ok', 
-      service: 'ServeFlow Core Auth API', 
+      service: 'NamasteQR Core API', 
       version: '1.0.0', 
       env: config.nodeEnv,
       timestamp: new Date().toISOString() 

@@ -1225,7 +1225,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
         {/* Subtle Footer */}
         <footer className="relative z-10 text-center py-4 text-[11px] text-zinc-400 dark:text-zinc-500">
-          ServeFlow Hospitality ? Real-Time Dining System
+          NamasteQR Hospitality • Real-Time Dining System
         </footer>
       </div>
     );

@@ -57,10 +57,10 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <div>
               <h3 className="text-sm font-bold uppercase tracking-wider text-amber-400 mb-2 flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                About ServeFlow
+                About NamasteQR
               </h3>
               <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-                ServeFlow is the modern operating system engineered exclusively for the hospitality sector. We empower fine dining restaurants, luxury hotels, artisan cafés, and multi-venue groups with cryptographically verified email authentication, relational kitchen architecture, and contactless digital dining operations.
+                NamasteQR is the modern operating system engineered exclusively for the hospitality sector. We empower fine dining restaurants, luxury hotels, artisan cafés, and multi-venue groups with cryptographically verified email authentication, relational kitchen architecture, and contactless digital dining operations.
               </p>
             </div>
 
@@ -180,8 +180,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                 <Mail className="w-4 h-4 text-amber-400 shrink-0" />
                 <div>
                   <span className="text-zinc-500 block text-[11px]">Direct Support & Inquiries</span>
-                  <a href="mailto:support@serveflow.io" className="font-mono text-white hover:text-amber-400 transition-colors">
-                    support@serveflow.io
+                  <a href="mailto:support@namasteqr.com" className="font-mono text-white hover:text-amber-400 transition-colors">
+                    support@namasteqr.com
                   </a>
                 </div>
               </div>
@@ -268,7 +268,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
 
         {/* Bottom Bar: Copyright & Compliance */}
         <div className="mt-12 pt-8 border-t border-zinc-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
-          <p>© 2026 ServeFlow Inc. Restaurant & Hospitality Operating System. All rights reserved.</p>
+          <p>© 2026 NamasteQR Inc. Restaurant & Hospitality Operating System. All rights reserved.</p>
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-1.5 text-zinc-400">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />

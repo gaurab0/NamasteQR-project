@@ -28,7 +28,7 @@ async function startServer() {
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 ServeFlow Server running on http://0.0.0.0:${PORT}`);
+    console.log(`🚀 NamasteQR Server running on http://0.0.0.0:${PORT}`);
   });
 }
 

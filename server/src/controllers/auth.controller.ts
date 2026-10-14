@@ -419,7 +419,7 @@ export class AuthController {
    */
   async logout(req: AuthenticatedRequest, res: Response) {
     const userId = req.user?.id || req.body?.userId || null;
-    const accountName = req.user?.business?.name || req.body?.accountName || req.user?.email || req.body?.email || 'ServeFlow Account';
+    const accountName = req.user?.business?.name || req.body?.accountName || req.user?.email || req.body?.email || 'NamasteQR Account';
     const email = req.user?.email || req.body?.email || null;
 
     if (userId || email) {

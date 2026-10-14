@@ -113,7 +113,7 @@ async function runPayFirstFlowTest() {
     const servedOrder = await rbacService.updateTableOrderStatus(testBizId, order.id, 'SERVED', {
       id: 'staff-1',
       role: 'WAITER',
-      email: 'waiter@serveflow.app',
+      email: 'waiter@namasteqr.com',
     });
 
     assert(servedOrder.status === 'COMPLETED', 'Pay-first order auto-completes to COMPLETED when served');

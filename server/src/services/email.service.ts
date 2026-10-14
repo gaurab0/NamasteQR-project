@@ -39,11 +39,11 @@ export class EmailService {
    */
   async sendVerificationOTP(email: string, otp: string, businessName?: string): Promise<{ success: boolean; messageId?: string }> {
     const formattedEmail = email.toLowerCase().trim();
-    const subject = `Your ServeFlow Verification Code: ${otp}`;
+    const subject = `Your NamasteQR Verification Code: ${otp}`;
     const htmlBody = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 28px 24px; background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 12px;">
         <div style="margin-bottom: 24px; border-bottom: 1px solid #f4f4f5; padding-bottom: 16px;">
-          <h2 style="margin: 0; color: #18181b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">ServeFlow</h2>
+          <h2 style="margin: 0; color: #18181b; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">NamasteQR</h2>
           <p style="margin: 4px 0 0 0; color: #71717a; font-size: 13px;">Business Authentication</p>
         </div>
         
@@ -68,7 +68,7 @@ export class EmailService {
         </p>
         
         <div style="margin-top: 28px; padding-top: 16px; border-top: 1px solid #f4f4f5; text-align: center; color: #a1a1aa; font-size: 11px;">
-          &copy; ${new Date().getFullYear()} ServeFlow Platform. All rights reserved.
+          &copy; ${new Date().getFullYear()} NamasteQR Platform. All rights reserved.
         </div>
       </div>
     `;
@@ -82,13 +82,13 @@ export class EmailService {
 
     if (this.transporter && this.isTransporterReady) {
       try {
-        const fromAddress = config.email.from || `"ServeFlow" <${config.email.user}>`;
+        const fromAddress = config.email.from || `"NamasteQR" <${config.email.user}>`;
         const info = await this.transporter.sendMail({
           from: fromAddress,
           to: formattedEmail,
           replyTo: config.email.user,
           subject,
-          text: `Your ServeFlow verification code is: ${otp}. This code is valid for ${config.otpExpiryMinutes} minutes. If you did not request this, please ignore this email.`,
+          text: `Your NamasteQR verification code is: ${otp}. This code is valid for ${config.otpExpiryMinutes} minutes. If you did not request this, please ignore this email.`,
           html: htmlBody,
           headers: {
             'X-Priority': '1 (Highest)',
@@ -142,12 +142,12 @@ export class EmailService {
         await this.transporter.sendMail({
           from: config.email.from,
           to: email,
-          subject: 'Reset your ServeFlow account password',
+          subject: 'Reset your NamasteQR account password',
           text: `Please use the following link to reset your password: ${resetUrl}`,
           html: `
             <div style="font-family: sans-serif; max-width: 500px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px;">
               <h2 style="color: #18181b;">Reset Your Password</h2>
-              <p style="color: #52525b;">Click the button below to choose a new password for your ServeFlow account:</p>
+              <p style="color: #52525b;">Click the button below to choose a new password for your NamasteQR account:</p>
               <div style="margin: 24px 0;">
                 <a href="${resetUrl}" style="background-color: #d97706; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;">
                   Reset Password

@@ -3315,7 +3315,7 @@ const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
             <p className="font-semibold">
               {taxConfig?.receipt_footer_note || 'Thank you for your visit! Please dine with us again.'}
             </p>
-            <p className="text-[9px] text-zinc-400">Powered by ServeFlow Restaurant POS Engine</p>
+            <p className="text-[9px] text-zinc-400">Powered by NamasteQR Restaurant POS Engine</p>
           </div>
         </div>
       </div>

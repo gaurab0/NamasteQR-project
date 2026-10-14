@@ -1408,7 +1408,7 @@ export class RBACService {
 
     auditService.log({
       userId: 'customer-bill',
-      email: 'guest@serveflow.app',
+      email: 'guest@namasteqr.com',
       businessId,
       eventType: 'TABLE_STATUS_RESET_ACTIVE',
       status: 'ONLINE',
@@ -1500,7 +1500,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'manager',
-      email: user?.email || 'manager@serveflow.app',
+      email: user?.email || 'manager@namasteqr.com',
       businessId,
       eventType: 'TABLE_SESSION_CLEARED_BY_STAFF',
       status: 'ONLINE',
@@ -1697,7 +1697,7 @@ export class RBACService {
 
     auditService.log({
       userId: `customer-${sessionId}`,
-      email: isHost ? 'host@serveflow.app' : 'guest-viewer@serveflow.app',
+      email: isHost ? 'host@namasteqr.com' : 'guest-viewer@namasteqr.com',
       businessId,
       eventType: isHost ? 'QR_TABLE_SCANNED_HOST' : 'QR_TABLE_SCANNED_GUEST',
       status: 'ONLINE',
@@ -1984,7 +1984,7 @@ export class RBACService {
 
       auditService.log({
         userId: `order-${updatedOrder.customer_name}`,
-        email: 'guest@serveflow.app',
+        email: 'guest@namasteqr.com',
         eventType: 'DIGITAL_ORDER_ITEMS_APPENDED',
         status: 'ONLINE',
       });
@@ -2095,7 +2095,7 @@ export class RBACService {
 
     auditService.log({
       userId: `order-${order.customer_name}`,
-      email: 'guest@serveflow.app',
+      email: 'guest@namasteqr.com',
       eventType: 'DIGITAL_ORDER_PLACED',
       status: 'ONLINE',
     });
@@ -2233,7 +2233,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'staff',
-      email: user?.email || 'staff@serveflow.app',
+      email: user?.email || 'staff@namasteqr.com',
       businessId,
       eventType: 'ORDER_STATUS_UPDATED',
       status: `STATUS_${nextStatus}`,
@@ -2400,7 +2400,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'staff',
-      email: user?.email || 'staff@serveflow.app',
+      email: user?.email || 'staff@namasteqr.com',
       businessId,
       eventType: 'ORDER_ITEM_STATUS_UPDATED',
       status: `ITEM_${targetItem.name}_${newStatus}`,
@@ -2866,7 +2866,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'admin',
-      email: user?.email || 'admin@serveflow.app',
+      email: user?.email || 'admin@namasteqr.com',
       businessId,
       eventType: 'TAX_CONFIG_UPDATED',
       status: updated.tax_enabled ? 'TAX_ENABLED' : 'TAX_DISABLED',
@@ -3193,7 +3193,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'owner',
-      email: user?.email || 'owner@serveflow.app',
+      email: user?.email || 'owner@namasteqr.com',
       businessId,
       eventType: 'GL_ACCOUNT_CREATED',
       status: `ACC_${accNumber}_${accName}`,
@@ -3274,7 +3274,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'owner',
-      email: user?.email || 'owner@serveflow.app',
+      email: user?.email || 'owner@namasteqr.com',
       businessId,
       eventType: 'GL_ACCOUNT_UPDATED',
       status: `ACC_${updatedAccount.account_number}_${updatedAccount.account_name}`,
@@ -3303,7 +3303,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'owner',
-      email: user?.email || 'owner@serveflow.app',
+      email: user?.email || 'owner@namasteqr.com',
       businessId,
       eventType: 'GL_ACCOUNT_DELETED',
       status: `ACC_ID_${accountId}`,
@@ -3359,7 +3359,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'owner',
-      email: user?.email || 'owner@serveflow.app',
+      email: user?.email || 'owner@namasteqr.com',
       businessId,
       eventType: 'GL_ACCOUNTS_RESET_DEFAULT',
       status: `RESET_COUNT_${defaults.length}`,
@@ -3761,7 +3761,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'staff',
-      email: user?.email || 'staff@serveflow.app',
+      email: user?.email || 'staff@namasteqr.com',
       businessId,
       eventType: 'SALE_RECORD_CREATED',
       status: `INVOICE_${invoiceNumber}_TOTAL_${newSale.total_amount}`,
@@ -3786,7 +3786,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'admin',
-      email: user?.email || 'admin@serveflow.app',
+      email: user?.email || 'admin@namasteqr.com',
       businessId,
       eventType: 'SALE_RECORD_DELETED',
       status: `DELETED_${saleId}`,
@@ -3813,7 +3813,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'admin',
-      email: user?.email || 'admin@serveflow.app',
+      email: user?.email || 'admin@namasteqr.com',
       businessId,
       eventType: 'SALES_HISTORY_DELETED_BY_DATE',
       status: `DELETED_DATE_${dateString}_COUNT_${prismaCount}`,
@@ -3838,7 +3838,7 @@ export class RBACService {
 
     auditService.log({
       userId: user?.id || 'admin',
-      email: user?.email || 'admin@serveflow.app',
+      email: user?.email || 'admin@namasteqr.com',
       businessId,
       eventType: 'ALL_SALES_HISTORY_CLEARED',
       status: `CLEARED_ALL_COUNT_${prismaCount}`,
@@ -3917,7 +3917,7 @@ export class RBACService {
     if (totalDeletedOrders > 0 || totalDeletedSales > 0) {
       auditService.log({
         userId: 'system-cron',
-        email: 'system@serveflow.app',
+        email: 'system@namasteqr.com',
         businessId: businessId || 'all',
         eventType: 'DAILY_STORAGE_CLEANUP',
         status: `DELETED_ORDERS_${totalDeletedOrders}_DELETED_SALES_${totalDeletedSales}`,
@@ -3947,7 +3947,7 @@ export class RBACService {
 
     auditService.log({
       userId: 'staff',
-      email: 'staff@serveflow.app',
+      email: 'staff@namasteqr.com',
       businessId,
       eventType: 'PURGE_COMPLETED_ORDERS',
       status: `PURGED_${deletedCount}`,

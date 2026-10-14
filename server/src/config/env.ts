@@ -8,7 +8,7 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   databaseUrl: process.env.DATABASE_URL || '',
-  jwtSecret: process.env.JWT_SECRET || 'serveflow_default_secure_jwt_secret_token_2026',
+  jwtSecret: process.env.JWT_SECRET || 'namasteqr_default_secure_jwt_secret_token_2026',
   sessionExpiryDays: parseInt(process.env.SESSION_EXPIRY_DAYS || '7', 10),
   bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
   
@@ -41,6 +41,6 @@ export const config = {
     port: parseInt(process.env.EMAIL_PORT || '2525', 10),
     user: process.env.EMAIL_USER || '',
     password: process.env.EMAIL_PASSWORD || '',
-    from: process.env.EMAIL_FROM || 'no-reply@serveflow.app',
+    from: process.env.EMAIL_FROM || 'no-reply@namasteqr.com',
   }
 };

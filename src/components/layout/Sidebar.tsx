@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import namasteQrIcon from '../../assets/namasteqr-icon.png';
 import { 
   LayoutDashboard,
   ClipboardList,
@@ -65,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [unreadNotifications, setUnreadNotifications] = useState(1);
 
   const business = activeBusiness || user?.business;
-  const businessName = business?.name || 'ServeFlow Venue';
+  const businessName = business?.name || 'NamasteQR Venue';
   const currentUserName = staffSession?.name || user?.name || user?.email?.split('@')[0] || 'Staff';
   const userRole = staffSession?.role || user?.role || 'OWNER';
 
@@ -155,23 +156,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex items-center justify-between px-4 h-16 border-b border-zinc-100">
         {!isCollapsed ? (
           <div className="flex items-center gap-2.5 overflow-hidden cursor-pointer" onClick={() => onSelectTab('overview')}>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 via-orange-500 to-amber-500 flex items-center justify-center text-white font-black text-lg shadow-sm shrink-0">
-              S
-            </div>
+            <img
+              src={namasteQrIcon}
+              alt="NamasteQR"
+              className="w-9 h-9 object-contain shrink-0"
+            />
             <div className="flex flex-col">
-              <span className="font-extrabold text-base tracking-tight text-zinc-950 flex items-center gap-1">
-                Serve<span className="text-amber-600">Flow</span>
+              <span className="font-black text-base tracking-tight text-zinc-950 flex items-center gap-0.5">
+                Namaste<span className="text-blue-600">QR</span>
               </span>
-              <span className="text-[10px] font-semibold text-zinc-400 -mt-1 tracking-wider uppercase">
+              <span className="text-[10px] font-semibold text-zinc-400 -mt-0.5 tracking-wider uppercase">
                 Restaurant POS
               </span>
             </div>
           </div>
         ) : (
-          <div className="mx-auto cursor-pointer" onClick={() => onSelectTab('overview')} title="ServeFlow">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white font-black text-lg shadow-sm">
-              S
-            </div>
+          <div className="mx-auto cursor-pointer" onClick={() => onSelectTab('overview')} title="NamasteQR">
+            <img
+              src={namasteQrIcon}
+              alt="NamasteQR"
+              className="w-8 h-8 object-contain"
+            />
           </div>
         )}
 

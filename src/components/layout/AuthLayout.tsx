@@ -82,7 +82,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
         </div>
 
         <div className="relative z-10 flex items-center justify-between text-xs text-zinc-500 pt-6 border-t border-zinc-800/80">
-          <span>© 2026 ServeFlow Inc.</span>
+          <span>© 2026 NamasteQR Inc.</span>
           <span>Security Guaranteed</span>
         </div>
       </div>

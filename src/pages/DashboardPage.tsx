@@ -92,7 +92,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   // Business Profile Configuration State
   const [isEditingBusiness, setIsEditingBusiness] = useState(false);
-  const businessName = user?.business?.name || 'ServeFlow Business';
+  const businessName = user?.business?.name || 'NamasteQR Business';
   const businessId = user?.business?.id || user?.id || 'default-business';
   const businessType = user?.business?.type || 'RESTAURANT';
   const phoneE164 = user?.business?.phone || user?.phone?.e164 || '';
@@ -827,7 +827,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                           Business Display Name
                         </label>
                         <div className="text-base font-extrabold text-zinc-900 mt-1">
-                          {user.business?.name || 'ServeFlow Business'}
+                          {user.business?.name || 'NamasteQR Business'}
                         </div>
                       </div>
 

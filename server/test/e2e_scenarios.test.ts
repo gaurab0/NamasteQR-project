@@ -7,7 +7,7 @@ const API_BASE = 'http://localhost:3000/api';
 
 async function runAllScenarios() {
   console.log('====================================================');
-  console.log('🧪 SERVEFLOW AUTOMATED SCENARIO TEST RUNNER');
+  console.log('🧪 NAMASTEQR AUTOMATED SCENARIO TEST RUNNER');
   console.log('====================================================\n');
 
   let passed = 0;

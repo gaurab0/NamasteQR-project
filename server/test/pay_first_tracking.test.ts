@@ -3,7 +3,7 @@ import { firestoreDb, collection, getDocs, deleteDoc, doc, getDoc, updateDoc } f
 import { buildSalesWorkbookData } from '../../src/utils/excelExport';
 
 const BIZ = `test-tracking-${Date.now()}`;
-const user = { id: 'tester', email: 'tester@serveflow.app', role: 'OWNER' };
+const user = { id: 'tester', email: 'tester@namasteqr.com', role: 'OWNER' };
 
 let passed = 0;
 let failed = 0;

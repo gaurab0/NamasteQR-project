@@ -1,6 +1,6 @@
-# ServeFlow — Restaurant & Hotel Order Management Portal (Phase 1)
+# NamasteQR — Restaurant & Hotel Order Management Portal (Phase 1)
 
-ServeFlow is a modern, hospitality-focused order management portal designed for restaurants, cafes, hotels, destination resorts, and bars.
+NamasteQR is a modern, hospitality-focused order management portal designed for restaurants, cafes, hotels, destination resorts, and bars.
 
 **Phase 1 Focus:** Production-ready authentication, multi-venue business onboarding, international WhatsApp OTP verification, secure HTTP-only sessions, password hashing, and role-ready relational architecture.
 
@@ -21,7 +21,7 @@ ServeFlow is a modern, hospitality-focused order management portal designed for 
 │   │       ├── Button.tsx         # Modern button with loading states & 44px touch targets
 │   │       ├── DevOtpBanner.tsx   # Development-only OTP preview & 1-click test helper
 │   │       ├── Input.tsx          # Form text input with focus rings & validation
-│   │       ├── Logo.tsx           # ServeFlow brand identity & vector iconography
+│   │       ├── Logo.tsx           # NamasteQR brand identity & vector iconography
 │   │       ├── OTPInput.tsx       # 6-box OTP component with auto-focus, paste & keypad support
 │   │       ├── PasswordInput.tsx  # Password field with toggle & live strength meter
 │   │       ├── PhoneNumberInput.tsx # International phone selector with flags & country codes
@@ -204,7 +204,7 @@ ServeFlow is a modern, hospitality-focused order management portal designed for 
 | :--- | :--- | :--- |
 | `NODE_ENV` | Runtime environment (`development` or `production`) | `development` |
 | `PORT` | Web server port | `3000` |
-| `DATABASE_URL` | MySQL connection string | `mysql://root:password@localhost:3306/serveflow` |
+| `DATABASE_URL` | MySQL connection string | `mysql://root:password@localhost:3306/namasteqr` |
 | `JWT_SECRET` | Secret key for signing session tokens | Secure random string |
 | `OTP_EXPIRY_MINUTES` | Lifetime of OTP verification codes | `5` |
 | `OTP_LENGTH` | Number of digits for OTP | `6` |
@@ -251,7 +251,7 @@ ServeFlow is a modern, hospitality-focused order management portal designed for 
 
 ## 7. Testing Instructions
 
-ServeFlow includes an automated integration test suite covering all critical security and verification scenarios:
+NamasteQR includes an automated integration test suite covering all critical security and verification scenarios:
 
 ```bash
 npm test
