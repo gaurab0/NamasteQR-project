@@ -106,18 +106,26 @@ router.post('/categories', authenticate, requireResourceAccess('menus', 'write')
       });
     }
 
-    const catId = generateCategoryDocId(name.trim());
-    const newCategory = await prisma.menuCategory.upsert({
-      where: { id: catId },
-      create: {
-        id: catId,
+    let existingCat = await prisma.menuCategory.findFirst({
+      where: {
         business_id: businessId,
-        name: name.trim(),
-      },
-      update: {
-        name: name.trim(),
+        name: { equals: name.trim(), mode: 'insensitive' },
       },
     });
+
+    let newCategory;
+    if (existingCat) {
+      newCategory = existingCat;
+    } else {
+      const catId = generateCategoryDocId(name.trim(), businessId);
+      newCategory = await prisma.menuCategory.create({
+        data: {
+          id: catId,
+          business_id: businessId,
+          name: name.trim(),
+        },
+      });
+    }
 
     return res.status(201).json({
       success: true,
@@ -448,7 +456,7 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
     }
 
     const itemStatus: MenuStatus = status || (is_available === false ? 'unavailable' : 'available');
-    const docId = generateMenuDocId(name.trim());
+    const docId = generateMenuDocId(name.trim(), businessId);
     const validAdditionalCats = Array.isArray(additional_categories)
       ? additional_categories.filter((c: any) => typeof c === 'string' && c.trim().length > 0).map((c: string) => c.trim())
       : [];

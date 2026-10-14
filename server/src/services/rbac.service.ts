@@ -211,7 +211,7 @@ export class RBACService {
    */
   public async createCategory(
     businessId: string,
-    data: { name: string },
+    data: { name: string; order?: number },
     user: { id: string; role?: string; email?: string }
   ): Promise<MenuCategory> {
     const access = this.evaluateAccess(user, 'menus', 'create');
@@ -219,30 +219,43 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Manager role required to create categories.');
     }
 
-    const catId = generateCategoryDocId(data.name.trim());
-    const newCategory: MenuCategory = {
-      id: catId,
-      business_id: businessId,
-      name: data.name.trim(),
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
+    const trimmedName = data.name.trim();
 
-    try {
-      await prisma.menuCategory.upsert({
-        where: { id: catId },
-        create: {
-          id: catId,
-          business_id: businessId,
-          name: data.name.trim(),
-        },
-        update: {
-          name: data.name.trim(),
-        },
-      });
-    } catch (e: any) {
-      console.warn('Prisma createCategory error:', e.message);
+    // Check if category with this name already exists for this business
+    const existing = await prisma.menuCategory.findFirst({
+      where: {
+        business_id: businessId,
+        name: { equals: trimmedName, mode: 'insensitive' },
+      },
+    });
+
+    if (existing) {
+      return {
+        id: existing.id,
+        business_id: existing.business_id,
+        name: existing.name,
+        created_at: new Date(existing.created_at),
+        updated_at: new Date(existing.updated_at),
+      };
     }
+
+    const catId = generateCategoryDocId(trimmedName, businessId);
+    const created = await prisma.menuCategory.create({
+      data: {
+        id: catId,
+        business_id: businessId,
+        name: trimmedName,
+        order: data.order ?? 0,
+      },
+    });
+
+    const newCategory: MenuCategory = {
+      id: created.id,
+      business_id: created.business_id,
+      name: created.name,
+      created_at: new Date(created.created_at),
+      updated_at: new Date(created.updated_at),
+    };
 
     realtimeEmitter.menuUpdated(businessId);
     return newCategory;
@@ -331,7 +344,7 @@ export class RBACService {
     }
 
     const itemStatus = itemData.status || (itemData.is_available === false ? 'unavailable' : 'available');
-    const docId = generateMenuDocId(itemData.name.trim());
+    const docId = generateMenuDocId(itemData.name.trim(), businessId);
 
     const newItem: MenuItem = {
       id: docId,
@@ -361,9 +374,8 @@ export class RBACService {
 
     // Save to Prisma PostgreSQL
     try {
-      await prisma.menuItem.upsert({
-        where: { id: newItem.id },
-        create: {
+      await prisma.menuItem.create({
+        data: {
           id: newItem.id,
           business_id: businessId,
           name: newItem.name,
@@ -379,21 +391,13 @@ export class RBACService {
           is_available: newItem.is_available,
           has_variants: newItem.has_variants,
           variants: (newItem.variants as any) || [],
-          variant_group_name: itemData.name ? undefined : null,
+          variant_group_name: (itemData as any).variant_group_name || (itemData.name ? undefined : null),
           display_style: newItem.display_style || 'auto',
           show_image: newItem.show_image ?? true,
           promo_badge: newItem.promo_badge || null,
           order_index: newItem.order_index ?? 0,
           preparation_time_mins: newItem.preparation_time_mins || 15,
           created_by: user.id,
-        },
-        update: {
-          name: newItem.name,
-          category: newItem.category,
-          price: newItem.price,
-          status: newItem.status,
-          is_available: newItem.is_available,
-          variants: (newItem.variants as any) || [],
         },
       });
     } catch (e: any) {
@@ -929,27 +933,31 @@ export class RBACService {
     const categoryNames = ['Breakfast', 'Lunch', 'Dinner', 'Nepali', 'Chinese', 'Snacks', 'Desserts', 'Beverages'];
     const results: MenuCategory[] = [];
     await db.ensureBusiness(businessId);
-    for (const name of categoryNames) {
-      const catId = generateCategoryDocId(name);
-      const cat: MenuCategory = {
-        id: catId,
-        business_id: businessId,
-        name,
-        created_at: new Date(),
-        updated_at: new Date(),
-      };
-      await prisma.menuCategory.upsert({
-        where: { id: catId },
-        create: {
-          id: catId,
-          business_id: businessId,
-          name,
-        },
-        update: {
-          name,
-        },
-      }).catch(() => {});
-      results.push(cat);
+    for (let i = 0; i < categoryNames.length; i++) {
+      const name = categoryNames[i];
+      let cat = await prisma.menuCategory.findFirst({
+        where: { business_id: businessId, name: { equals: name, mode: 'insensitive' } },
+      });
+      if (!cat) {
+        const catId = generateCategoryDocId(name, businessId);
+        cat = await prisma.menuCategory.create({
+          data: {
+            id: catId,
+            business_id: businessId,
+            name,
+            order: i,
+          },
+        }).catch(() => null as any);
+      }
+      if (cat) {
+        results.push({
+          id: cat.id,
+          business_id: cat.business_id,
+          name: cat.name,
+          created_at: new Date(cat.created_at),
+          updated_at: new Date(cat.updated_at),
+        });
+      }
     }
     return results;
   }
@@ -1033,7 +1041,30 @@ export class RBACService {
     const results: MenuItem[] = [];
     await db.ensureBusiness(businessId);
     for (const d of defaults) {
-      const docId = generateMenuDocId(d.name);
+      let existing = await prisma.menuItem.findFirst({
+        where: { business_id: businessId, name: { equals: d.name, mode: 'insensitive' } },
+      });
+      if (existing) {
+        results.push({
+          id: existing.id,
+          business_id: existing.business_id,
+          name: existing.name,
+          category: existing.category,
+          price: Number(existing.price),
+          currency: existing.currency,
+          description: existing.description || '',
+          image_url: existing.image_url || '',
+          food_type: (existing.food_type as any) || 'veg',
+          status: (existing.status as any) || 'available',
+          is_available: existing.is_available,
+          created_by: existing.created_by || userId,
+          created_at: new Date(existing.created_at),
+          updated_at: new Date(existing.updated_at),
+        });
+        continue;
+      }
+
+      const docId = generateMenuDocId(d.name, businessId);
       const item: MenuItem = {
         id: docId,
         business_id: businessId,
@@ -1051,9 +1082,8 @@ export class RBACService {
         created_at: new Date(),
         updated_at: new Date(),
       };
-      await prisma.menuItem.upsert({
-        where: { id: docId },
-        create: {
+      await prisma.menuItem.create({
+        data: {
           id: docId,
           business_id: businessId,
           name: d.name,
@@ -1067,11 +1097,6 @@ export class RBACService {
           is_available: d.is_available,
           preparation_time_mins: d.preparation_time_mins,
           created_by: userId,
-        },
-        update: {
-          name: d.name,
-          category: d.category,
-          price: d.price,
         },
       }).catch(() => {});
       results.push(item);
@@ -3941,41 +3966,122 @@ export class RBACService {
   ): Promise<{ categoriesCloned: number; itemsCloned: number }> {
     try {
       // 1. Fetch categories from source
-      const sourceCategories = await this.getCategories(sourceBusinessId, user);
+      const sourceCategories = await prisma.menuCategory.findMany({
+        where: { business_id: sourceBusinessId },
+        orderBy: { order: 'asc' },
+      });
       const categoryIdMap = new Map<string, string>(); // oldId -> newId
 
       for (const cat of sourceCategories) {
-        const createdCat = await this.createCategory(targetBusinessId, { name: cat.name }, user);
-        categoryIdMap.set(cat.id, createdCat.id);
+        try {
+          let targetCat = await prisma.menuCategory.findFirst({
+            where: {
+              business_id: targetBusinessId,
+              name: { equals: cat.name.trim(), mode: 'insensitive' },
+            },
+          });
+
+          if (!targetCat) {
+            const newCatId = generateCategoryDocId(cat.name.trim(), targetBusinessId);
+            targetCat = await prisma.menuCategory.create({
+              data: {
+                id: newCatId,
+                business_id: targetBusinessId,
+                name: cat.name.trim(),
+                order: cat.order ?? 0,
+              },
+            });
+          }
+          categoryIdMap.set(cat.id, targetCat.id);
+        } catch (catErr: any) {
+          console.warn(`[CloneMenu] Error cloning category "${cat.name}":`, catErr.message);
+        }
       }
 
       // 2. Fetch items from source
-      const sourceItems = await this.getMenuItems(sourceBusinessId, user);
+      const sourceItems = await prisma.menuItem.findMany({
+        where: { business_id: sourceBusinessId },
+        orderBy: { order_index: 'asc' },
+      });
       let itemsCloned = 0;
 
       for (const item of sourceItems) {
-        const targetCategoryId = item.category_id ? categoryIdMap.get(item.category_id) : undefined;
-        await this.createMenuItem(
-          targetBusinessId,
-          {
-            name: item.name,
-            category: item.category,
-            category_id: targetCategoryId,
-            price: item.price,
-            currency: item.currency,
-            description: item.description,
-            image_url: item.image_url,
-            food_type: item.food_type,
-            status: item.status,
-            is_available: item.is_available,
-            preparation_time_mins: item.preparation_time_mins,
-          },
-          user
-        );
-        itemsCloned++;
+        try {
+          const targetCategoryId = item.category_id ? categoryIdMap.get(item.category_id) || null : null;
+
+          // Check if item already exists in target branch
+          const existingItem = await prisma.menuItem.findFirst({
+            where: {
+              business_id: targetBusinessId,
+              name: { equals: item.name.trim(), mode: 'insensitive' },
+            },
+          });
+
+          if (existingItem) {
+            if (targetCategoryId && existingItem.category_id !== targetCategoryId) {
+              await prisma.menuItem.update({
+                where: { id: existingItem.id },
+                data: { category_id: targetCategoryId },
+              });
+            }
+            continue;
+          }
+
+          const newDocId = generateMenuDocId(item.name.trim(), targetBusinessId);
+
+          await prisma.menuItem.create({
+            data: {
+              id: newDocId,
+              business_id: targetBusinessId,
+              name: item.name.trim(),
+              category: item.category.trim(),
+              category_id: targetCategoryId,
+              additional_categories: Array.isArray(item.additional_categories) ? item.additional_categories : [],
+              price: item.price,
+              currency: item.currency || 'Rs.',
+              description: item.description || '',
+              image_url: item.image_url || '',
+              food_type: item.food_type || 'non-veg',
+              status: item.status || 'available',
+              is_available: item.is_available ?? true,
+              has_variants: Boolean(item.has_variants),
+              variants: (item.variants as any) || [],
+              variant_group_name: item.variant_group_name || null,
+              display_style: item.display_style || 'auto',
+              show_image: item.show_image ?? true,
+              promo_badge: item.promo_badge || null,
+              order_index: item.order_index ?? 0,
+              preparation_time_mins: item.preparation_time_mins || 15,
+              created_by: user.id,
+            },
+          });
+          itemsCloned++;
+        } catch (itemErr: any) {
+          console.warn(`[CloneMenu] Error cloning item "${item.name}":`, itemErr.message);
+        }
       }
 
-      return { categoriesCloned: sourceCategories.length, itemsCloned };
+      // 3. Clone menu theme configuration and image display setting
+      try {
+        const sourceBiz = await prisma.business.findUnique({
+          where: { id: sourceBusinessId },
+          select: { menu_theme_config: true, show_menu_images: true },
+        });
+        if (sourceBiz) {
+          await prisma.business.update({
+            where: { id: targetBusinessId },
+            data: {
+              ...(sourceBiz.menu_theme_config ? { menu_theme_config: sourceBiz.menu_theme_config as any } : {}),
+              show_menu_images: sourceBiz.show_menu_images ?? true,
+            },
+          });
+        }
+      } catch (themeErr: any) {
+        console.warn('[CloneMenu] Error copying menu theme config:', themeErr.message);
+      }
+
+      realtimeEmitter.menuUpdated(targetBusinessId);
+      return { categoriesCloned: categoryIdMap.size, itemsCloned };
     } catch (err: any) {
       console.warn(`[CloneMenu] Notice cloning menu from ${sourceBusinessId} to ${targetBusinessId}:`, err.message);
       return { categoriesCloned: 0, itemsCloned: 0 };

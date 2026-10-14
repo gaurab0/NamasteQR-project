@@ -1253,4 +1253,26 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-14 by Antigravity (Pay-First complete flow, initial viewMode, and session stability fixed and verified)*
+## 21. Franchise Menu Catalog Cloning Fix & Scoped Primary Keys
+
+- **Issue**: When creating a new franchise branch with "Clone Menu Catalog" enabled (e.g. from `7-spices` to `7-spices-two`), only 4 out of 53 menu items were created in the target branch. 49 items were missing.
+- **Root Cause**:
+  1. Primary key collision in PostgreSQL: `generateMenuDocId(name)` and `generateCategoryDocId(name)` in `server/src/utils/id.utils.ts` produced deterministic IDs based purely on item name slug (e.g., `'burger'`, `'beverages'`).
+  2. In Firestore, items were in scoped subcollections (`/businesses/{bizId}/menus/{itemId}`), so same IDs across businesses never collided. In PostgreSQL, `menu_items` and `menu_categories` are flat global tables.
+  3. When cloning, `prisma.menuItem.upsert` with deterministic ID found the existing row belonging to the source business and updated it instead of inserting a new row for the target business (`business_id` was not changed).
+  4. Only 4 items with non-colliding names were inserted into the new branch.
+  5. In addition, `cloneMenuCatalog` previously missed preserving dish variants (`has_variants`, `variants`, `variant_group_name`), dietary flags, ordering, and theme configurations.
+- **Fix**:
+  1. Updated `generateMenuDocId(name, businessId?)` and `generateCategoryDocId(name, businessId?)` to include business-scoped prefixes and randomized alphanumeric suffixes (e.g. `${bizPrefix}${base}_${rand}`), guaranteeing uniqueness across businesses.
+  2. Rewrote `cloneMenuCatalog` in `server/src/services/rbac.service.ts`:
+     - Clones all categories with newly generated scoped unique IDs.
+     - Maintains category mapping between source and cloned IDs.
+     - Clones all menu items with full field preservation: `variants`, `has_variants`, `variant_group_name`, `additional_categories`, `display_style`, `show_image`, `promo_badge`, `food_type`, `image_url`, `price`, `currency`, `order_index`.
+     - Idempotent by checking item name per `business_id` before inserting.
+     - Clones `menu_theme_config`.
+  3. Repaired existing branch `7-spices/franchises/7-spices-two`, populating all 53 items and 15 categories.
+  4. Verified via automated test suite `server/test/menu_clone.test.ts` (19/19 assertions passing).
+
+---
+
+*Last updated: 2026-10-14 by Antigravity (Franchise Menu Catalog cloning ID scoping and variant preservation verified)*

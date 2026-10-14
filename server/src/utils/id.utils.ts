@@ -20,11 +20,13 @@ export function sanitizePhoneId(phone: string): string {
 }
 
 /**
- * Generates a clean ID for a menu item based on dish name
+ * Generates a clean ID for a menu item based on dish name and business
  */
-export function generateMenuDocId(dishName: string): string {
-  const base = slugify(dishName) || 'menu-item';
-  return base;
+export function generateMenuDocId(dishName: string, businessId?: string): string {
+  const base = slugify(dishName) || 'item';
+  const bizPrefix = businessId ? `${slugify(businessId)}_` : '';
+  const rand = Math.random().toString(36).substring(2, 8);
+  return `${bizPrefix}${base}_${rand}`;
 }
 
 /**
@@ -38,8 +40,11 @@ export function generateUserDocId(businessName: string, roleOrEmail?: string): s
 }
 
 /**
- * Generates a clean ID for a menu category based on name
+ * Generates a clean ID for a menu category based on name and business
  */
-export function generateCategoryDocId(categoryName: string): string {
-  return slugify(categoryName) || 'category';
+export function generateCategoryDocId(categoryName: string, businessId?: string): string {
+  const base = slugify(categoryName) || 'cat';
+  const bizPrefix = businessId ? `${slugify(businessId)}_` : '';
+  const rand = Math.random().toString(36).substring(2, 8);
+  return `${bizPrefix}${base}_${rand}`;
 }
