@@ -1345,4 +1345,30 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-14 by Antigravity (NamasteQR brand migration and logo integration complete)*
+## 25. Database Connection Resilience & Supabase Session Pooler Migration
+
+- **Issue**:
+  - `Can't reach database server at aws-0-ap-south-1.pooler.supabase.com:6543` occurred intermittently during idle periods when calling queries like `restaurantTable.findMany()` and `sale.findMany()`.
+- **Root Cause Analysis**:
+  - **Transaction Pooler vs. Session Pooler**: Port `6543` is Supabase's Transaction Pooler (designed for serverless/stateless lambdas). It aggressively drops idle TCP client connections after 60 seconds of inactivity.
+  - Stateful Express servers maintain persistent connection pools. When an idle socket was terminated by the pooler, the next query executed against that dead socket failed before a new connection was established.
+- **Resolution**:
+  1. **Switched to Supabase Session Pooler (Port `5432`)**:
+     - Updated `.env` and documented in `.env.example`:
+       `DATABASE_URL="postgresql://postgres.qlfcpfljiofjwqleppfs:Pikapika%20123%21@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?connection_limit=10&pool_timeout=20"`
+     - Port `5432` is configured for stateful Node.js servers, retaining persistent connections and supporting full PostgreSQL session capabilities without aggressive idle termination.
+  2. **Implemented Resilient Query Retry Layer in `server/src/lib/prisma.ts`**:
+     - Utilized Prisma 6 client extension (`$extends.query.$allModels.$allOperations`).
+     - Automatically catches any transient connection or pooler network hiccups (`Can't reach database server`, `ConnectionAborted`, `ConnectionReset`, `10053`, `10054`, `ECONNRESET`, `ETIMEDOUT`, etc.).
+     - Retries up to 2 times with a 200ms/400ms exponential backoff, allowing Prisma to cleanly re-establish a fresh connection pool socket. The client request completes successfully without failing or throwing an error to the frontend.
+  3. **Verification**:
+     - Tested model queries (`restaurantTable.count`, `restaurantTable.findFirst`, `restaurantTable.findMany`) on port `5432` with 100% success.
+     - Verified interactive transactions (`$transaction`) and raw queries (`$queryRaw`) with extended client.
+     - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+     - `npm run build`: PASSED (Production bundle created in 3.02s).
+     - `server/test/auth.test.ts`: PASSED (6 passed, 0 failed).
+     - `server/test/rbac_security_audit.test.ts`: PASSED (18 passed, 0 failed).
+
+---
+
+*Last updated: 2026-10-14 by Antigravity (Database connection resilience and session pooler configured)*
