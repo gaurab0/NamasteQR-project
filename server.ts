@@ -29,11 +29,6 @@ async function startServer() {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 ServeFlow Server running on http://0.0.0.0:${PORT}`);
-    
-    // Automatically convert any legacy UUID document IDs in Firestore to human-readable identifiers
-    import('./server/src/services/migration.service')
-      .then((m) => m.migrateAllFirestoreDocumentsToReadableIds())
-      .catch((e) => console.warn('Background migration note:', e.message));
   });
 }
 
