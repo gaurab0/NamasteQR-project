@@ -1323,8 +1323,8 @@ export class RBACService {
     }
 
     try {
-      await prisma.restaurantTable.update({
-        where: { id: tableId },
+      await prisma.restaurantTable.updateMany({
+        where: { id: tableId, business_id: businessId },
         data: { status },
       });
     } catch (e: any) {
@@ -1434,8 +1434,8 @@ export class RBACService {
     const now = new Date();
 
     try {
-      await prisma.restaurantTable.update({
-        where: { id: tableId },
+      await prisma.restaurantTable.updateMany({
+        where: { id: tableId, business_id: businessId },
         data: {
           status: 'ACTIVE',
           current_session_id: null,
@@ -1950,7 +1950,7 @@ export class RBACService {
       // Keep table occupied
       if (updatedOrder.table_id) {
         try {
-          await prisma.restaurantTable.update({
+          await prisma.restaurantTable.updateMany({
             where: { id: updatedOrder.table_id },
             data: { status: 'OCCUPIED' },
           });
@@ -2061,7 +2061,7 @@ export class RBACService {
     // Make sure the table remains OCCUPIED
     if (order.table_id) {
       try {
-        await prisma.restaurantTable.update({
+        await prisma.restaurantTable.updateMany({
           where: { id: order.table_id },
           data: { status: 'OCCUPIED' },
         });
@@ -2194,7 +2194,7 @@ export class RBACService {
     // Reset table session if a pay_first order was completed
     if (nextStatus === 'COMPLETED' && currentOrder.pay_first && currentOrder.table_id) {
       try {
-        await prisma.restaurantTable.update({
+        await prisma.restaurantTable.updateMany({
           where: { id: currentOrder.table_id },
           data: {
             status: 'ACTIVE',
@@ -2360,7 +2360,7 @@ export class RBACService {
     // If order was cancelled completely, check if table can be marked AVAILABLE
     if (nextOrderStatus === 'CANCELLED' && currentData.table_id) {
       try {
-        await prisma.restaurantTable.update({
+        await prisma.restaurantTable.updateMany({
           where: { id: currentData.table_id },
           data: { status: 'AVAILABLE' },
         });

@@ -1814,9 +1814,15 @@ router.post('/service-requests', optionalAuthenticate, async (req: Request, res:
       },
     });
 
-    if (table_id) {
-      await prisma.restaurantTable.update({
-        where: { id: table_id },
+    if (table_id || table_number) {
+      await prisma.restaurantTable.updateMany({
+        where: {
+          business_id: businessId,
+          OR: [
+            ...(table_id ? [{ id: table_id }] : []),
+            ...(table_number ? [{ table_number: String(table_number) }] : []),
+          ],
+        },
         data: {
           waiter_ping: {
             active: true,
@@ -1827,6 +1833,7 @@ router.post('/service-requests', optionalAuthenticate, async (req: Request, res:
 
       realtimeEmitter.tableUpdated(businessId, {
         id: table_id,
+        table_number,
         waiter_ping: { active: true, timestamp: new Date().toISOString() },
       });
     }
@@ -1879,15 +1886,23 @@ router.post('/tables/:tableId/acknowledge-ping', optionalAuthenticate, async (re
     const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
 
     if (tableId) {
-      await prisma.restaurantTable.update({
-        where: { id: tableId },
+      await prisma.restaurantTable.updateMany({
+        where: {
+          OR: [
+            { id: tableId },
+            { table_number: tableId, ...(businessId ? { business_id: businessId } : {}) },
+          ],
+        },
         data: { waiter_ping: { active: false } },
       }).catch(() => {});
 
       if (businessId) {
         await prisma.serviceRequest.updateMany({
           where: {
-            table_id: tableId,
+            OR: [
+              { table_id: tableId },
+              { table_number: tableId },
+            ],
             business_id: businessId,
             type: 'CALL_WAITER',
             status: 'PENDING',
