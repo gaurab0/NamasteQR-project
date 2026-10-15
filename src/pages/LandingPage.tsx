@@ -35,6 +35,7 @@ import { useAuth } from '../context/AuthContext';
 import { Footer } from '../components/layout/Footer';
 import { CustomerMenuPhoneMockup } from '../components/landing/CustomerMenuPhoneMockup';
 import { BookDemoModal } from '../components/landing/BookDemoModal';
+import { HeroShaderGradient } from '../components/landing/HeroShaderGradient';
 
 interface LandingPageProps {
   onNavigate: (route: string) => void;
@@ -258,10 +259,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* ======================================================== */}
       {/* 1. HERO SECTION (Inspired by Shelf's Layered Hero Canvas) */}
       {/* ======================================================== */}
-      <section className="relative overflow-hidden pt-8 pb-14 sm:pt-10 sm:pb-20 border-b border-zinc-200/80 bg-gradient-to-b from-blue-50/40 via-white to-zinc-50/50">
+      <section className="relative overflow-hidden pt-8 pb-14 sm:pt-10 sm:pb-20 border-b border-zinc-200/80 bg-gradient-to-b from-blue-50/20 via-white to-zinc-50/50">
+        {/* Full-width 3D moving shader gradient canvas */}
+        <HeroShaderGradient />
+
         {/* Subtle background tech grid */}
         <div 
-          className="absolute inset-0 pointer-events-none opacity-[0.035]"
+          className="absolute inset-0 pointer-events-none opacity-[0.035] z-1"
           style={{
             backgroundImage: `radial-gradient(#1e3a8a 1px, transparent 1px)`,
             backgroundSize: '24px 24px',

@@ -1405,4 +1405,30 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-15 by Antigravity (Book Demo & Enquiry routed to info@namasteqr.com)*
+## 27. Hero ShaderGradient Background Integration
+
+- **Installed Packages**:
+  - `@shadergradient/react`: Core 3D moving shader gradient renderer and canvas helper.
+  - `@react-three/fiber` (`^9.0.0`): React 19 compatible Three.js reconciler.
+  - `three`, `three-stdlib`, `camera-controls`: 3D WebGL engine and camera control dependencies.
+  - `@types/three`: TypeScript type definitions.
+- **Component Implementation**:
+  - Created `src/components/landing/HeroShaderGradient.tsx`:
+    - Renders `<ShaderGradientCanvas>` full-width with `pointerEvents: 'none'` and `fov={45}`.
+    - Uses 3D plane mesh (`type="plane"`) with brand colors:
+      - `color1`: `#2563eb` (Brand Blue)
+      - `color2`: `#f59e0b` (Warm Amber)
+      - `color3`: `#4f46e5` (Deep Indigo)
+    - Motion speed: `uSpeed={0.1}` (slow, tranquil, non-intrusive drift).
+    - Texture: `grain="on"` for a soft, tactile organic grain finish.
+    - Soft vignette: Semi-transparent gradient overlay (`from-white/40 via-white/10 to-zinc-50/80`) ensuring crisp readability for foreground text, CTA buttons, dashboard frame, and realistic smartphone mockup.
+- **Placement**:
+  - Embedded exclusively behind the Hero Section (`section#1`) in `src/pages/LandingPage.tsx`. All other sections retain their clean, designated backgrounds.
+- **Verification**:
+  - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+  - `npm run build` (Vite + esbuild): PASSED (0 errors).
+  - Running live on `http://localhost:3000`.
+
+---
+
+*Last updated: 2026-10-15 by Antigravity (Hero ShaderGradient full-width canvas added)*
