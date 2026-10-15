@@ -11,11 +11,13 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { MenuManagementPage } from './pages/MenuManagementPage';
 import { CustomerMenuPreviewPage } from './pages/CustomerMenuPreviewPage';
+import { BookDemoModal } from './components/landing/BookDemoModal';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
 
 function AppContent() {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
   const [currentPath, setCurrentPath] = useState<string>(() => {
     return window.location.pathname || '/';
   });
@@ -118,7 +120,7 @@ function AppContent() {
 
     return (
       <div className="min-h-screen flex flex-col bg-zinc-50">
-        <Navbar onNavigate={navigate} currentRoute={currentPath} />
+        <Navbar onNavigate={navigate} currentRoute={currentPath} onBookDemo={() => setIsDemoModalOpen(true)} />
         <main className="flex-1">
           <ErrorBoundary onReset={() => navigate('/login')}>
             <ResetPasswordPage
@@ -128,6 +130,10 @@ function AppContent() {
             />
           </ErrorBoundary>
         </main>
+        <BookDemoModal
+          isOpen={isDemoModalOpen}
+          onClose={() => setIsDemoModalOpen(false)}
+        />
       </div>
     );
   }
@@ -163,7 +169,7 @@ function AppContent() {
       case '/menu-management':
         // Synchronous auth guard: Never render admin panel to unauthorized guests
         if (!isAuthenticated) {
-          return <LandingPage onNavigate={navigate} />;
+          return <LandingPage onNavigate={navigate} onBookDemo={() => setIsDemoModalOpen(true)} />;
         }
         return (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -176,12 +182,12 @@ function AppContent() {
       case '/dashboard':
         // Synchronous auth guard: Never render admin panel to unauthorized guests
         if (!isAuthenticated) {
-          return <LandingPage onNavigate={navigate} />;
+          return <LandingPage onNavigate={navigate} onBookDemo={() => setIsDemoModalOpen(true)} />;
         }
         return <DashboardPage onNavigate={navigate} />;
       case '/':
       default:
-        return <LandingPage onNavigate={navigate} />;
+        return <LandingPage onNavigate={navigate} onBookDemo={() => setIsDemoModalOpen(true)} />;
     }
   };
 
@@ -190,12 +196,22 @@ function AppContent() {
 
   return (
     <div className="min-h-screen flex flex-col bg-zinc-50">
-      {!isCustomerMenuRoute && !isDashboardRoute && <Navbar onNavigate={navigate} currentRoute={currentPath} />}
+      {!isCustomerMenuRoute && !isDashboardRoute && (
+        <Navbar
+          onNavigate={navigate}
+          currentRoute={currentPath}
+          onBookDemo={() => setIsDemoModalOpen(true)}
+        />
+      )}
       <main className="flex-1">
         <ErrorBoundary onReset={() => navigate(isAuthenticated ? '/dashboard' : '/login')}>
           {renderCurrentView()}
         </ErrorBoundary>
       </main>
+      <BookDemoModal
+        isOpen={isDemoModalOpen}
+        onClose={() => setIsDemoModalOpen(false)}
+      />
     </div>
   );
 }

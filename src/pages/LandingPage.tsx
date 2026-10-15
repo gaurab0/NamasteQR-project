@@ -28,20 +28,32 @@ import {
   Printer,
   ShoppingBag,
   Bell,
-  MessageCircleQuestion
+  MessageCircleQuestion,
+  Calendar
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Footer } from '../components/layout/Footer';
 import { CustomerMenuPhoneMockup } from '../components/landing/CustomerMenuPhoneMockup';
+import { BookDemoModal } from '../components/landing/BookDemoModal';
 
 interface LandingPageProps {
   onNavigate: (route: string) => void;
+  onBookDemo?: () => void;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo }) => {
   const { isAuthenticated, user } = useAuth();
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
   const [activeWorkflowTab, setActiveWorkflowTab] = useState<number>(0);
+  const [internalDemoModalOpen, setInternalDemoModalOpen] = useState(false);
+
+  const handleOpenDemo = () => {
+    if (onBookDemo) {
+      onBookDemo();
+    } else {
+      setInternalDemoModalOpen(true);
+    }
+  };
 
   const toggleFaq = (index: number) => {
     setOpenFaqIndex((prev) => (prev === index ? null : index));
@@ -277,7 +289,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           </p>
 
           {/* Dual Action Buttons (Guaranteed working navigation) */}
-          <div className="mt-4 sm:mt-5 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
+          <div className="mt-4 sm:mt-5 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-xl mx-auto">
             {isAuthenticated && user ? (
               <Button
                 variant="primary"
@@ -299,6 +311,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                 >
                   Create Business Account
                 </Button>
+                <button
+                  type="button"
+                  onClick={handleOpenDemo}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-white shadow-md hover:shadow-lg transition-all cursor-pointer"
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span>Book a Demo</span>
+                </button>
                 <Button
                   variant="outline"
                   size="md"
@@ -808,14 +828,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           </div>
           <h3 className="text-xl font-extrabold text-zinc-900">Still have questions?</h3>
           <p className="text-sm text-zinc-600">
-            Can't find the answer you are looking for? Reach out to our hospitality solutions team directly.
+            Can't find the answer you are looking for? Book a 1-on-1 personalized live demo or reach out to our solutions team directly.
           </p>
-          <div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={handleOpenDemo}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 font-bold text-xs sm:text-sm text-white transition-colors shadow-2xs cursor-pointer"
+            >
+              <Calendar className="w-4 h-4" />
+              <span>Book a Live Demo</span>
+            </button>
             <a
-              href="mailto:support@namasteqr.com"
+              href="mailto:info@namasteqr.com"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white border border-zinc-300 font-bold text-xs sm:text-sm text-zinc-800 hover:bg-zinc-100 transition-colors shadow-2xs"
             >
-              Contact Support Team (support@namasteqr.com)
+              <Mail className="w-4 h-4 text-zinc-500" />
+              <span>Contact Team (info@namasteqr.com)</span>
             </a>
           </div>
         </div>
@@ -824,7 +853,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       {/* ======================================================== */}
       {/* 9. COMPLETE GLOBAL FOOTER                                 */}
       {/* ======================================================== */}
-      <Footer onNavigate={onNavigate} />
+      <Footer onNavigate={onNavigate} onBookDemo={handleOpenDemo} />
+
+      {/* Demo Booking Dialog Modal */}
+      <BookDemoModal
+        isOpen={internalDemoModalOpen}
+        onClose={() => setInternalDemoModalOpen(false)}
+      />
 
     </div>
   );

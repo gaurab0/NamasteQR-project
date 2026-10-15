@@ -13,35 +13,53 @@ import {
   ArrowRight,
   HelpCircle,
   FileText,
-  Lock
+  Lock,
+  AlertCircle
 } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { Button } from '../ui/Button';
+import { contactApi } from '../../api/contactApi';
 
 interface FooterProps {
   onNavigate: (route: string) => void;
+  onBookDemo?: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
+export const Footer: React.FC<FooterProps> = ({ onNavigate, onBookDemo }) => {
   const [contactForm, setContactForm] = useState({
     name: '',
     email: '',
+    phone: '',
     message: '',
   });
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleContactSubmit = (e: React.FormEvent) => {
+  const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contactForm.email || !contactForm.message) return;
+    setErrorMessage(null);
+    if (!contactForm.email || !contactForm.message) {
+      setErrorMessage('Please provide your email and message.');
+      return;
+    }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      await contactApi.sendEnquiry({
+        name: contactForm.name || 'Prospective Customer',
+        email: contactForm.email,
+        phone: contactForm.phone,
+        message: contactForm.message,
+      });
       setIsSubmitted(true);
-      setContactForm({ name: '', email: '', message: '' });
-      setTimeout(() => setIsSubmitted(false), 5000);
-    }, 600);
+      setContactForm({ name: '', email: '', phone: '', message: '' });
+      setTimeout(() => setIsSubmitted(false), 7000);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Failed to dispatch enquiry. Please contact info@namasteqr.com directly.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -139,6 +157,17 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                   About Platform
                 </a>
               </li>
+              {onBookDemo && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={onBookDemo}
+                    className="text-amber-400 hover:text-amber-300 font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>📅 Book a Live Demo</span>
+                  </button>
+                </li>
+              )}
               <li>
                 <a
                   href="#contact"
@@ -180,8 +209,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                 <Mail className="w-4 h-4 text-amber-400 shrink-0" />
                 <div>
                   <span className="text-zinc-500 block text-[11px]">Direct Support & Inquiries</span>
-                  <a href="mailto:support@namasteqr.com" className="font-mono text-white hover:text-amber-400 transition-colors">
-                    support@namasteqr.com
+                  <a href="mailto:info@namasteqr.com" className="font-mono text-white hover:text-amber-400 transition-colors">
+                    info@namasteqr.com
                   </a>
                 </div>
               </div>
@@ -211,20 +240,27 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* Quick Contact Box */}
+            {/* Quick Contact / Send Enquiry Box */}
             <div className="mt-4 p-4 rounded-2xl bg-zinc-900 border border-zinc-800">
               <h4 className="text-xs font-bold text-white mb-2 flex items-center justify-between">
-                <span>Send Quick Message</span>
-                <span className="text-[10px] text-amber-400 uppercase font-semibold">Priority Queue</span>
+                <span>Send Enquiry</span>
+                <span className="text-[10px] text-amber-400 uppercase font-semibold">Direct to info@namasteqr.com</span>
               </h4>
 
               {isSubmitted ? (
-                <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-800/80 text-emerald-300 text-xs flex items-center gap-2">
+                <div className="p-3.5 rounded-xl bg-emerald-950/70 border border-emerald-700 text-emerald-200 text-xs flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                  <span>Thank you! Your message has been routed to our support team.</span>
+                  <span>Thank you! Your enquiry has been received and routed directly to <strong>info@namasteqr.com</strong>.</span>
                 </div>
               ) : (
                 <form onSubmit={handleContactSubmit} className="space-y-2">
+                  {errorMessage && (
+                    <div className="p-2.5 rounded-lg bg-red-950/70 border border-red-800 text-red-200 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input
                       type="text"
@@ -236,16 +272,23 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                     <input
                       type="email"
                       required
-                      placeholder="Email or Phone"
+                      placeholder="Email Address"
                       value={contactForm.email}
                       onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
                       className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500"
                     />
                   </div>
+                  <input
+                    type="tel"
+                    placeholder="Phone Number (Optional)"
+                    value={contactForm.phone}
+                    onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                    className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500"
+                  />
                   <textarea
                     required
                     rows={2}
-                    placeholder="How can we help your venue?"
+                    placeholder="How can we help your venue? (Your Enquiry)"
                     value={contactForm.message}
                     onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
                     className="w-full px-3 py-1.5 rounded-lg bg-zinc-950 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500 resize-none"
@@ -258,7 +301,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
                     leftIcon={<Send className="w-3.5 h-3.5" />}
                     className="w-full"
                   >
-                    {isSubmitting ? 'Dispatching Message...' : 'Send Inquiry'}
+                    {isSubmitting ? 'Dispatching to info@namasteqr.com...' : 'Send Enquiry'}
                   </Button>
                 </form>
               )}

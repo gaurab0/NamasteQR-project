@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes';
 import rbacRoutes from './routes/rbac.routes';
 import menuRoutes from './routes/menu.routes';
 import imageRoutes from './routes/image.routes';
+import contactRoutes from './routes/contact.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { config } from './config/env';
 
@@ -50,6 +51,7 @@ export function createApp() {
   app.use('/api/business', rbacRoutes);
   app.use('/api/menus', menuRoutes);
   app.use('/api/images', imageRoutes);
+  app.use('/api/contact', contactRoutes);
 
   // Centralized error handler
   app.use(errorHandler);

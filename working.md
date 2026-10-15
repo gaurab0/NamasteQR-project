@@ -1371,4 +1371,38 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-14 by Antigravity (Database connection resilience and session pooler configured)*
+## 26. Book Demo Form & Send Enquiry Routing to info@namasteqr.com
+
+- **Feature Implementation**:
+  1. **Book Demo Modal**:
+     - Created `src/components/landing/BookDemoModal.tsx` containing all 6 required fields:
+       - `name`: Full Name
+       - `businessName`: Restaurant, Café, or Hotel Name
+       - `email`: Business Email Address
+       - `phone`: Contact Phone Number
+       - `location`: City, Country, or Region
+       - `queries`: Specific Questions or Requirements
+     - Integrated input validation, submission loading states, error handling, and confirmation screen.
+  2. **Book Demo Access Points**:
+     - **Navbar**: Added a "Book Demo" button in the center navigation links and right-hand action bar for unauthenticated visitors.
+     - **Hero Section**: Added an amber "Book a Demo" CTA button between "Create Business Account" and "Sign In to Portal".
+     - **Pre-Footer Section 8 ("Still have questions?")**: Added a "Book a Live Demo" button alongside direct contact email.
+     - **Footer**: Added a "📅 Book a Live Demo" link in Platform & Access.
+  3. **Send Enquiry Routing**:
+     - Updated `src/components/layout/Footer.tsx` to route all enquiries to `info@namasteqr.com` via `contactApi.sendEnquiry`.
+     - Added phone number field to the footer enquiry form.
+     - Replaced legacy support email references with `info@namasteqr.com`.
+  4. **Backend Routes & Email Dispatch**:
+     - Created `server/src/routes/contact.routes.ts` with:
+       - `POST /api/contact/demo`: Validates required fields, persists booking to database/in-memory store, dispatches notification email to `info@namasteqr.com` with `replyTo` set to customer email.
+       - `POST /api/contact/enquiry`: Validates required fields, persists enquiry, dispatches notification email to `info@namasteqr.com`.
+     - Mounted in `server/src/app.ts` under `/api/contact`.
+     - Added `sendDemoBookingNotification` and `sendContactEnquiryNotification` in `server/src/services/email.service.ts` with branded HTML and plaintext layouts.
+     - Added persistent store audit methods (`saveDemoBooking`, `saveContactEnquiry`, `getDemoBookings`, `getContactEnquiries`) in `server/src/services/db.service.ts`.
+- **Verification**:
+  - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+  - `npm run build` (Vite + esbuild bundle): PASSED (0 errors).
+
+---
+
+*Last updated: 2026-10-15 by Antigravity (Book Demo & Enquiry routed to info@namasteqr.com)*

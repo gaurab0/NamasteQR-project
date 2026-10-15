@@ -27,6 +27,8 @@ class PostgresDatabaseStore {
   private passwordResetTokens: Map<string, PasswordResetToken> = new Map();
   private auditLogs: Map<string, AuditLog> = new Map();
   private devOtpStore: Map<string, string> = new Map();
+  private demoBookings: Map<string, any> = new Map();
+  private contactEnquiries: Map<string, any> = new Map();
 
   constructor() {
     this.initPostgres();
@@ -1305,6 +1307,24 @@ class PostgresDatabaseStore {
       log.updated_at = now;
       await this.upsertAuditLog(log);
     }
+  }
+
+  saveDemoBooking(payload: any): void {
+    this.demoBookings.set(payload.id, payload);
+    console.log(`📌 [DB:DEMO_SAVED] Demo booking #${payload.id} recorded for ${payload.businessName} (${payload.email})`);
+  }
+
+  getDemoBookings(): any[] {
+    return Array.from(this.demoBookings.values());
+  }
+
+  saveContactEnquiry(payload: any): void {
+    this.contactEnquiries.set(payload.id, payload);
+    console.log(`📌 [DB:ENQUIRY_SAVED] Enquiry #${payload.id} recorded from ${payload.name} (${payload.email})`);
+  }
+
+  getContactEnquiries(): any[] {
+    return Array.from(this.contactEnquiries.values());
   }
 }
 

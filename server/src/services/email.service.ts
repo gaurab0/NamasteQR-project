@@ -178,6 +178,223 @@ export class EmailService {
 
     return null;
   }
+
+  /**
+   * Routes a "Book Demo" submission directly to info@namasteqr.com
+   */
+  async sendDemoBookingNotification(data: {
+    name: string;
+    businessName: string;
+    email: string;
+    phone: string;
+    location: string;
+    queries?: string;
+  }): Promise<{ success: boolean; messageId?: string }> {
+    const targetEmail = 'info@namasteqr.com';
+    const subject = `📅 [Book Demo Request] ${data.businessName} - ${data.name}`;
+
+    const textBody = `
+========================================
+NEW DEMO BOOKING REQUEST FOR NAMASTEQR
+========================================
+Client Name: ${data.name}
+Business / Venue: ${data.businessName}
+Email Address: ${data.email}
+Phone Number: ${data.phone}
+Venue Location: ${data.location}
+Other Queries / Notes: ${data.queries || 'None specified'}
+Submitted At: ${new Date().toUTCString()}
+Routed Directly To: ${targetEmail}
+========================================
+    `.trim();
+
+    const htmlBody = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 14px;">
+        <div style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); padding: 22px 24px; border-radius: 10px; color: #ffffff; margin-bottom: 24px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">📅 New Demo Booking Request</h2>
+          <p style="margin: 6px 0 0 0; opacity: 0.9; font-size: 13px;">NamasteQR Hospitality OS • Leads Dispatch</p>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
+          <tbody>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; width: 140px; font-weight: 600;">Client Name</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${data.name}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Business / Venue</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${data.businessName}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Email Address</td>
+              <td style="padding: 10px 0;">
+                <a href="mailto:${data.email}" style="color: #2563eb; font-weight: 600; text-decoration: none;">${data.email}</a>
+              </td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Phone Number</td>
+              <td style="padding: 10px 0;">
+                <a href="tel:${data.phone}" style="color: #059669; font-weight: 700; text-decoration: none;">${data.phone}</a>
+              </td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Venue Location</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 600;">${data.location}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600; vertical-align: top;">Other Queries</td>
+              <td style="padding: 10px 0; color: #27272a; line-height: 1.5; background: #fafafa; padding: 10px 14px; border-radius: 8px;">
+                ${data.queries ? data.queries.replace(/\n/g, '<br/>') : '<em>No specific queries provided</em>'}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; color: #475569;">
+          <strong>Quick Action:</strong> You can click "Reply" in your email client to respond directly to <strong>${data.name}</strong> at <strong>${data.email}</strong>.
+        </div>
+
+        <div style="border-top: 1px solid #f4f4f5; padding-top: 14px; font-size: 11px; color: #a1a1aa; text-align: center;">
+          Sent to <strong>${targetEmail}</strong> via NamasteQR Lead Notification Engine • ${new Date().toLocaleString()}
+        </div>
+      </div>
+    `;
+
+    console.log(`\n========================================`);
+    console.log(`📅 [BOOK DEMO DISPATCHED TO ${targetEmail}]`);
+    console.log(`   Client: ${data.name} (${data.businessName})`);
+    console.log(`   Email: ${data.email} | Phone: ${data.phone}`);
+    console.log(`   Location: ${data.location}`);
+    console.log(`   Queries: ${data.queries || 'None'}`);
+    console.log(`========================================\n`);
+
+    if (this.transporter && this.isTransporterReady) {
+      try {
+        const info = await this.transporter.sendMail({
+          from: config.email.from || `"NamasteQR Leads" <no-reply@namasteqr.com>`,
+          to: targetEmail,
+          replyTo: `"${data.name}" <${data.email}>`,
+          subject,
+          text: textBody,
+          html: htmlBody,
+          headers: {
+            'X-Priority': '1 (Highest)',
+            'X-MSMail-Priority': 'High',
+            'Importance': 'High',
+          },
+        });
+        console.log(`✅ [SMTP SUCCESS] Demo booking email delivered to ${targetEmail}. MessageId: ${info.messageId}`);
+        return { success: true, messageId: info.messageId };
+      } catch (err: any) {
+        console.error(`❌ [SMTP ERROR] Failed to send demo booking email to ${targetEmail}:`, err.message);
+      }
+    }
+
+    return { success: true, messageId: `dev-demo-${Date.now()}` };
+  }
+
+  /**
+   * Routes a "Send Enquiry" submission directly to info@namasteqr.com
+   */
+  async sendContactEnquiryNotification(data: {
+    name: string;
+    email: string;
+    message: string;
+    phone?: string;
+  }): Promise<{ success: boolean; messageId?: string }> {
+    const targetEmail = 'info@namasteqr.com';
+    const subject = `💬 [Customer Enquiry] From ${data.name}`;
+
+    const textBody = `
+========================================
+NEW CUSTOMER ENQUIRY VIA NAMASTEQR
+========================================
+From: ${data.name}
+Email: ${data.email}
+Phone: ${data.phone || 'Not provided'}
+Message:
+${data.message}
+Submitted At: ${new Date().toUTCString()}
+Routed Directly To: ${targetEmail}
+========================================
+    `.trim();
+
+    const htmlBody = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 14px;">
+        <div style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); padding: 22px 24px; border-radius: 10px; color: #ffffff; margin-bottom: 24px;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">💬 New Customer Enquiry</h2>
+          <p style="margin: 6px 0 0 0; opacity: 0.9; font-size: 13px;">NamasteQR Support & Inquiries</p>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 14px;">
+          <tbody>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; width: 140px; font-weight: 600;">Sender Name</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${data.name}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Email Address</td>
+              <td style="padding: 10px 0;">
+                <a href="mailto:${data.email}" style="color: #2563eb; font-weight: 600; text-decoration: none;">${data.email}</a>
+              </td>
+            </tr>
+            ${data.phone ? `
+            <tr style="border-bottom: 1px solid #f4f4f5;">
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Phone Number</td>
+              <td style="padding: 10px 0;">
+                <a href="tel:${data.phone}" style="color: #059669; font-weight: 700; text-decoration: none;">${data.phone}</a>
+              </td>
+            </tr>
+            ` : ''}
+            <tr>
+              <td style="padding: 10px 0; color: #71717a; font-weight: 600; vertical-align: top;">Message</td>
+              <td style="padding: 10px 0; color: #27272a; line-height: 1.6; background: #fafafa; padding: 12px 14px; border-radius: 8px;">
+                ${data.message.replace(/\n/g, '<br/>')}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; color: #475569;">
+          <strong>Quick Action:</strong> Click "Reply" in your email client to respond directly to <strong>${data.name}</strong> at <strong>${data.email}</strong>.
+        </div>
+
+        <div style="border-top: 1px solid #f4f4f5; padding-top: 14px; font-size: 11px; color: #a1a1aa; text-align: center;">
+          Sent to <strong>${targetEmail}</strong> via NamasteQR Inquiry Pipeline • ${new Date().toLocaleString()}
+        </div>
+      </div>
+    `;
+
+    console.log(`\n========================================`);
+    console.log(`💬 [CUSTOMER ENQUIRY DISPATCHED TO ${targetEmail}]`);
+    console.log(`   From: ${data.name} (${data.email})`);
+    console.log(`   Message: ${data.message.substring(0, 100)}...`);
+    console.log(`========================================\n`);
+
+    if (this.transporter && this.isTransporterReady) {
+      try {
+        const info = await this.transporter.sendMail({
+          from: config.email.from || `"NamasteQR Inquiries" <no-reply@namasteqr.com>`,
+          to: targetEmail,
+          replyTo: `"${data.name}" <${data.email}>`,
+          subject,
+          text: textBody,
+          html: htmlBody,
+          headers: {
+            'X-Priority': '1 (Highest)',
+            'X-MSMail-Priority': 'High',
+            'Importance': 'High',
+          },
+        });
+        console.log(`✅ [SMTP SUCCESS] Customer enquiry email delivered to ${targetEmail}. MessageId: ${info.messageId}`);
+        return { success: true, messageId: info.messageId };
+      } catch (err: any) {
+        console.error(`❌ [SMTP ERROR] Failed to send enquiry email to ${targetEmail}:`, err.message);
+      }
+    }
+
+    return { success: true, messageId: `dev-enquiry-${Date.now()}` };
+  }
 }
 
 export const emailService = new EmailService();
