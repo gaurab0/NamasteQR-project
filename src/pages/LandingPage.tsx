@@ -289,7 +289,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
           </p>
 
           {/* Dual Action Buttons (Guaranteed working navigation) */}
-          <div className="mt-4 sm:mt-5 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-xl mx-auto">
+          <div className="mt-4 sm:mt-5 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
             {isAuthenticated && user ? (
               <Button
                 variant="primary"
@@ -311,14 +311,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
                 >
                   Create Business Account
                 </Button>
-                <button
-                  type="button"
-                  onClick={handleOpenDemo}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs sm:text-sm font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-white shadow-md hover:shadow-lg transition-all cursor-pointer"
-                >
-                  <Calendar className="w-4 h-4" />
-                  <span>Book a Demo</span>
-                </button>
                 <Button
                   variant="outline"
                   size="md"
@@ -475,6 +467,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
 
             {/* Overlapping Realistic Smartphone (Front Layer) - Desktop & Tablet */}
             <div className="hidden lg:block absolute -bottom-10 -right-20 lg:-right-28 xl:-right-38 2xl:-right-46 -translate-x-3 z-30 transform-gpu rotate-[5deg] origin-bottom-right hover:rotate-[3deg] transition-all duration-300 [backface-visibility:hidden] [transform:rotate(5deg)_translateZ(0)]">
+              {/* Minimalist Professional "Book a Demo" with Diagonal Alignment */}
+              <div className="absolute -top-11 left-1/2 -translate-x-1/2 z-40 whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={handleOpenDemo}
+                  className="group inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900/95 hover:bg-black text-white border border-zinc-700/80 hover:border-amber-400 shadow-2xl backdrop-blur-md text-xs font-bold tracking-tight transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer select-none"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-12 transition-transform" />
+                  <span>Book a Demo</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-zinc-400 group-hover:text-white group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              </div>
+
               <CustomerMenuPhoneMockup variant="hero" />
             </div>
 
@@ -493,10 +498,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
 
           {/* Centered Realistic Smartphone for Mobile & Tablet screens (< lg) */}
           <div className="mt-10 flex flex-col items-center justify-center lg:hidden relative z-20">
-            <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Live Guest Mobile View (Table #4)
-            </div>
+            <button
+              type="button"
+              onClick={handleOpenDemo}
+              className="mb-3.5 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-900 hover:bg-black text-white border border-zinc-700/80 text-xs font-bold shadow-md transition-all duration-200 cursor-pointer"
+            >
+              <Calendar className="w-3.5 h-3.5 text-amber-400" />
+              <span>Book a Demo</span>
+              <ArrowRight className="w-3.5 h-3.5 text-zinc-400" />
+            </button>
             <CustomerMenuPhoneMockup variant="hero" />
           </div>
         </div>

@@ -51,19 +51,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
           >
             Contact Us
           </button>
-          {onBookDemo && (
-            <>
-              <span className="text-zinc-300">•</span>
-              <button
-                type="button"
-                onClick={onBookDemo}
-                className="hover:text-amber-600 transition-colors cursor-pointer text-amber-600 font-bold flex items-center gap-1.5"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Book Demo</span>
-              </button>
-            </>
-          )}
         </div>
 
         <nav className="flex items-center gap-3">
@@ -120,16 +107,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
             </div>
           ) : (
             <div className="flex items-center gap-2 sm:gap-2.5">
-              {onBookDemo && (
-                <button
-                  type="button"
-                  onClick={onBookDemo}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors shadow-2xs cursor-pointer"
-                >
-                  <Calendar className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Book Demo</span>
-                </button>
-              )}
               {currentRoute !== '/login' && (
                 <Button
                   variant="ghost"
