@@ -397,25 +397,25 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       {/* Main Workspace (Right Area) */}
       <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
         {/* Top Workspace Header Bar matching RestroX layout */}
-        <header className="h-16 px-4 sm:px-6 bg-white border-b border-zinc-200/90 flex items-center justify-between shrink-0 shadow-2xs z-20">
-          <div className="flex items-center gap-3">
+        <header className="h-16 px-2.5 sm:px-6 bg-white border-b border-zinc-200/90 flex items-center justify-between shrink-0 shadow-2xs z-20 gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
             {/* Mobile hamburger menu toggle */}
             <button
               type="button"
               onClick={() => setIsMobileMenuOpen(true)}
-              className="md:hidden p-2 rounded-xl text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 cursor-pointer"
+              className="md:hidden p-1.5 sm:p-2 rounded-xl text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 cursor-pointer shrink-0"
               title="Open Navigation Menu"
             >
               <Menu className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 hide-scrollbar shrink-0">
+            <div className="flex items-center min-w-0 shrink-0">
               <DateTimeDisplay mode={user?.business?.date_format_nav || 'ENGLISH'} />
             </div>
           </div>
 
           {/* Right Controls matching RestroX: Date Filter + Daybook + Branch Analytics */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Timeframe Filter */}
             <div className="hidden lg:flex relative items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-700 bg-zinc-50 shadow-2xs hover:bg-zinc-100 transition-colors">
               <Clock className="w-3.5 h-3.5 text-zinc-400" />

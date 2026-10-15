@@ -49,17 +49,39 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
         id="btn-branch-switcher"
         type="button"
         onClick={() => hasFranchiseAccess && setIsOpen(!isOpen)}
-        className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/95 border shadow-2xs transition-all group ${hasFranchiseAccess ? 'hover:bg-zinc-50 border-zinc-200/90 hover:border-amber-300 cursor-pointer' : 'border-transparent cursor-default'}`}
+        className={`flex items-center gap-1.5 sm:gap-2.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-medium bg-white/95 border shadow-2xs transition-all group shrink-0 ${hasFranchiseAccess ? 'hover:bg-zinc-50 border-zinc-200/90 hover:border-amber-300 cursor-pointer' : 'border-transparent cursor-default'}`}
+        aria-label="Franchise & Branch Switcher"
       >
-        <div className="w-6 h-6 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
+        <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${
+          isFlagship 
+            ? 'bg-amber-50 border-amber-200 text-amber-600' 
+            : 'bg-indigo-50 border-indigo-200 text-indigo-600'
+        }`}>
           {isFlagship ? (
-            <Crown className="w-3.5 h-3.5 text-amber-600" />
+            <Crown className="w-3.5 h-3.5" />
           ) : (
-            <Store className="w-3.5 h-3.5 text-indigo-600" />
+            <Store className="w-3.5 h-3.5" />
           )}
         </div>
 
-        <div className="flex flex-col text-left max-w-[140px] sm:max-w-[190px]">
+        {/* Mobile View: Compact single-line name with badge */}
+        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[85px] xs:max-w-[110px]">
+          <span className="font-bold text-xs text-zinc-900 truncate leading-tight">
+            {currentBranch?.name || 'Venue'}
+          </span>
+          {isFlagship ? (
+            <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
+              HQ
+            </span>
+          ) : (
+            <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-indigo-100 text-indigo-900 border border-indigo-300 shrink-0">
+              {currentBranch?.branch_code || 'Branch'}
+            </span>
+          )}
+        </div>
+
+        {/* Desktop View: Full rich 2-line details */}
+        <div className="hidden sm:flex flex-col text-left max-w-[160px] md:max-w-[190px]">
           <div className="flex items-center gap-1.5">
             <span className="font-bold text-zinc-900 truncate leading-tight">
               {currentBranch?.name || 'Active Venue'}
@@ -89,17 +111,20 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
         </div>
 
         {hasFranchiseAccess && (
-          <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform ml-1 ${isOpen ? 'rotate-180 text-zinc-700' : ''}`} />
+          <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform shrink-0 ml-0.5 sm:ml-1 ${isOpen ? 'rotate-180 text-zinc-700' : ''}`} />
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 mt-1.5 w-72 sm:w-80 rounded-2xl bg-white border border-zinc-200/90 shadow-xl z-50 p-2 animate-in fade-in zoom-in-95 duration-100">
+        <div className="absolute right-0 mt-2 w-[calc(100vw-1.5rem)] sm:w-80 max-w-[340px] rounded-2xl bg-white border border-zinc-200/90 shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-100">
           <div className="px-3 py-2 border-b border-zinc-100 flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-              Franchise & Branch Locations
-            </span>
-            <span className="text-[11px] font-semibold text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full">
+            <div className="flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-zinc-500" />
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                Franchise & Branch Locations
+              </span>
+            </div>
+            <span className="text-[10px] font-bold text-amber-800 bg-amber-100/80 border border-amber-200 px-2 py-0.5 rounded-full">
               {branches.length || 1} Total
             </span>
           </div>
@@ -147,17 +172,17 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
                         : 'hover:bg-zinc-50 text-zinc-700 border border-transparent'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                      <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2 flex-1">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
                         isMain 
-                          ? 'bg-amber-100 text-amber-700' 
-                          : 'bg-indigo-50 text-indigo-600 border border-indigo-100'
+                          ? 'bg-amber-100 text-amber-700 border-amber-200/60' 
+                          : 'bg-indigo-50 text-indigo-600 border-indigo-200/60'
                       }`}>
-                        {isMain ? <Crown className="w-3.5 h-3.5" /> : <Store className="w-3.5 h-3.5" />}
+                        {isMain ? <Crown className="w-4 h-4" /> : <Store className="w-4 h-4" />}
                       </div>
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-xs font-bold text-zinc-900 truncate">
                             {branch.name}
                           </p>
@@ -168,21 +193,23 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
                           )}
                         </div>
 
-                        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-zinc-500 truncate">
+                        <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-zinc-500 flex-wrap">
                           {isMain ? (
-                            <span className="text-amber-700 font-semibold">HQ / Flagship</span>
+                            <span className="text-amber-700 font-semibold bg-amber-100/60 px-1.5 py-0.2 rounded border border-amber-200/60">
+                              HQ / Flagship
+                            </span>
                           ) : (
-                            <span className="text-indigo-600 font-medium">Franchise Branch</span>
+                            <span className="text-indigo-600 font-semibold bg-indigo-50 px-1.5 py-0.2 rounded border border-indigo-100">
+                              Franchise Branch
+                            </span>
                           )}
 
                           {branch.location && (
-                            <>
+                            <span className="truncate flex items-center gap-0.5 text-zinc-500 max-w-[150px]">
                               <span className="text-zinc-300">•</span>
-                              <span className="truncate flex items-center gap-0.5">
-                                <MapPin className="w-2.5 h-2.5 text-zinc-400 shrink-0" />
-                                {branch.location}
-                              </span>
-                            </>
+                              <MapPin className="w-2.5 h-2.5 text-zinc-400 shrink-0" />
+                              {branch.location}
+                            </span>
                           )}
                         </div>
                       </div>
@@ -206,7 +233,7 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
                   setIsOpen(false);
                   onOpenAddBranch();
                 }}
-                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold text-amber-700 hover:bg-amber-50 border border-amber-200 transition-colors cursor-pointer"
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Add New Franchise Branch
