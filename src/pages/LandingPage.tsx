@@ -454,7 +454,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             </div>
 
             {/* Overlapping Realistic Smartphone (Front Layer) - Desktop & Tablet */}
-            <div className="hidden lg:block absolute -bottom-16 -right-6 xl:-right-10 z-30 transform hover:-translate-y-1 transition-transform duration-300">
+            <div className="hidden lg:block absolute -bottom-14 -right-16 lg:-right-20 xl:-right-28 2xl:-right-32 z-30 transform rotate-[4.5deg] hover:rotate-[2deg] hover:-translate-y-1 transition-all duration-300 drop-shadow-2xl">
               <CustomerMenuPhoneMockup variant="hero" />
             </div>
 
