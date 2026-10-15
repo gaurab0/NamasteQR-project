@@ -358,7 +358,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               {/* Inside Dashboard Preview Grid */}
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 p-2 sm:p-4 text-left bg-zinc-50/40 rounded-xl">
                 {/* Left Metrics & Table Layout */}
-                <div className="md:col-span-8 space-y-4">
+                <div className="md:col-span-7 space-y-4">
                   <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-white rounded-xl border border-zinc-200 shadow-2xs">
                     <div>
                       <div className="text-xs text-zinc-500 font-semibold">NamasteQR Main Dining Room</div>
@@ -416,8 +416,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
-                {/* Right Quick POS Register Preview */}
-                <div className="md:col-span-4 p-3.5 bg-white rounded-xl border border-zinc-200 shadow-2xs space-y-3 transform -translate-x-2 lg:-translate-x-6">
+                {/* Right Quick POS Register Preview - Shifted More Left */}
+                <div className="md:col-span-5 p-3.5 bg-white rounded-xl border border-zinc-200 shadow-2xs space-y-3 max-w-[310px] transform -translate-x-3 md:-translate-x-6 lg:-translate-x-10 xl:-translate-x-14">
                   <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
                     <span className="text-xs font-bold text-zinc-900">Quick POS Register</span>
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-zinc-100 text-zinc-700">
@@ -455,20 +455,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
             {/* Overlapping Realistic Smartphone (Front Layer) - Desktop & Tablet */}
             <div className="hidden lg:block absolute -bottom-10 -right-24 lg:-right-32 xl:-right-44 2xl:-right-52 z-30 transform rotate-[5.5deg] scale-[0.92] lg:scale-[0.94] origin-bottom-right hover:rotate-[3deg] hover:scale-[0.98] transition-all duration-300 drop-shadow-2xl">
-              
-              {/* Floating Table Tent Card tucked behind the left of the phone (Shelf-inspired) */}
-              <div className="hidden md:flex items-center gap-3 p-3 rounded-2xl bg-white/95 backdrop-blur-md border border-zinc-200/90 shadow-xl absolute top-24 -left-48 lg:-left-52 z-[-1] text-left transform -rotate-[5.5deg] select-none">
-                <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center p-1.5 shrink-0">
-                  <QrCode className="w-full h-full text-blue-700" />
-                </div>
-                <div className="pr-4">
-                  <div className="text-xs font-extrabold text-zinc-900 whitespace-nowrap">Table Tent Card #12</div>
-                  <div className="text-[11px] text-zinc-500 whitespace-nowrap">Scanned via Camera • 0 Apps</div>
-                  <div className="text-[10px] font-bold text-emerald-600 mt-0.5 whitespace-nowrap">● Connected Live</div>
-                </div>
-              </div>
-
               <CustomerMenuPhoneMockup variant="hero" />
+            </div>
+
+            {/* Floating QR Tag Badge (Left) - Exactly where it was before */}
+            <div className="hidden md:flex items-center gap-3 p-3 rounded-2xl bg-white/95 backdrop-blur-md border border-zinc-200/90 shadow-xl absolute -top-6 -left-6 z-20 text-left select-none">
+              <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center p-1.5 shrink-0">
+                <QrCode className="w-full h-full text-blue-700" />
+              </div>
+              <div>
+                <div className="text-xs font-extrabold text-zinc-900">Table Tent Card #12</div>
+                <div className="text-[11px] text-zinc-500">Scanned via Camera • 0 Apps</div>
+                <div className="text-[10px] font-bold text-emerald-600 mt-0.5">● Connected Live</div>
+              </div>
             </div>
           </div>
 
