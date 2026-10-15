@@ -63,7 +63,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onBookDemo }) => {
   };
 
   return (
-    <footer className="bg-zinc-950 text-zinc-300 border-t border-zinc-800">
+    <footer className="relative z-20 bg-zinc-950 text-zinc-300 border-t border-zinc-800">
       {/* Main Footer Container */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8">

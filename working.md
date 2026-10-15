@@ -1405,30 +1405,33 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-## 27. Hero ShaderGradient Background Integration
+## 27. Full-Page ShaderGradient Background & Jitter Fix
 
 - **Installed Packages**:
   - `@shadergradient/react`: Core 3D moving shader gradient renderer and canvas helper.
   - `@react-three/fiber` (`^9.0.0`): React 19 compatible Three.js reconciler.
   - `three`, `three-stdlib`, `camera-controls`: 3D WebGL engine and camera control dependencies.
   - `@types/three`: TypeScript type definitions.
-- **Component Implementation**:
-  - Created `src/components/landing/HeroShaderGradient.tsx`:
-    - Renders `<ShaderGradientCanvas>` full-width with `pointerEvents: 'none'` and `fov={45}`.
-    - Uses 3D plane mesh (`type="plane"`) with brand colors:
-      - `color1`: `#2563eb` (Brand Blue)
-      - `color2`: `#f59e0b` (Warm Amber)
-      - `color3`: `#4f46e5` (Deep Indigo)
-    - Motion speed: `uSpeed={0.1}` (slow, tranquil, non-intrusive drift).
-    - Texture: `grain="on"` for a soft, tactile organic grain finish.
-    - Soft vignette: Semi-transparent gradient overlay (`from-white/40 via-white/10 to-zinc-50/80`) ensuring crisp readability for foreground text, CTA buttons, dashboard frame, and realistic smartphone mockup.
-- **Placement**:
-  - Embedded exclusively behind the Hero Section (`section#1`) in `src/pages/LandingPage.tsx`. All other sections retain their clean, designated backgrounds.
+- **Full-Page Architecture (Excluding Nav & Footer)**:
+  - Mounted a single fixed viewport canvas layer (`fixed inset-0 pointer-events-none z-0`) in `src/pages/LandingPage.tsx`.
+  - The sticky header navbar (`Navbar.tsx`) is styled with solid `bg-white shadow-2xs z-40`, completely excluding it from the moving gradient.
+  - The footer (`Footer.tsx`) has solid `bg-zinc-950 relative z-20`, completely concealing the gradient upon scroll.
+  - Intermediate landing page sections (1–8) are styled with semi-transparent frosted backdrops (`bg-white/40 backdrop-blur-xs`), allowing the serene gradient to flow gently behind all sections while keeping cards, POS tables, and Section 3 phone mockup crisp and locked.
+- **Jitter Elimination & Serene Motion**:
+  - In `HeroShaderGradient.tsx`: Set `enableTransition={false}` and `smoothTime={0}` to disable CameraControls initial camera swing across 50ms upon mount.
+  - Added `lazyLoad={false}` to eliminate IntersectionObserver mount deferral.
+  - Added a graceful mount fade-in (`mounted` state with a 150ms delay and `transition-opacity duration-700 ease-out`), masking initial WebGL shader compilation.
+  - Tuned flow parameters: `speed={0.05}`, `strength={1.4}`, `opacity={0.45}`, `color2="#fbbf24"` (soft honey amber), and soft white diffusion overlay (`bg-white/45`).
+- **Trust Badges High-Contrast Redesign**:
+  - Replaced the low-contrast unstyled gray text in the Hero section with frosted glass pill badges (`bg-white/95 backdrop-blur-md border border-zinc-200/90 text-zinc-900 font-bold shadow-2xs whitespace-nowrap select-none`) and emerald checkmark icons.
+  - Guarantees WCAG AAA contrast ratio (> 11:1) and eliminates line-wrapping on narrow mobile viewports.
+- **Item 3 Terminal Errors Diagnosis**:
+  - `EADDRINUSE 0.0.0.0:3000` & `Port 24678 is already in use`: Caused by an existing background Node process already listening on ports 3000 and 24678.
+  - `[THREE_CJS_DEPRECATED]`: Non-fatal warning emitted by Three.js v0.186.1 when `@react-three/fiber` loads Three.js via CommonJS `require()`.
 - **Verification**:
   - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
   - `npm run build` (Vite + esbuild): PASSED (0 errors).
-  - Running live on `http://localhost:3000`.
 
 ---
 
-*Last updated: 2026-10-15 by Antigravity (Hero ShaderGradient full-width canvas added)*
+*Last updated: 2026-10-15 by Antigravity (Full-page ShaderGradient, jitter elimination & frosted badge contrast)*

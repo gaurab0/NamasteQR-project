@@ -31,7 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
   const currentUserName = staffSession?.name || user?.name || user?.email?.split('@')[0] || 'User';
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-zinc-200/80 bg-white/80 backdrop-blur-md">
+    <header className="sticky top-0 z-40 w-full border-b border-zinc-200/80 bg-white shadow-2xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 sm:h-15 flex items-center justify-between">
         <Logo onClick={() => onNavigate(isAuthenticated ? '/dashboard' : '/')} />
 

@@ -254,15 +254,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
   ];
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 selection:bg-blue-100 selection:text-blue-900">
-      
+    <div className="min-h-screen bg-transparent text-zinc-900 selection:bg-blue-100 selection:text-blue-900 relative">
+      {/* Full-page fixed 3D moving shader gradient canvas (sits behind all content; physically concealed by sticky header navbar z-40 and footer z-20) */}
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <HeroShaderGradient />
+      </div>
+
       {/* ======================================================== */}
       {/* 1. HERO SECTION (Inspired by Shelf's Layered Hero Canvas) */}
       {/* ======================================================== */}
-      <section className="relative overflow-hidden pt-8 pb-14 sm:pt-10 sm:pb-20 border-b border-zinc-200/80 bg-gradient-to-b from-blue-50/20 via-white to-zinc-50/50">
-        {/* Full-width 3D moving shader gradient canvas */}
-        <HeroShaderGradient />
-
+      <section className="relative z-10 overflow-hidden pt-8 pb-14 sm:pt-10 sm:pb-20 border-b border-zinc-200/80 bg-gradient-to-b from-blue-50/20 via-white/30 to-zinc-50/20 backdrop-blur-xs">
         {/* Subtle background tech grid */}
         <div 
           className="absolute inset-0 pointer-events-none opacity-[0.035] z-1"
@@ -288,7 +289,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
           </h1>
 
           {/* Subheadline */}
-          <p className="mt-3 sm:mt-3.5 text-xs sm:text-sm lg:text-[15px] text-zinc-600 max-w-xl mx-auto leading-relaxed">
+          <p className="mt-3 sm:mt-3.5 text-xs sm:text-sm lg:text-[15px] text-zinc-700 font-medium max-w-xl mx-auto leading-relaxed">
             Replace paper menus, slow order taking, and clunky hardware. Contactless table ordering, live kitchen display (KDS), split billing, and multi-venue management in one unified cloud system.
           </p>
 
@@ -327,24 +328,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
             )}
           </div>
 
-          {/* Trust Highlights */}
-          <div className="mt-4 sm:mt-5 flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-[11px] sm:text-xs font-medium text-zinc-500">
-            <span className="flex items-center gap-1.5">
-              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              No App Download for Guests
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              Instant Setup in 5 Minutes
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              Any Tablet, Phone or PC
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              Zero Hardware Lock-In
-            </span>
+          {/* Trust Highlights - Frosted glass pill badges for crystal-clear readability against gradient */}
+          <div className="mt-4 sm:mt-5 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3 text-xs font-semibold">
+            {[
+              'No App Download for Guests',
+              'Instant Setup in 5 Minutes',
+              'Any Tablet, Phone or PC',
+              'Zero Hardware Lock-In',
+            ].map((item, idx) => (
+              <div
+                key={idx}
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/95 backdrop-blur-md border border-zinc-200/90 text-zinc-900 font-bold shadow-2xs whitespace-nowrap select-none"
+              >
+                <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Check className="w-2.5 h-2.5 stroke-[3]" />
+                </span>
+                <span>{item}</span>
+              </div>
+            ))}
           </div>
 
           {/* ======================================================== */}
@@ -519,7 +520,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* ======================================================== */}
       {/* 2. PHILOSOPHY / VALUE PROPOSITION STATEMENT (Shelf-style) */}
       {/* ======================================================== */}
-      <section className="py-12 bg-white border-b border-zinc-200/80">
+      <section className="relative z-10 py-12 bg-white/40 backdrop-blur-xs border-b border-zinc-200/80">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
           <p className="text-base sm:text-lg font-medium text-zinc-700 leading-relaxed">
             Why modernize your venue with <span className="font-bold text-zinc-900">NamasteQR</span>? 
@@ -532,7 +533,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* 3. SYMMETRICAL 6-FEATURE GRID WITH CENTER PHONE MOCKUP   */}
       {/*    (Directly inspired by Shelf Tile 2 & Tile 3 layout)   */}
       {/* ======================================================== */}
-      <section className="py-20 sm:py-28 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="relative z-10 py-20 sm:py-28 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <span className="text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
             Built for Hospitality
@@ -631,7 +632,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* 4. INTERACTIVE 4-STEP WORKFLOW SHOWCASE                  */}
       {/*    (Inspired by Shelf's Tabbed Feature Section)          */}
       {/* ======================================================== */}
-      <section className="py-20 bg-white border-y border-zinc-200/80">
+      <section className="relative z-10 py-20 bg-white/40 backdrop-blur-xs border-y border-zinc-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-12">
             <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
@@ -646,7 +647,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
           </div>
 
           {/* Interactive Step Card Container */}
-          <div className="max-w-4xl mx-auto bg-zinc-50 border border-zinc-200/90 rounded-3xl p-6 sm:p-10 shadow-lg">
+          <div className="max-w-4xl mx-auto bg-white/90 backdrop-blur-md border border-zinc-200/90 rounded-3xl p-6 sm:p-10 shadow-lg">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
               {/* Left: Step Description */}
               <div className="space-y-4 text-left">
@@ -703,7 +704,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* ======================================================== */}
       {/* 5. VENUE AUDIENCES                                       */}
       {/* ======================================================== */}
-      <section className="py-16 bg-zinc-50 border-b border-zinc-200/80">
+      <section className="relative z-10 py-16 bg-white/40 backdrop-blur-xs border-b border-zinc-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
             Engineered For Modern Hospitality Properties
@@ -712,7 +713,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
             {venueTypes.map((v, i) => (
               <div
                 key={i}
-                className="flex flex-col items-center justify-center p-5 rounded-2xl bg-white border border-zinc-200 text-center hover:border-blue-400 hover:shadow-xs transition-all"
+                className="flex flex-col items-center justify-center p-5 rounded-2xl bg-white/90 backdrop-blur-sm border border-zinc-200 text-center hover:border-blue-400 hover:shadow-xs transition-all"
               >
                 <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-100 mb-2.5">
                   {v.icon}
@@ -727,7 +728,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* ======================================================== */}
       {/* 6. CONVERSION / VALUE CALLOUT (Shelf-inspired Card)       */}
       {/* ======================================================== */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="relative z-10 py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="rounded-3xl bg-gradient-to-r from-zinc-900 via-zinc-900 to-blue-950 text-white p-8 sm:p-14 shadow-2xl border border-zinc-800">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
             {/* Left Content */}
@@ -784,7 +785,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* ======================================================== */}
       {/* 7. ACCORDION FAQ SECTION (Shelf Tile 5 Inspiration)      */}
       {/* ======================================================== */}
-      <section className="py-20 bg-white border-t border-zinc-200/80">
+      <section className="relative z-10 py-20 bg-white/40 backdrop-blur-xs border-t border-zinc-200/80">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Centered Question Badge */}
           <div className="text-center mb-12">
@@ -806,7 +807,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
               return (
                 <div
                   key={i}
-                  className="rounded-2xl border border-zinc-200 bg-zinc-50/50 overflow-hidden transition-colors"
+                  className="rounded-2xl border border-zinc-200 bg-white/80 backdrop-blur-sm overflow-hidden transition-colors"
                 >
                   <button
                     type="button"
@@ -835,7 +836,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       {/* ======================================================== */}
       {/* 8. PRE-FOOTER "STILL HAVE QUESTIONS?" BOX (Shelf Tile 6) */}
       {/* ======================================================== */}
-      <section className="py-16 bg-zinc-50 border-t border-zinc-200/80">
+      <section className="relative z-10 py-16 bg-white/40 backdrop-blur-xs border-t border-zinc-200/80">
         <div className="max-w-2xl mx-auto px-4 text-center space-y-4">
           <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center mx-auto">
             <Mail className="w-5 h-5" />
