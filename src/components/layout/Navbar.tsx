@@ -105,13 +105,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute }) => {
               />
             </div>
           ) : (
-            <div className="hidden sm:flex items-center gap-2.5">
+            <div className="flex items-center gap-2 sm:gap-2.5">
               {currentRoute !== '/login' && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => onNavigate('/login')}
-                  className="text-zinc-700 font-semibold"
+                  className="text-zinc-700 font-semibold px-2.5 sm:px-3 text-xs sm:text-sm"
                 >
                   Sign In
                 </Button>
@@ -121,9 +121,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute }) => {
                   variant="primary"
                   size="sm"
                   onClick={() => onNavigate('/signup')}
-                  rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                  rightIcon={<ArrowRight className="w-3.5 h-3.5 hidden sm:inline" />}
+                  className="px-3 sm:px-4 text-xs sm:text-sm font-semibold shadow-xs"
                 >
-                  Create Account
+                  <span className="hidden xs:inline">Create Account</span>
+                  <span className="xs:hidden">Join</span>
                 </Button>
               )}
             </div>
