@@ -31,7 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute }) => {
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200/80 bg-white/80 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 sm:h-15 flex items-center justify-between">
         <Logo onClick={() => onNavigate(isAuthenticated ? '/dashboard' : '/')} />
 
         <div className="hidden md:flex items-center gap-6 text-xs font-semibold text-zinc-500">

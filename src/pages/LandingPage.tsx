@@ -246,7 +246,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
       {/* ======================================================== */}
       {/* 1. HERO SECTION (Inspired by Shelf's Layered Hero Canvas) */}
       {/* ======================================================== */}
-      <section className="relative overflow-hidden pt-12 pb-20 sm:pt-20 sm:pb-32 border-b border-zinc-200/80 bg-gradient-to-b from-blue-50/40 via-white to-zinc-50/50">
+      <section className="relative overflow-hidden pt-8 pb-14 sm:pt-10 sm:pb-20 border-b border-zinc-200/80 bg-gradient-to-b from-blue-50/40 via-white to-zinc-50/50">
         {/* Subtle background tech grid */}
         <div 
           className="absolute inset-0 pointer-events-none opacity-[0.035]"
@@ -258,13 +258,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
           {/* Eyebrow Badge */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-200/80 text-blue-700 text-xs font-semibold mb-6 shadow-2xs">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200/80 text-blue-700 text-[11px] sm:text-xs font-semibold mb-3.5 shadow-2xs">
             <Sparkles className="w-3.5 h-3.5 text-blue-600" />
             <span>Smart Hospitality OS & Contactless Dining Infrastructure</span>
           </div>
 
           {/* Main Headline */}
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-zinc-900 max-w-4xl mx-auto leading-[1.15]">
+          <h1 className="text-3xl sm:text-4xl lg:text-[46px] font-extrabold tracking-tight text-zinc-900 max-w-3xl mx-auto leading-[1.12]">
             Transform Dining with <br className="hidden sm:inline" />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700">
               Smart QR Menus & Real-Time POS
@@ -272,19 +272,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           </h1>
 
           {/* Subheadline */}
-          <p className="mt-6 text-base sm:text-lg text-zinc-600 max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-3 sm:mt-3.5 text-xs sm:text-sm lg:text-[15px] text-zinc-600 max-w-xl mx-auto leading-relaxed">
             Replace paper menus, slow order taking, and clunky hardware. Contactless table ordering, live kitchen display (KDS), split billing, and multi-venue management in one unified cloud system.
           </p>
 
           {/* Dual Action Buttons (Guaranteed working navigation) */}
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-md mx-auto">
+          <div className="mt-4 sm:mt-5 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
             {isAuthenticated && user ? (
               <Button
                 variant="primary"
-                size="lg"
+                size="md"
                 onClick={() => onNavigate('/dashboard')}
                 rightIcon={<ArrowRight className="w-4 h-4" />}
-                className="w-full sm:w-auto px-6 py-3 text-sm font-bold shadow-md bg-blue-600 hover:bg-blue-700"
+                className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-bold shadow-md bg-blue-600 hover:bg-blue-700"
               >
                 Go to Dashboard ({user.business?.name || 'Venue'})
               </Button>
@@ -292,18 +292,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               <>
                 <Button
                   variant="primary"
-                  size="lg"
+                  size="md"
                   onClick={() => onNavigate('/signup')}
                   rightIcon={<ArrowRight className="w-4 h-4" />}
-                  className="w-full sm:w-auto px-6 py-3 text-sm font-bold shadow-md bg-blue-600 hover:bg-blue-700"
+                  className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-bold shadow-md bg-blue-600 hover:bg-blue-700"
                 >
                   Create Business Account
                 </Button>
                 <Button
                   variant="outline"
-                  size="lg"
+                  size="md"
                   onClick={() => onNavigate('/login')}
-                  className="w-full sm:w-auto px-6 py-3 text-sm font-bold bg-white hover:bg-zinc-100 border-zinc-300"
+                  className="w-full sm:w-auto px-5 py-2.5 text-xs sm:text-sm font-bold bg-white hover:bg-zinc-100 border-zinc-300"
                 >
                   Sign In to Portal
                 </Button>
@@ -312,21 +312,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           </div>
 
           {/* Trust Highlights */}
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-5 sm:gap-8 text-xs font-medium text-zinc-500">
+          <div className="mt-4 sm:mt-5 flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-[11px] sm:text-xs font-medium text-zinc-500">
             <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               No App Download for Guests
             </span>
             <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               Instant Setup in 5 Minutes
             </span>
             <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               Any Tablet, Phone or PC
             </span>
             <span className="flex items-center gap-1.5">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               Zero Hardware Lock-In
             </span>
           </div>
@@ -334,7 +334,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
           {/* ======================================================== */}
           {/* HERO PRODUCT MOCKUP COMPOSITION (Shelf-inspired visual)   */}
           {/* ======================================================== */}
-          <div className="mt-14 relative max-w-5xl mx-auto">
+          <div className="mt-7 sm:mt-9 relative max-w-5xl mx-auto">
             {/* Ambient Back Glow */}
             <div className="absolute -inset-1.5 bg-gradient-to-r from-blue-500/20 via-indigo-500/20 to-amber-500/10 rounded-3xl blur-2xl opacity-70 -z-10" />
 
@@ -454,7 +454,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             </div>
 
             {/* Overlapping Realistic Smartphone (Front Layer) - Desktop & Tablet */}
-            <div className="hidden lg:block absolute -bottom-14 -right-16 lg:-right-20 xl:-right-28 2xl:-right-32 z-30 transform rotate-[4.5deg] hover:rotate-[2deg] hover:-translate-y-1 transition-all duration-300 drop-shadow-2xl">
+            <div className="hidden lg:block absolute -bottom-10 -right-24 lg:-right-32 xl:-right-44 2xl:-right-52 z-30 transform rotate-[5.5deg] scale-[0.92] lg:scale-[0.94] origin-bottom-right hover:rotate-[3deg] hover:scale-[0.98] transition-all duration-300 drop-shadow-2xl">
               <CustomerMenuPhoneMockup variant="hero" />
             </div>
 
