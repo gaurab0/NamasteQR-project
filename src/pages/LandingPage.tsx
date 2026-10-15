@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Footer } from '../components/layout/Footer';
+import { CustomerMenuPhoneMockup } from '../components/landing/CustomerMenuPhoneMockup';
 
 interface LandingPageProps {
   onNavigate: (route: string) => void;
@@ -452,54 +453,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            {/* Overlapping Floating Phone Frame (Front Center/Right) */}
-            <div className="hidden sm:block absolute -bottom-10 -right-6 lg:right-4 w-72 bg-zinc-900 p-2.5 rounded-[36px] shadow-2xl border-4 border-zinc-800 text-left">
-              <div className="w-full bg-white rounded-[28px] overflow-hidden border border-zinc-100 p-3 space-y-2.5">
-                {/* Phone Speaker & Notch */}
-                <div className="w-16 h-3.5 bg-zinc-900 rounded-full mx-auto" />
-                
-                {/* Guest Menu Header */}
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-100">
-                  <div>
-                    <div className="text-xs font-bold text-zinc-900">NamasteQR Menu</div>
-                    <div className="text-[10px] text-zinc-500">Table 4 • Contactless Order</div>
-                  </div>
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                </div>
-
-                {/* Food Item Card 1 */}
-                <div className="flex items-center justify-between p-2 rounded-xl bg-zinc-50 border border-zinc-100">
-                  <div>
-                    <div className="text-xs font-bold text-zinc-900">Classic Chicken Burger</div>
-                    <div className="text-[10px] text-zinc-500">Toasted brioche, melted cheddar</div>
-                    <div className="text-xs font-extrabold text-blue-600 mt-1">Rs. 450</div>
-                  </div>
-                  <span className="px-2 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold shadow-2xs">
-                    + Add
-                  </span>
-                </div>
-
-                {/* Food Item Card 2 */}
-                <div className="flex items-center justify-between p-2 rounded-xl bg-zinc-50 border border-zinc-100">
-                  <div>
-                    <div className="text-xs font-bold text-zinc-900">Iced Caramel Latte</div>
-                    <div className="text-[10px] text-zinc-500">Double espresso shot</div>
-                    <div className="text-xs font-extrabold text-blue-600 mt-1">Rs. 240</div>
-                  </div>
-                  <span className="px-2 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold shadow-2xs">
-                    + Add
-                  </span>
-                </div>
-
-                {/* Floating Guest Cart Bar */}
-                <div className="p-2.5 rounded-xl bg-zinc-900 text-white flex items-center justify-between text-xs font-bold shadow-lg">
-                  <div className="flex items-center gap-1.5">
-                    <ShoppingBag className="w-3.5 h-3.5 text-amber-400" />
-                    <span>2 Items</span>
-                  </div>
-                  <span>Rs. 690 →</span>
-                </div>
-              </div>
+            {/* Overlapping Realistic Smartphone (Front Layer) - Desktop & Tablet */}
+            <div className="hidden lg:block absolute -bottom-16 -right-6 xl:-right-10 z-30 transform hover:-translate-y-1 transition-transform duration-300">
+              <CustomerMenuPhoneMockup variant="hero" />
             </div>
 
             {/* Floating QR Tag Badge (Left) */}
@@ -513,6 +469,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
                 <div className="text-[10px] font-bold text-emerald-600 mt-0.5">● Connected Live</div>
               </div>
             </div>
+          </div>
+
+          {/* Centered Realistic Smartphone for Mobile & Tablet screens (< lg) */}
+          <div className="mt-10 flex flex-col items-center justify-center lg:hidden relative z-20">
+            <div className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Live Guest Mobile View (Table #4)
+            </div>
+            <CustomerMenuPhoneMockup variant="hero" />
           </div>
         </div>
       </section>
@@ -585,45 +550,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
             </div>
           </div>
 
-          {/* Center Column: Phone Mockup Frame */}
+          {/* Center Column: Realistic Smartphone Mockup Frame */}
           <div className="lg:col-span-4 flex justify-center py-4">
-            <div className="w-full max-w-[310px] bg-zinc-900 p-3 rounded-[40px] shadow-2xl border-4 border-zinc-800 text-left">
-              <div className="bg-white rounded-[30px] p-3.5 space-y-3 overflow-hidden border border-zinc-100">
-                <div className="w-16 h-4 bg-zinc-900 rounded-full mx-auto" />
-                
-                <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200">
-                  <div className="text-[10px] font-bold text-blue-700 uppercase">Live Waiter Station</div>
-                  <div className="text-sm font-extrabold text-zinc-900">Table 4 Status: Active</div>
-                </div>
-
-                <div className="space-y-2 text-xs">
-                  <div className="p-2 rounded-lg bg-zinc-50 border border-zinc-100">
-                    <div className="flex justify-between font-bold text-zinc-900">
-                      <span>2x Momo Platter</span>
-                      <span className="text-emerald-600 font-extrabold">Ready</span>
-                    </div>
-                    <div className="text-[10px] text-zinc-500">Kitchen Ticket #104</div>
-                  </div>
-                  <div className="p-2 rounded-lg bg-zinc-50 border border-zinc-100">
-                    <div className="flex justify-between font-bold text-zinc-900">
-                      <span>1x Mint Lemonade</span>
-                      <span className="text-amber-600 font-extrabold">Preparing</span>
-                    </div>
-                    <div className="text-[10px] text-zinc-500">Bar Station</div>
-                  </div>
-                  <div className="p-2 rounded-lg bg-zinc-50 border border-zinc-100">
-                    <div className="flex justify-between font-bold text-zinc-900">
-                      <span>Guest Bill Total</span>
-                      <span className="text-blue-600 font-extrabold">Rs. 980</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-emerald-600 text-white text-center font-bold text-xs shadow-sm">
-                  ✓ Table In Service
-                </div>
-              </div>
-            </div>
+            <CustomerMenuPhoneMockup variant="grid" className="transform hover:scale-[1.01] transition-transform" />
           </div>
 
           {/* Right Column (3 Features) */}
