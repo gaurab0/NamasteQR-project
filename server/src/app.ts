@@ -7,32 +7,99 @@ import rbacRoutes from './routes/rbac.routes';
 import menuRoutes from './routes/menu.routes';
 import imageRoutes from './routes/image.routes';
 import contactRoutes from './routes/contact.routes';
+import printRoutes from './routes/print.routes';
 import { errorHandler } from './middleware/errorHandler';
+import { sanitizeInput } from './middleware/sanitize.middleware';
+import { generalApiLimiter } from './middleware/rateLimit.middleware';
 import { config } from './config/env';
 
 export function createApp() {
   const app = express();
 
-  // Basic security headers
+  // 1. Reverse proxy configuration: trust first proxy hop for client IP detection behind Cloudflare, Nginx, ALB, Cloud Run
+  app.set('trust proxy', 1);
+
+  // 2. Security headers via Helmet & Express hardening
+  app.disable('x-powered-by');
   app.use(
     helmet({
-      contentSecurityPolicy: false, // Vite handles development script injection
+      contentSecurityPolicy: false, // Vite handles development script injection & HMR
       crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      frameguard: { action: 'sameorigin' }, // X-Frame-Options: SAMEORIGIN
+      xContentTypeOptions: true, // X-Content-Type-Options: nosniff
+      hsts: config.isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false, // Strict-Transport-Security
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' }, // Referrer-Policy
     })
   );
 
-  // CORS configuration
+  // 3. Constrained CORS configuration
+  const configuredAllowedOrigins = [
+    config.frontendUrl,
+    config.appUrl,
+    ...config.allowedOrigins,
+  ].filter(Boolean) as string[];
+
   app.use(
     cors({
-      origin: true,
+      origin: (origin, callback) => {
+        // Permit requests with no origin (e.g. mobile apps, curl, direct server-to-server, LAN printer bridge)
+        if (!origin) {
+          return callback(null, true);
+        }
+
+        // In non-production, allow localhost, 127.0.0.1, and local private LAN ranges
+        if (!config.isProduction) {
+          if (
+            /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+            /^https?:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin) ||
+            configuredAllowedOrigins.includes(origin)
+          ) {
+            return callback(null, true);
+          }
+        } else {
+          // In production, strictly match authorized origins
+          if (configuredAllowedOrigins.includes(origin)) {
+            return callback(null, true);
+          }
+        }
+
+        // Deny unlisted origins without throwing 500 internal server crash
+        return callback(null, false);
+      },
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'x-auth-token',
+        'x-staff-session',
+        'x-staff-email',
+        'x-staff-role',
+        'x-business-id',
+        'x-business-name',
+        'x-business-type',
+        'x-user-id',
+        'x-user-email',
+        'x-user-role',
+        'x-printer-host',
+        'x-printer-port',
+      ],
     })
   );
 
-  // Body and cookie parsers
+  // 4. Body and cookie parsers
+  app.use(express.raw({ type: ['application/octet-stream', 'application/x-escpos'], limit: '10mb' }));
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
   app.use(cookieParser());
+
+  // 5. Input validation & Prototype pollution sanitization
+  app.use(sanitizeInput);
+
+  // 6. General API Rate Limiting for all /api endpoints
+  app.use('/api', generalApiLimiter);
 
   // Health check endpoint
   app.get('/api/health', (req, res) => {
@@ -45,15 +112,16 @@ export function createApp() {
     });
   });
 
-  // Mount Routes
+  // 7. Mount Routes
   app.use('/api/auth', authRoutes);
   app.use('/api/rbac', rbacRoutes);
   app.use('/api/business', rbacRoutes);
   app.use('/api/menus', menuRoutes);
   app.use('/api/images', imageRoutes);
   app.use('/api/contact', contactRoutes);
+  app.use('/api/print', printRoutes);
 
-  // Centralized error handler
+  // 8. Centralized error handler
   app.use(errorHandler);
 
   return app;

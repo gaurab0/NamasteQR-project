@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Search,
-  ShieldCheck,
+  Globe,
   ShoppingBag,
   Plus,
   Minus,
@@ -137,10 +137,10 @@ export const CustomerMenuPhoneMockup: React.FC<CustomerMenuPhoneMockupProps> = (
                       <h4 className="text-xs font-black text-white truncate drop-shadow-sm">
                         7 Spices Bistro & Bar
                       </h4>
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
-                        <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
-                        Live Menu
-                      </span>
+                      <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-white/15 text-white border border-white/25 backdrop-blur-md shadow-xs select-none">
+                        <Globe className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                        <span>English</span>
+                      </div>
                     </div>
                     <p className="text-[10px] text-zinc-200 truncate mt-0.5 font-medium">
                       Authentic Himalayan & Continental Dining

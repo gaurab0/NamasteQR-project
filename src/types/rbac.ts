@@ -252,6 +252,8 @@ export interface TableOrder {
   taxes?: SaleTaxBreakdown[];
   ready_at?: string | Date | null;
   served_at?: string | Date | null;
+  source?: 'QR' | 'POS_MANUAL' | string;
+  pos_sale_id?: string;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -348,6 +350,8 @@ export interface SaleRecord {
   notes?: string;
   created_at: string;
   date_string: string; // YYYY-MM-DD
+  source?: 'POS_MANUAL' | 'QR' | string;
+  dispatch_kitchen?: boolean;
 }
 
 export type SalesTimeFilter = 'DAY' | 'WEEK' | 'MONTH' | 'ALL' | 'CUSTOM' | 'today' | 'week' | 'month' | 'all';

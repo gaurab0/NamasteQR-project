@@ -8,6 +8,7 @@ class RealtimeSocketService {
   private tableListeners: Set<(table: any) => void> = new Set();
   private requestListeners: Set<(request: any) => void> = new Set();
   private menuListeners: Set<(data: any) => void> = new Set();
+  private businessProfileListeners: Set<(data: any) => void> = new Set();
 
   public connect(): Socket {
     if (this.socket && this.socket.connected) {
@@ -52,6 +53,10 @@ class RealtimeSocketService {
 
     this.socket.on('menu:updated', (data: any) => {
       this.menuListeners.forEach((listener) => listener(data));
+    });
+
+    this.socket.on('business:updated', (data: any) => {
+      this.businessProfileListeners.forEach((listener) => listener(data));
     });
 
     return this.socket;
@@ -103,6 +108,14 @@ class RealtimeSocketService {
     this.connect();
     return () => {
       this.menuListeners.delete(callback);
+    };
+  }
+
+  public subscribeToBusinessProfile(callback: (data: any) => void): () => void {
+    this.businessProfileListeners.add(callback);
+    this.connect();
+    return () => {
+      this.businessProfileListeners.delete(callback);
     };
   }
 }

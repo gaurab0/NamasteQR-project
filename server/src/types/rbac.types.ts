@@ -188,6 +188,9 @@ export interface TableOrder {
   taxes?: SaleTaxBreakdown[];
   ready_at?: Date | null;
   served_at?: Date | null;
+  source?: 'QR' | 'POS_MANUAL' | string;
+  pos_sale_id?: string;
+  invoice_number?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -305,6 +308,9 @@ export interface SaleRecord {
   notes?: string;
   created_at: string | Date;
   date_string: string; // YYYY-MM-DD
+  source?: 'POS_MANUAL' | 'QR' | string;
+  is_manual_pos?: boolean;
+  dispatch_kitchen?: boolean;
 }
 
 export interface ServiceRequest {

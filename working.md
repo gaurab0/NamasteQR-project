@@ -1,4 +1,4 @@
-# ServeFlow — Working Reference
+# ServeFlow â€” Working Reference
 
 > **Purpose**: This file is a permanent quick-reference for Antigravity AI. Updated when architecture changes. Prevents re-scanning the whole codebase on every task.
 
@@ -25,6 +25,9 @@
 17. [Environment Variables](#17-environment-variables)
 18. [Recent Changes Log](#18-recent-changes-log)
 19. [Tab-Based Access Control (RBAC rewrite spec)](#19-tab-based-access-control-rbac-rewrite--spec-source-of-truth)
+20. [Deep Security Audit & Hardening](#32-deep-security-audit--hardening)
+21. [Kitchen Dispatch Policy & Adaptive Operational Workflow](#33-kitchen-dispatch-policy--adaptive-operational-workflow)
+22. [Multi-Language Menu Localization & Headless Translation Architecture](#34-multi-language-menu-localization--headless-translation-architecture)
 
 ---
 
@@ -59,7 +62,7 @@
 | Server framework | express | ^4.21.2 |
 | Auth tokens | jsonwebtoken, bcryptjs | ^9.0.3, ^3.0.3 |
 | Email | nodemailer | ^9.1.0 |
-| WhatsApp OTP | meta API / twilio / mock | — |
+| WhatsApp OTP | meta API / twilio / mock | â€” |
 | QR codes | qrcode | ^1.5.4 |
 | Excel export | xlsx | ^0.18.5 |
 | Validation | zod | ^4.4.3 |
@@ -68,11 +71,11 @@
 | TypeScript runner | tsx | ^4.21.0 |
 
 **Scripts**:
-- `npm run dev` — starts Express + Vite with HMR via `tsx watch server.ts`
-- `npm run build` — `vite build && esbuild server.ts --bundle ...`
-- `npm run start` — `node dist/server.cjs` (production)
-- `npm run test` — `tsx server/test/auth.test.ts`
-- `npm run lint` — `tsc --noEmit`
+- `npm run dev` â€” starts Express + Vite with HMR via `tsx watch server.ts`
+- `npm run build` â€” `vite build && esbuild server.ts --bundle ...`
+- `npm run start` â€” `node dist/server.cjs` (production)
+- `npm run test` â€” `tsx server/test/auth.test.ts`
+- `npm run lint` â€” `tsc --noEmit`
 
 **Firebase config**: Loaded from `firebase-applet-config.json` at project root (not `.env`). Uses named Firestore database if `firestoreDatabaseId` is set in that JSON.
 
@@ -82,142 +85,142 @@
 
 ```
 ServeFlow/
-├── server.ts                      # Express server entry point (tsx watch server.ts)
-├── firebase-applet-config.json    # Firebase client config (PUBLIC, safe for client)
-├── .env                           # Server secrets (JWT, email, WhatsApp, etc.)
-├── .env.example                   # Template for env vars
-├── working.md                     # THIS FILE
-├── vite.config.ts                 # Vite config (@/ alias → project root)
-├── package.json
-│
-├── src/                           # React frontend
-│   ├── App.tsx                    # Root: router, providers, guest lock
-│   ├── api/
-│   │   └── authApi.ts             # Client API calls for auth endpoints
-│   ├── components/
-│   │   ├── billing/
-│   │   │   ├── BillingPOS.tsx         # Full POS cashier panel (staff)
-│   │   │   ├── FinalTableBillPage.tsx # Customer-facing final bill
-│   │   │   ├── TaxConfigurationPanel.tsx # Tax settings UI (in config center)
-│   │   │   ├── GLAccountsTable.tsx    # GL accounts UI
-│   │   │   └── ExcelSheetPreviewModal.tsx
-│   │   ├── cart/
-│   │   │   ├── CustomerCartModal.tsx  # Cart review before placing order
-│   │   │   └── OrderSuccessModal.tsx  # Post-order live tracker + inline bill
-│   │   ├── checkin/
-│   │   │   └── CheckInsModule.tsx     # Hotel check-in management
-│   │   ├── common/
-│   │   │   └── DateTimeDisplay.tsx    # Live clock with dual date format
-│   │   ├── config/
-│   │   │   ├── BusinessConfigurationCenter.tsx  # All settings (tax, tables, menu, staff, GL, etc.)
-│   │   │   └── PrinterConfiguration.tsx
-│   │   ├── dashboard/
-│   │   │   └── OperationsOverviewDashboard.tsx  # Overview/analytics tab
-│   │   ├── franchise/
-│   │   │   ├── AddBranchModal.tsx
-│   │   │   └── FranchiseBranchList.tsx
-│   │   ├── kds/
-│   │   │   └── KitchenDisplaySystem.tsx  # KDS: KITCHEN | BAR | WAITER views
-│   │   ├── layout/
-│   │   │   ├── AuthLayout.tsx
-│   │   │   ├── BranchSwitcher.tsx
-│   │   │   ├── Footer.tsx
-│   │   │   ├── Navbar.tsx             # Public/auth navbar (NOT shown on /menu or /dashboard)
-│   │   │   └── Sidebar.tsx            # Dashboard sidebar with DashboardTab type
-│   │   ├── menu/
-│   │   │   ├── AvailabilityStatusBadge.tsx
-│   │   │   ├── CategoryManager.tsx
-│   │   │   ├── DeleteConfirmationModal.tsx
-│   │   │   ├── MenuItemCard.tsx
-│   │   │   ├── MenuItemDetailModal.tsx
-│   │   │   ├── MenuItemFormModal.tsx
-│   │   │   ├── MenuItemPreviewModal.tsx
-│   │   │   ├── MenuModule.tsx
-│   │   │   └── MenuThemeCustomizerModal.tsx
-│   │   ├── tables/
-│   │   │   ├── TableFormModal.tsx
-│   │   │   ├── TableManagementGrid.tsx
-│   │   │   └── TableQrCardModal.tsx
-│   │   ├── team/
-│   │   │   ├── StaffRoleLoginModal.tsx   # PIN/password login for staff roles
-│   │   │   └── TeamStaffManagement.tsx
-│   │   ├── ui/                          # Primitive UI components
-│   │   │   ├── Alert.tsx, Button.tsx, ErrorBoundary.tsx, Input.tsx
-│   │   │   ├── Logo.tsx, OTPInput.tsx, PasswordInput.tsx
-│   │   │   ├── PhoneNumberInput.tsx, Select.tsx
-│   │   └── waiter/
-│   │       └── WaiterStationDashboard.tsx  # Waiter view: service requests queue
-│   ├── context/
-│   │   └── AuthContext.tsx        # Global auth: user, business, branches, login/logout
-│   ├── contexts/
-│   │   └── PrinterContext.tsx     # Printer config context
-│   ├── lib/
-│   │   └── firebase.ts            # Firestore client init (exports `db`)
-│   ├── pages/
-│   │   ├── CustomerMenuPreviewPage.tsx   # *** Customer dining page (QR scan) ***
-│   │   ├── DashboardPage.tsx             # *** Admin/staff dashboard ***
-│   │   ├── MenuManagementPage.tsx        # Legacy menu management page
-│   │   ├── LandingPage.tsx
-│   │   ├── LoginPage.tsx
-│   │   ├── SignupPage.tsx
-│   │   ├── VerifyEmailPage.tsx
-│   │   ├── ForgotPasswordPage.tsx
-│   │   └── ResetPasswordPage.tsx
-│   ├── services/
-│   │   ├── rbac.service.ts        # ClientRBACService class — all API calls + some Firestore
-│   │   └── print.service.ts       # Print/receipt service
-│   ├── types/
-│   │   ├── auth.ts                # User, Business, BusinessType interfaces
-│   │   ├── rbac.ts                # All domain types: MenuItem, TableOrder, SaleRecord, etc.
-│   │   └── printer.types.ts       # Printer-related types
-│   └── utils/
-│       ├── dateFormatter.ts       # formatDualDate(), renderFormattedDate(), DateFormatMode
-│       ├── firestoreUtils.ts      # sanitizeFirestorePayload() — ALWAYS use before Firestore writes
-│       ├── excelExport.ts         # buildSalesWorkbookData()
-│       ├── menuUtils.ts           # Menu helper functions
-│       ├── themeEngine.ts         # Menu theme logic
-│       └── countryCodes.ts        # Phone country code list
-│
-└── server/
-    └── src/
-        ├── app.ts                 # Express app factory (routes, middleware)
-        ├── config/
-        │   ├── env.ts             # Typed env config (reads .env)
-        │   └── firebase.ts        # Firebase Admin init (exports firestoreDb, etc.)
-        ├── controllers/
-        │   └── auth.controller.ts # Auth handlers: signup, login, OTP, reset
-        ├── middleware/
-        │   ├── auth.middleware.ts          # authenticate, optionalAuthenticate
-        │   ├── errorHandler.ts             # Centralized error response
-        │   └── rateLimit.middleware.ts     # Per-route rate limiters
-        ├── routes/
-        │   ├── auth.routes.ts     # /api/auth/*
-        │   ├── rbac.routes.ts     # /api/rbac/* (= /api/business/*)
-        │   ├── menu.routes.ts     # /api/menus/*
-        │   └── image.routes.ts    # /api/images/*
-        ├── services/
-        │   ├── rbac.service.ts    # *** ALL business logic: orders, tables, sales, tax ***
-        │   ├── db.service.ts      # Firestore CRUD for users, businesses, OTPs
-        │   ├── audit.service.ts   # Audit log writes
-        │   ├── email.service.ts   # Email via nodemailer
-        │   ├── otp.service.ts     # OTP generation & verification
-        │   ├── migration.service.ts  # Data migration utilities
-        │   └── whatsapp.service.ts   # WhatsApp OTP via Meta/Twilio
-        ├── types/
-        │   ├── index.ts           # Generic server types
-        │   └── rbac.types.ts      # Server-side mirror of domain types
-        ├── utils/
-        │   ├── id.utils.ts        # ID generation helpers
-        │   └── sequence.util.ts   # Sequential number generation (order/invoice)
-        └── validators/
-            └── auth.validator.ts  # Zod validators for auth inputs
+â”œâ”€â”€ server.ts                      # Express server entry point (tsx watch server.ts)
+â”œâ”€â”€ firebase-applet-config.json    # Firebase client config (PUBLIC, safe for client)
+â”œâ”€â”€ .env                           # Server secrets (JWT, email, WhatsApp, etc.)
+â”œâ”€â”€ .env.example                   # Template for env vars
+â”œâ”€â”€ working.md                     # THIS FILE
+â”œâ”€â”€ vite.config.ts                 # Vite config (@/ alias â†’ project root)
+â”œâ”€â”€ package.json
+â”‚
+â”œâ”€â”€ src/                           # React frontend
+â”‚   â”œâ”€â”€ App.tsx                    # Root: router, providers, guest lock
+â”‚   â”œâ”€â”€ api/
+â”‚   â”‚   â””â”€â”€ authApi.ts             # Client API calls for auth endpoints
+â”‚   â”œâ”€â”€ components/
+â”‚   â”‚   â”œâ”€â”€ billing/
+â”‚   â”‚   â”‚   â”œâ”€â”€ BillingPOS.tsx         # Full POS cashier panel (staff)
+â”‚   â”‚   â”‚   â”œâ”€â”€ FinalTableBillPage.tsx # Customer-facing final bill
+â”‚   â”‚   â”‚   â”œâ”€â”€ TaxConfigurationPanel.tsx # Tax settings UI (in config center)
+â”‚   â”‚   â”‚   â”œâ”€â”€ GLAccountsTable.tsx    # GL accounts UI
+â”‚   â”‚   â”‚   â””â”€â”€ ExcelSheetPreviewModal.tsx
+â”‚   â”‚   â”œâ”€â”€ cart/
+â”‚   â”‚   â”‚   â”œâ”€â”€ CustomerCartModal.tsx  # Cart review before placing order
+â”‚   â”‚   â”‚   â””â”€â”€ OrderSuccessModal.tsx  # Post-order live tracker + inline bill
+â”‚   â”‚   â”œâ”€â”€ checkin/
+â”‚   â”‚   â”‚   â””â”€â”€ CheckInsModule.tsx     # Hotel check-in management
+â”‚   â”‚   â”œâ”€â”€ common/
+â”‚   â”‚   â”‚   â””â”€â”€ DateTimeDisplay.tsx    # Live clock with dual date format
+â”‚   â”‚   â”œâ”€â”€ config/
+â”‚   â”‚   â”‚   â”œâ”€â”€ BusinessConfigurationCenter.tsx  # All settings (tax, tables, menu, staff, GL, etc.)
+â”‚   â”‚   â”‚   â””â”€â”€ PrinterConfiguration.tsx
+â”‚   â”‚   â”œâ”€â”€ dashboard/
+â”‚   â”‚   â”‚   â””â”€â”€ OperationsOverviewDashboard.tsx  # Overview/analytics tab
+â”‚   â”‚   â”œâ”€â”€ franchise/
+â”‚   â”‚   â”‚   â”œâ”€â”€ AddBranchModal.tsx
+â”‚   â”‚   â”‚   â””â”€â”€ FranchiseBranchList.tsx
+â”‚   â”‚   â”œâ”€â”€ kds/
+â”‚   â”‚   â”‚   â””â”€â”€ KitchenDisplaySystem.tsx  # KDS: KITCHEN | BAR | WAITER views
+â”‚   â”‚   â”œâ”€â”€ layout/
+â”‚   â”‚   â”‚   â”œâ”€â”€ AuthLayout.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ BranchSwitcher.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ Footer.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ Navbar.tsx             # Public/auth navbar (NOT shown on /menu or /dashboard)
+â”‚   â”‚   â”‚   â””â”€â”€ Sidebar.tsx            # Dashboard sidebar with DashboardTab type
+â”‚   â”‚   â”œâ”€â”€ menu/
+â”‚   â”‚   â”‚   â”œâ”€â”€ AvailabilityStatusBadge.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ CategoryManager.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ DeleteConfirmationModal.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ MenuItemCard.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ MenuItemDetailModal.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ MenuItemFormModal.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ MenuItemPreviewModal.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ MenuModule.tsx
+â”‚   â”‚   â”‚   â””â”€â”€ MenuThemeCustomizerModal.tsx
+â”‚   â”‚   â”œâ”€â”€ tables/
+â”‚   â”‚   â”‚   â”œâ”€â”€ TableFormModal.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ TableManagementGrid.tsx
+â”‚   â”‚   â”‚   â””â”€â”€ TableQrCardModal.tsx
+â”‚   â”‚   â”œâ”€â”€ team/
+â”‚   â”‚   â”‚   â”œâ”€â”€ StaffRoleLoginModal.tsx   # PIN/password login for staff roles
+â”‚   â”‚   â”‚   â””â”€â”€ TeamStaffManagement.tsx
+â”‚   â”‚   â”œâ”€â”€ ui/                          # Primitive UI components
+â”‚   â”‚   â”‚   â”œâ”€â”€ Alert.tsx, Button.tsx, ErrorBoundary.tsx, Input.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ Logo.tsx, OTPInput.tsx, PasswordInput.tsx
+â”‚   â”‚   â”‚   â”œâ”€â”€ PhoneNumberInput.tsx, Select.tsx
+â”‚   â”‚   â””â”€â”€ waiter/
+â”‚   â”‚       â””â”€â”€ WaiterStationDashboard.tsx  # Waiter view: service requests queue
+â”‚   â”œâ”€â”€ context/
+â”‚   â”‚   â””â”€â”€ AuthContext.tsx        # Global auth: user, business, branches, login/logout
+â”‚   â”œâ”€â”€ contexts/
+â”‚   â”‚   â””â”€â”€ PrinterContext.tsx     # Printer config context
+â”‚   â”œâ”€â”€ lib/
+â”‚   â”‚   â””â”€â”€ firebase.ts            # Firestore client init (exports `db`)
+â”‚   â”œâ”€â”€ pages/
+â”‚   â”‚   â”œâ”€â”€ CustomerMenuPreviewPage.tsx   # *** Customer dining page (QR scan) ***
+â”‚   â”‚   â”œâ”€â”€ DashboardPage.tsx             # *** Admin/staff dashboard ***
+â”‚   â”‚   â”œâ”€â”€ MenuManagementPage.tsx        # Legacy menu management page
+â”‚   â”‚   â”œâ”€â”€ LandingPage.tsx
+â”‚   â”‚   â”œâ”€â”€ LoginPage.tsx
+â”‚   â”‚   â”œâ”€â”€ SignupPage.tsx
+â”‚   â”‚   â”œâ”€â”€ VerifyEmailPage.tsx
+â”‚   â”‚   â”œâ”€â”€ ForgotPasswordPage.tsx
+â”‚   â”‚   â””â”€â”€ ResetPasswordPage.tsx
+â”‚   â”œâ”€â”€ services/
+â”‚   â”‚   â”œâ”€â”€ rbac.service.ts        # ClientRBACService class â€” all API calls + some Firestore
+â”‚   â”‚   â””â”€â”€ print.service.ts       # Print/receipt service
+â”‚   â”œâ”€â”€ types/
+â”‚   â”‚   â”œâ”€â”€ auth.ts                # User, Business, BusinessType interfaces
+â”‚   â”‚   â”œâ”€â”€ rbac.ts                # All domain types: MenuItem, TableOrder, SaleRecord, etc.
+â”‚   â”‚   â””â”€â”€ printer.types.ts       # Printer-related types
+â”‚   â””â”€â”€ utils/
+â”‚       â”œâ”€â”€ dateFormatter.ts       # formatDualDate(), renderFormattedDate(), DateFormatMode
+â”‚       â”œâ”€â”€ firestoreUtils.ts      # sanitizeFirestorePayload() â€” ALWAYS use before Firestore writes
+â”‚       â”œâ”€â”€ excelExport.ts         # buildSalesWorkbookData()
+â”‚       â”œâ”€â”€ menuUtils.ts           # Menu helper functions
+â”‚       â”œâ”€â”€ themeEngine.ts         # Menu theme logic
+â”‚       â””â”€â”€ countryCodes.ts        # Phone country code list
+â”‚
+â””â”€â”€ server/
+    â””â”€â”€ src/
+        â”œâ”€â”€ app.ts                 # Express app factory (routes, middleware)
+        â”œâ”€â”€ config/
+        â”‚   â”œâ”€â”€ env.ts             # Typed env config (reads .env)
+        â”‚   â””â”€â”€ firebase.ts        # Firebase Admin init (exports firestoreDb, etc.)
+        â”œâ”€â”€ controllers/
+        â”‚   â””â”€â”€ auth.controller.ts # Auth handlers: signup, login, OTP, reset
+        â”œâ”€â”€ middleware/
+        â”‚   â”œâ”€â”€ auth.middleware.ts          # authenticate, optionalAuthenticate
+        â”‚   â”œâ”€â”€ errorHandler.ts             # Centralized error response
+        â”‚   â””â”€â”€ rateLimit.middleware.ts     # Per-route rate limiters
+        â”œâ”€â”€ routes/
+        â”‚   â”œâ”€â”€ auth.routes.ts     # /api/auth/*
+        â”‚   â”œâ”€â”€ rbac.routes.ts     # /api/rbac/* (= /api/business/*)
+        â”‚   â”œâ”€â”€ menu.routes.ts     # /api/menus/*
+        â”‚   â””â”€â”€ image.routes.ts    # /api/images/*
+        â”œâ”€â”€ services/
+        â”‚   â”œâ”€â”€ rbac.service.ts    # *** ALL business logic: orders, tables, sales, tax ***
+        â”‚   â”œâ”€â”€ db.service.ts      # Firestore CRUD for users, businesses, OTPs
+        â”‚   â”œâ”€â”€ audit.service.ts   # Audit log writes
+        â”‚   â”œâ”€â”€ email.service.ts   # Email via nodemailer
+        â”‚   â”œâ”€â”€ otp.service.ts     # OTP generation & verification
+        â”‚   â”œâ”€â”€ migration.service.ts  # Data migration utilities
+        â”‚   â””â”€â”€ whatsapp.service.ts   # WhatsApp OTP via Meta/Twilio
+        â”œâ”€â”€ types/
+        â”‚   â”œâ”€â”€ index.ts           # Generic server types
+        â”‚   â””â”€â”€ rbac.types.ts      # Server-side mirror of domain types
+        â”œâ”€â”€ utils/
+        â”‚   â”œâ”€â”€ id.utils.ts        # ID generation helpers
+        â”‚   â””â”€â”€ sequence.util.ts   # Sequential number generation (order/invoice)
+        â””â”€â”€ validators/
+            â””â”€â”€ auth.validator.ts  # Zod validators for auth inputs
 ```
 
 ---
 
 ## 4. Routing & Navigation
 
-**No React Router** — custom SPA routing via `window.history.pushState` + `useState<currentPath>` in `App.tsx`.
+**No React Router** â€” custom SPA routing via `window.history.pushState` + `useState<currentPath>` in `App.tsx`.
 
 ### Routes
 
@@ -264,7 +267,7 @@ const isDashboardRoute = currentPath.startsWith('/dashboard');
 
 ### Owner/Admin login
 
-1. `POST /api/auth/login` → returns JWT + user object
+1. `POST /api/auth/login` â†’ returns JWT + user object
 2. JWT stored in `localStorage['serveflow_auth_token']`
 3. User cached in `localStorage['serveflow_cached_user']`
 4. Session restored via `GET /api/auth/me` on app load
@@ -272,7 +275,7 @@ const isDashboardRoute = currentPath.startsWith('/dashboard');
 
 ### Staff role session (secondary)
 
-Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password in `StaffRoleLoginModal`. The role is a label; **what they can open is decided by `allowed_tabs`** (§19).
+Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password in `StaffRoleLoginModal`. The role is a label; **what they can open is decided by `allowed_tabs`** (Â§19).
 
 - Session stored in `sessionStorage['serveflow_staff_role_session']`
 - Type: `StaffAccountSession { role, email, name, authenticatedAt, businessId, allowed_tabs }` (`custom_permissions` deprecated/ignored)
@@ -281,7 +284,7 @@ Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password i
 
 ### Customer (guest) session
 
-1. Customer scans table QR → `POST /api/rbac/tables/scan-checkin` (public, no auth)
+1. Customer scans table QR â†’ `POST /api/rbac/tables/scan-checkin` (public, no auth)
 2. Server validates session token in QR, returns `{ businessId, tableId, tableNumber, sessionId, hostToken }`
 3. Client stores in `sessionStorage['serveflow_customer_table_session']`
 4. Type: `CustomerTableSession { businessId, tableId, tableNumber, sessionId, isHost, hostToken }`
@@ -292,7 +295,7 @@ Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password i
 
 - `Business.parent_business_id` links branches to a parent
 - `AuthContext.branches[]` lists all branches
-- `AuthContext.switchBranch(branchId)` changes active branch — updates `localStorage['serveflow_active_branch_id']`
+- `AuthContext.switchBranch(branchId)` changes active branch â€” updates `localStorage['serveflow_active_branch_id']`
 - Active business: `user.business` (synced to selected branch)
 
 ---
@@ -310,9 +313,9 @@ Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password i
 | `password_reset_tokens` | Password reset tokens |
 | `audit_logs` | Login/action audit log |
 
-> **Legacy note**: Client `rbac.service.ts` still has some reads to top-level `menus`, `check_ins`, `tables` — these are old paths from before the business-scoped sub-collection migration. Do NOT add new code using these legacy paths.
+> **Legacy note**: Client `rbac.service.ts` still has some reads to top-level `menus`, `check_ins`, `tables` â€” these are old paths from before the business-scoped sub-collection migration. Do NOT add new code using these legacy paths.
 
-### `businesses/{businessId}` — root document
+### `businesses/{businessId}` â€” root document
 
 | Field | Type | Description |
 |---|---|---|
@@ -320,8 +323,8 @@ Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password i
 | `name` | string | Display name |
 | `type` | BusinessType | RESTAURANT \| HOTEL \| CAFE \| RESORT \| BAR \| OTHER |
 | `status` | BusinessStatus | PENDING_VERIFICATION \| ACTIVE \| SUSPENDED \| DEACTIVATED |
-| `tagline` | string? | — |
-| `location` | string? | — |
+| `tagline` | string? | â€” |
+| `location` | string? | â€” |
 | `currency` | string? | e.g. `NPR` |
 | `tax_rate` | number? | Legacy flat tax rate (superseded by `tax_settings/default`) |
 | `date_format_nav` | `'ENGLISH' \| 'NEPALI' \| 'BOTH'` | Date format for dashboard navbar |
@@ -329,19 +332,19 @@ Staff members (WAITER, KITCHEN_STAFF, CASHIER, etc.) log in via a PIN/password i
 | `parent_business_id` | string? | Set on branch documents |
 | `menu_theme_config` | MenuThemeConfig? | Customer menu visual theming |
 
-### `businesses/{businessId}/menus/{itemId}` — menu items
+### `businesses/{businessId}/menus/{itemId}` â€” menu items
 
 Fields: `id, business_id, name, category, category_id, price, currency, description, image_url, food_type (veg|non-veg|none), status (available|unavailable|out_of_stock), is_available, has_variants, variants[], variant_group_name, display_style, show_image, promo_badge, order_index, preparation_time_mins, created_by, created_at, updated_at`
 
-### `businesses/{businessId}/menu_categories/{categoryId}` — categories
+### `businesses/{businessId}/menu_categories/{categoryId}` â€” categories
 
 Fields: `id, business_id, name, created_at, updated_at`
 
-### `businesses/{businessId}/tables/{tableId}` — restaurant tables
+### `businesses/{businessId}/tables/{tableId}` â€” restaurant tables
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | — |
+| `id` | string | â€” |
 | `table_number` | string | Display number (e.g. "T1", "12") |
 | `floor` | string? | Floor label |
 | `building` | string? | Building label |
@@ -356,14 +359,14 @@ Fields: `id, business_id, name, created_at, updated_at`
 | `order_number` | string? | Current active order number |
 | `invoice_number` | string? | Invoice number after settlement |
 
-### `businesses/{businessId}/table_orders/{orderId}` — orders
+### `businesses/{businessId}/table_orders/{orderId}` â€” orders
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | — |
-| `business_id` | string | — |
-| `table_id` | string | — |
-| `table_number` | string | — |
+| `id` | string | â€” |
+| `business_id` | string | â€” |
+| `table_id` | string | â€” |
+| `table_number` | string | â€” |
 | `order_number` | string? | Sequential order number |
 | `invoice_number` | string? | Invoice number (set on settlement) |
 | `items` | TableOrderItem[] | Array of ordered items |
@@ -371,7 +374,7 @@ Fields: `id, business_id, name, created_at, updated_at`
 | `tax_amount` | number? | Computed tax amount (in currency units) |
 | `taxes` | SaleTaxBreakdown[]? | Per-rate tax breakdown |
 | `total_amount` | number | Grand total (subtotal + tax) |
-| `currency` | string | — |
+| `currency` | string | â€” |
 | `status` | OrderStatus | PENDING \| RECEIVED \| PREPARING \| READY \| SERVED \| COMPLETED \| CANCELLED |
 | `bill_requested` | boolean? | Customer clicked "Request Bill" |
 | `bill_requested_at` | Date? | Timestamp of bill request |
@@ -384,38 +387,38 @@ Fields: `id, business_id, name, created_at, updated_at`
 **Per-item `TableOrderItem`**:
 `item_id, item_key, name, price, currency, quantity, special_instructions?, variant_id?, variant_name?, food_type?, category?, station (KITCHEN|BAR), status (per-item: PENDING|RECEIVED|PREPARING|READY|SERVED|CANCELLED), ready_at?, served_at?, cancelled_at?, ordered_at?`
 
-### `businesses/{businessId}/service_requests/{pingId}` — service pings
+### `businesses/{businessId}/service_requests/{pingId}` â€” service pings
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | string | — |
+| `id` | string | â€” |
 | `type` | string | BILL_REQUEST \| WAITER_CALL \| WATER \| CLEANING |
-| `business_id` | string | — |
-| `order_id` | string? | — |
-| `table_id` | string | — |
-| `table_number` | string | — |
-| `order_number` | string? | — |
-| `customer_name` | string? | — |
+| `business_id` | string | â€” |
+| `order_id` | string? | â€” |
+| `table_id` | string | â€” |
+| `table_number` | string | â€” |
+| `order_number` | string? | â€” |
+| `customer_name` | string? | â€” |
 | `payment_method` | string? | For BILL_REQUEST |
 | `total_amount` | number? | For BILL_REQUEST |
 | `status` | string | PENDING \| ATTENDED \| RESOLVED |
-| `created_at` | string | — |
+| `created_at` | string | â€” |
 
 **ID patterns**:
 - Bill requests: `bill-{orderId}`
 - Table calls: `waiter-{tableId}-{Date.now()}`
 - Water/cleaning: similar timestamp-based IDs
 
-### `businesses/{businessId}/tax_settings/default` — tax config
+### `businesses/{businessId}/tax_settings/default` â€” tax config
 
 Single document, always at ID `default`.
 
 | Field | Type | Description |
 |---|---|---|
-| `business_id` | string | — |
+| `business_id` | string | â€” |
 | `tax_enabled` | boolean | Master on/off |
 | `currency` | string | e.g. `NPR` |
-| `currency_symbol` | string | e.g. `रु` |
+| `currency_symbol` | string | e.g. `à¤°à¥` |
 | `rates` | TaxRateItem[] | Array of tax rates |
 | `invoice_prefix` | string? | e.g. `INV` |
 | `receipt_footer_note` | string? | Footer text for receipts |
@@ -429,32 +432,32 @@ Single document, always at ID `default`.
 **`TaxRateItem`**: `{ id, name, rate_percent, enabled, is_inclusive?, description? }`
 - Active business (`seoul-jib-restaurant-pvt-ltd`): 13% VAT, `is_inclusive: false`, `tax_enabled: true`
 
-### `businesses/{businessId}/sales/{saleId}` — settled sale records
+### `businesses/{businessId}/sales/{saleId}` â€” settled sale records
 
 | Field | Type | Description |
 |---|---|---|
-| `invoice_number` | string | — |
-| `order_number` | string? | — |
+| `invoice_number` | string | â€” |
+| `order_number` | string? | â€” |
 | `sale_type` | SaleType | DINE_IN \| TAKEAWAY \| DELIVERY \| ROOM_SERVICE \| QUICK_POS |
 | `items` | SaleItem[] | Sold items snapshot |
-| `subtotal` | number | — |
-| `taxes` | SaleTaxBreakdown[] | — |
-| `total_tax` | number | — |
-| `total_amount` | number | — |
+| `subtotal` | number | â€” |
+| `taxes` | SaleTaxBreakdown[] | â€” |
+| `total_tax` | number | â€” |
+| `total_amount` | number | â€” |
 | `payment_method` | SalePaymentMethod | CASH \| UPI_QR \| CARD \| ONLINE \| ROOM_BILL \| SPLIT \| QR_CODE |
 | `payment_status` | SalePaymentStatus | PAID \| REFUNDED \| CANCELLED |
-| `cashier_name` | string? | — |
+| `cashier_name` | string? | â€” |
 | `date_string` | string | YYYY-MM-DD |
 
-### `businesses/{businessId}/gl_accounts/{accountId}` — GL accounts
+### `businesses/{businessId}/gl_accounts/{accountId}` â€” GL accounts
 
 `{ id, account_number, account_name, category (REVENUE|TAX_LIABILITY|ASSET|EXPENSE|LIABILITY|EQUITY), mapping_key?, is_active }`
 
-### `businesses/{businessId}/check_ins/{checkInId}` — hotel check-ins
+### `businesses/{businessId}/check_ins/{checkInId}` â€” hotel check-ins
 
 `{ id, guest_name, guest_phone?, room_or_table_number, check_in_date, check_out_date?, status (CHECKED_IN|CHECKED_OUT|RESERVED|CANCELLED), total_amount?, deposit_paid?, handled_by_user_id }`
 
-### `businesses/{businessId}/counters/{type}` — sequential counters
+### `businesses/{businessId}/counters/{type}` â€” sequential counters
 
 Used by `sequence.util.ts` for incrementing order/invoice numbers. `type` is e.g. `order` or `invoice`.
 
@@ -462,7 +465,7 @@ Used by `sequence.util.ts` for incrementing order/invoice numbers. `type` is e.g
 
 ## 7. API Reference (Server Routes)
 
-### Route resolution — `businessId`
+### Route resolution â€” `businessId`
 
 All `/api/rbac` routes resolve businessId in this priority:
 1. `req.query.businessId`
@@ -479,7 +482,7 @@ All `/api/rbac` routes resolve businessId in this priority:
 | POST | `/verify-email` | Yes | Verify OTP to activate account |
 | POST | `/verify-whatsapp` | Yes | Alias for verify-email |
 | POST | `/resend-otp` | Yes | Resend OTP (cooldown enforced) |
-| POST | `/login` | Yes | Login → returns JWT + user |
+| POST | `/login` | Yes | Login â†’ returns JWT + user |
 | POST | `/forgot-password` | Yes | Send password reset link |
 | POST | `/reset-password` | No | Apply reset token + new password |
 | GET | `/me` | No | Restore session (optional auth) |
@@ -510,8 +513,8 @@ All `/api/rbac` routes resolve businessId in this priority:
 
 **Staff / Check-ins**:
 | GET | `/staff` | Required | List staff (each member includes effective `allowed_tabs`) |
-| POST | `/staff` | Required | Add staff — body takes `allowed_tabs` (≥1 required) |
-| PATCH | `/staff/:id/role` | Required | Change role label and/or `allowed_tabs` (body `custom_permissions` ignored). Anti-escalation rules in §19.7 |
+| POST | `/staff` | Required | Add staff â€” body takes `allowed_tabs` (â‰¥1 required) |
+| PATCH | `/staff/:id/role` | Required | Change role label and/or `allowed_tabs` (body `custom_permissions` ignored). Anti-escalation rules in Â§19.7 |
 | DELETE | `/staff/:id` | Required | Remove staff |
 | GET | `/check-ins` | Required | List hotel check-ins |
 | POST | `/check-ins` | Required | Create check-in |
@@ -525,11 +528,11 @@ All `/api/rbac` routes resolve businessId in this priority:
 | PATCH | `/tables/:id/status` | Required | Update table status |
 | DELETE | `/tables/:id` | Required | Delete table |
 | POST | `/tables/seed-defaults` | Required | Seed default tables |
-| POST | `/tables/scan-checkin` | **None** | QR scan (public — creates guest session) |
+| POST | `/tables/scan-checkin` | **None** | QR scan (public â€” creates guest session) |
 | POST | `/tables/:id/reset-session` | Required | Reset table session (after settlement) |
 | POST | `/tables/reset-status` | **None** | Bulk reset table status (public) |
 
-**Orders** (all public — no auth required):
+**Orders** (all public â€” no auth required):
 | POST | `/table-orders` | None | Create/append table order. Computes tax server-side. |
 | POST | `/orders` | None | Alias for `/table-orders` |
 | GET | `/orders` | None | List orders for a business |
@@ -553,7 +556,7 @@ All `/api/rbac` routes resolve businessId in this priority:
 | DELETE | `/sales` | Optional | Bulk delete sales |
 
 **Permissions**:
-| GET | `/permissions` | Required | Current user's effective access: `{ allowed_tabs, is_business_owner }` (replaces the old per-action `canManageMenus` / `canReadCheckIns` … flags) |
+| GET | `/permissions` | Required | Current user's effective access: `{ allowed_tabs, is_business_owner }` (replaces the old per-action `canManageMenus` / `canReadCheckIns` â€¦ flags) |
 
 ### `/api/menus` (menu.routes.ts)
 
@@ -582,7 +585,7 @@ Image search via Google Images scraping with 1-hour in-memory cache. No authenti
 |---|---|
 | `src/pages/DashboardPage.tsx` | Admin/staff dashboard container. Manages tab switching, staff session, branch switching. ~1034 lines. |
 | `src/components/layout/Sidebar.tsx` | Left sidebar navigation. `DashboardTab` type. |
-| `src/components/kds/KitchenDisplaySystem.tsx` | KDS — KITCHEN \| BAR \| WAITER views. Real-time order management. Bill settlement. ~2998 lines. |
+| `src/components/kds/KitchenDisplaySystem.tsx` | KDS â€” KITCHEN \| BAR \| WAITER views. Real-time order management. Bill settlement. ~2998 lines. |
 | `src/components/waiter/WaiterStationDashboard.tsx` | Waiter view: service request queue (table calls, bill requests). |
 | `src/components/billing/BillingPOS.tsx` | Cashier POS: active orders, create sale records, daybook, history. ~3129 lines. |
 | `src/components/config/BusinessConfigurationCenter.tsx` | All business settings: tax, GL accounts, tables, menu, staff, theme, date format. ~1655 lines. |
@@ -593,10 +596,10 @@ Image search via Google Images scraping with 1-hour in-memory cache. No authenti
 | File | Key exports |
 |---|---|
 | `src/lib/firebase.ts` | `db` (Firestore client instance) |
-| `src/utils/firestoreUtils.ts` | `sanitizeFirestorePayload<T>(obj)` — REQUIRED before any Firestore write with nested objects |
+| `src/utils/firestoreUtils.ts` | `sanitizeFirestorePayload<T>(obj)` â€” REQUIRED before any Firestore write with nested objects |
 | `src/utils/dateFormatter.ts` | `formatDualDate(date, mode)`, `renderFormattedDate(date, mode, separator)`, `DateFormatMode` |
-| `src/services/rbac.service.ts` | `rbacService` (singleton `ClientRBACService`) — all API calls, staff session mgmt |
-| `src/context/AuthContext.tsx` | `useAuth()`, `AuthProvider` — user, business, branches, login/logout |
+| `src/services/rbac.service.ts` | `rbacService` (singleton `ClientRBACService`) â€” all API calls, staff session mgmt |
+| `src/context/AuthContext.tsx` | `useAuth()`, `AuthProvider` â€” user, business, branches, login/logout |
 
 ---
 
@@ -604,26 +607,26 @@ Image search via Google Images scraping with 1-hour in-memory cache. No authenti
 
 ```
 Customer scans QR code on table
-         ↓
+         â†“
 POST /api/rbac/tables/scan-checkin
   - Validates host_token in QR
   - Returns: { businessId, tableId, tableNumber, sessionId, hostToken }
   - Updates tables/{tableId}: status=OCCUPIED, current_session_id, last_scanned_at
-         ↓
+         â†“
 SessionStorage: 'serveflow_customer_table_session' = CustomerTableSession JSON
 SessionStorage: 'serveflow_customer_active' = 'true'
-App.tsx guest lock activates → customer locked to /menu
-         ↓
+App.tsx guest lock activates â†’ customer locked to /menu
+         â†“
 CustomerMenuPreviewPage loads
   - Reads business doc (businesses/{bizId})
   - Reads menu items (businesses/{bizId}/menus)
   - Reads categories (businesses/{bizId}/menu_categories)
   - Subscribes to tables/{tableId} via onSnapshot (for session validity)
   - Displays: table number in header, Live Menu title
-         ↓
+         â†“
 Customer browses menu, adds items to cart
   - MenuItemDetailModal: tap +/- to modify qty, cart count shown inside modal
-         ↓
+         â†“
 CustomerCartModal: review cart items
 POST /api/rbac/table-orders
   Body: { businessId, tableId, tableNumber, items[], sessionId, hostToken, ... }
@@ -635,30 +638,30 @@ POST /api/rbac/table-orders
     - Stores: taxes[], tax_amount, total_amount, subtotal
     - Updates tables/{tableId}: status=OCCUPIED, order_number
   Returns: { order: TableOrder }
-         ↓
+         â†“
 OrderSuccessModal opens
   - onSnapshot(businesses/{bizId}/table_orders/{orderId})
-  - Live status: PENDING → RECEIVED → PREPARING → READY → SERVED
+  - Live status: PENDING â†’ RECEIVED â†’ PREPARING â†’ READY â†’ SERVED
   - Shows: item statuses, VAT breakdown (subtotal + tax + total)
   - Can: call waiter (writes to service_requests/waiter-{tableId}-{ts})
-         ↓
+         â†“
 Customer clicks "Request Bill" (inside OrderSuccessModal or FinalTableBillPage)
   - Updates table_orders/{orderId}: bill_requested=true, bill_requested_at
   - Writes service_requests/bill-{orderId}: type=BILL_REQUEST, payment_method, total_amount
   - Tables/{tableId}: status=OCCUPIED (stays until settled)
-         ↓
+         â†“
 FinalTableBillPage
   - onSnapshot on table_orders/{orderId} for live updates
   - Shows: subtotal, VAT, total, payment method
   - Customer cannot navigate back (hardware back trapped)
   - Customer cannot return to menu
-         ↓
+         â†“
 Staff settles bill (via BillingPOS)
   - Creates sale record (businesses/{bizId}/sales/{saleId})
   - Resets table: status=ACTIVE, clears session, order_number, host_token
   - Marks order: status=COMPLETED, payment_status=PAID
   - Resolves service_requests document
-         ↓
+         â†“
 Customer sees "Thank you for dining" card (FinalTableBillPage thank-you state)
 ```
 
@@ -668,17 +671,17 @@ Customer sees "Thank you for dining" card (FinalTableBillPage thank-you state)
 
 ### Kitchen Display System (KDS)
 
-- **Accessed from**: Dashboard → Orders tab (`kds`)
+- **Accessed from**: Dashboard â†’ Orders tab (`kds`)
 - **Modes**: `KITCHEN` (food items), `BAR` (drinks), `WAITER` (service requests + delivery)
 - **Real-time**: `onSnapshot` on `tables`, `table_orders`, `service_requests`
-- **Order flow**: PENDING → RECEIVED → PREPARING → READY → SERVED → COMPLETED
+- **Order flow**: PENDING â†’ RECEIVED â†’ PREPARING â†’ READY â†’ SERVED â†’ COMPLETED
 - **Per-item status**: Each `TableOrderItem` has its own `status` field
-- **Kitchen/Bar**: cooks mark items/all items READY (pings waiter). There is **no "Mark Delivered"** here any more — delivery is the waiter's action.
-- **Settlement**: **removed from KDS** (2026-10-11). Bills are settled only in Finance & POS (`BillingPOS`) → writes to `sales`, resets table + order.
+- **Kitchen/Bar**: cooks mark items/all items READY (pings waiter). There is **no "Mark Delivered"** here any more â€” delivery is the waiter's action.
+- **Settlement**: **removed from KDS** (2026-10-11). Bills are settled only in Finance & POS (`BillingPOS`) â†’ writes to `sales`, resets table + order.
 
 ### Waiter Station Dashboard
 
-- **Accessed from**: Dashboard → Waiter Station tab (`waiter`) — `WaiterStationDashboard` renders `KitchenDisplaySystem` with `defaultStation="WAITER"`
+- **Accessed from**: Dashboard â†’ Waiter Station tab (`waiter`) â€” `WaiterStationDashboard` renders `KitchenDisplaySystem` with `defaultStation="WAITER"`
 - **Shows**: Service request queue (WAITER_CALL, BILL_REQUEST, WATER, CLEANING)
 - **Real-time**: `onSnapshot` on `businesses/{bizId}/tables`
 - Table calls appear in queue (NOT overlaid on table grid)
@@ -686,20 +689,20 @@ Customer sees "Thank you for dining" card (FinalTableBillPage thank-you state)
 
 ### BillingPOS
 
-- **Accessed from**: Dashboard → Billing tab
+- **Accessed from**: Dashboard â†’ Billing tab
 - **Features**: Active order list, quick POS sale, sales history, daybook, Excel export, promo codes, GL accounts
 - **Real-time**: `onSnapshot` on `table_orders` and `service_requests`
 - **Settlement**: Updates order status, creates `SaleRecord`, resets table
 
 ### BusinessConfigurationCenter
 
-- **Accessed from**: Dashboard → Configurations tab
+- **Accessed from**: Dashboard â†’ Configurations tab
 - **Sections**:
   - Business profile (name, type, phone, location)
   - Menu management (items, categories, themes)
   - Table management (create, edit, QR)
-  - Tax configuration → `tax_settings/default`
-  - GL accounts → `gl_accounts/{id}`
+  - Tax configuration â†’ `tax_settings/default`
+  - GL accounts â†’ `gl_accounts/{id}`
   - Staff management
   - Date format (nav + billing KOT/bill)
   - Printer configuration
@@ -715,28 +718,28 @@ Stored at: `businesses/{businessId}/tax_settings/default` (Firestore)
 **Active config for `seoul-jib-restaurant-pvt-ltd`**:
 - `tax_enabled: true`
 - `rates: [{ id: 'vat', name: 'VAT', rate_percent: 13, enabled: true, is_inclusive: false }]`
-- `currency: 'NPR'`, `currency_symbol: 'रु'`
+- `currency: 'NPR'`, `currency_symbol: 'à¤°à¥'`
 
 ### Tax Computation (Server-side)
 
-**Where**: `server/src/services/rbac.service.ts` → `createTableOrder()` function (~line 1657)
+**Where**: `server/src/services/rbac.service.ts` â†’ `createTableOrder()` function (~line 1657)
 
 **Flow**:
 1. `createTableOrder()` is called when customer POSTs to `/api/rbac/table-orders`
 2. Fetches `getTaxConfig(businessId)` from Firestore
-3. Computes `subtotal` from item prices × quantities
-4. For each enabled tax rate: `taxAmount = (subtotal × rate_percent) / 100`
+3. Computes `subtotal` from item prices Ã— quantities
+4. For each enabled tax rate: `taxAmount = (subtotal Ã— rate_percent) / 100`
 5. Stores in Firestore: `{ subtotal, tax_amount: totalTax, taxes: [{ name, rate_percent, amount }], total_amount: subtotal + totalTax }`
 6. On item append (existing order): recalculates and updates all three fields
 
 ### Tax Display (Client-side)
 
-**`OrderSuccessModal.tsx`** — Live Tracker VAT display:
+**`OrderSuccessModal.tsx`** â€” Live Tracker VAT display:
 - Reads `taxes[]` and `tax_amount` from `onSnapshot` Firestore data
 - Fallback: if `taxConfig` not loaded yet, uses 13% VAT standard
 - Display condition: `taxesList.length > 0` (NOT gated on `taxConfig?.tax_enabled`)
 
-**`FinalTableBillPage.tsx`** — Final Bill VAT display:
+**`FinalTableBillPage.tsx`** â€” Final Bill VAT display:
 - `useMemo` for `taxesList/totalTax` with robust fallback chain:
   1. `liveOrder.taxes[]` (from Firestore snapshot)
   2. `liveOrder.tax_amount` (from Firestore)
@@ -744,7 +747,7 @@ Stored at: `businesses/{businessId}/tax_settings/default` (Firestore)
   4. Default 13% VAT calculation
 - Fetches `taxConfig` via both `rbacService.getTaxConfigApi()` (immediate) AND `onSnapshot` on `tax_settings/default`
 
-### `sanitizeFirestorePayload` — CRITICAL RULE
+### `sanitizeFirestorePayload` â€” CRITICAL RULE
 
 Before ANY Firestore `setDoc` or `updateDoc` with nested objects or arrays, you MUST call `sanitizeFirestorePayload()`:
 
@@ -762,7 +765,7 @@ Firestore rejects any field with `undefined` value. This function recursively st
 
 ### Config storage
 
-`Business.date_format_nav` and `Business.date_format_billing` — stored in the `businesses/{bizId}` Firestore doc.
+`Business.date_format_nav` and `Business.date_format_billing` â€” stored in the `businesses/{bizId}` Firestore doc.
 
 - `date_format_nav`: Controls date display in dashboard navbar
 - `date_format_billing`: Controls date on KOT slips and bill prints
@@ -777,13 +780,13 @@ formatDualDate(date: Date, mode: DateFormatMode): DualDateParts
 // Returns: { time12, englishDate, nepaliDate, englishFull, nepaliFull }
 
 renderFormattedDate(date, mode, separator?): string
-// ENGLISH → "Oct 1, 2026, 04:23 PM"
-// NEPALI  → "2083 Aswin 15, 04:23 PM (BS)"
-// BOTH    → "04:23 PM | Oct 1, 2026 | 2083 Aswin 15 (BS)"
+// ENGLISH â†’ "Oct 1, 2026, 04:23 PM"
+// NEPALI  â†’ "2083 Aswin 15, 04:23 PM (BS)"
+// BOTH    â†’ "04:23 PM | Oct 1, 2026 | 2083 Aswin 15 (BS)"
 ```
 
 **Rules**:
-- Never use 24-hour format — always `hour12: true`
+- Never use 24-hour format â€” always `hour12: true`
 - When NEPALI: time comes before date, 12hr AM/PM
 - When BOTH: time12 appears ONCE before both dates
 - In navbar: both dates bold, same style
@@ -825,10 +828,10 @@ renderFormattedDate(date, mode, separator?): string
 ## 14. Key Types Reference
 
 ### `AppRole` (client: `src/types/rbac.ts`)
-`OWNER | MANAGER | ADMIN | RESTAURANT_OWNER | HOTEL_OWNER | RESTAURANT_MANAGER | HOTEL_MANAGER | FRONT_DESK | KITCHEN_STAFF | HOUSEKEEPING | CASHIER | WAITER | BAR_STAFF | STAFF` — **display label / login designation only; carries no permissions** (§19). Only OWNER/ADMIN/RESTAURANT_OWNER/HOTEL_OWNER bypass the tab list.
+`OWNER | MANAGER | ADMIN | RESTAURANT_OWNER | HOTEL_OWNER | RESTAURANT_MANAGER | HOTEL_MANAGER | FRONT_DESK | KITCHEN_STAFF | HOUSEKEEPING | CASHIER | WAITER | BAR_STAFF | STAFF` â€” **display label / login designation only; carries no permissions** (Â§19). Only OWNER/ADMIN/RESTAURANT_OWNER/HOTEL_OWNER bypass the tab list.
 
-### `TabPermissionId` (`src/types/rbac.ts`, mirrored in `server/src/types/rbac.types.ts`) — NEW
-`overview | operations | kds | waiter | checkins | menus | billing | team | configurations | account | franchise` — stored per account as `allowed_tabs` (§19).
+### `TabPermissionId` (`src/types/rbac.ts`, mirrored in `server/src/types/rbac.types.ts`) â€” NEW
+`overview | operations | kds | waiter | checkins | menus | billing | team | configurations | account | franchise` â€” stored per account as `allowed_tabs` (Â§19).
 
 ### `OrderStatus`
 `PENDING | RECEIVED | PREPARING | READY | SERVED | COMPLETED | CANCELLED`
@@ -880,7 +883,7 @@ Firestore throws `"Unsupported field value: undefined"` for any `undefined` valu
 await setDoc(docRef, sanitizeFirestorePayload({ ...data }));
 ```
 
-### 3. No React Router — custom navigation
+### 3. No React Router â€” custom navigation
 
 Navigating programmatically: call the `onNavigate(path)` prop (received from App.tsx). Never use `window.location.href =` or `window.location.assign()` as these cause full page reloads.
 
@@ -891,7 +894,7 @@ After requesting the final bill (`bill_requested = true`), `FinalTableBillPage` 
 window.history.pushState({ billLocked: true }, '');
 window.addEventListener('popstate', () => window.history.pushState({}, ''));
 ```
-Do NOT remove this — it's intentional.
+Do NOT remove this â€” it's intentional.
 
 ### 5. Dual Firestore access pattern
 
@@ -903,14 +906,14 @@ Do NOT remove this — it's intentional.
 
 The server defaults to `'maya-forest-resort'` if no `businessId` is provided. Active test business is `seoul-jib-restaurant-pvt-ltd`. Always pass `?businessId=...` or `x-business-id` header in API calls.
 
-### 7. Tax display condition — do NOT gate on `taxConfig`
+### 7. Tax display condition â€” do NOT gate on `taxConfig`
 
 Tax rows must display even when `taxConfig` hasn't loaded. Use:
 ```ts
 // CORRECT
 {taxesList.length > 0 && <TaxRow />}
 
-// WRONG — causes race condition where tax disappears
+// WRONG â€” causes race condition where tax disappears
 {taxConfig?.tax_enabled && taxesList.length > 0 && <TaxRow />}
 ```
 
@@ -920,7 +923,7 @@ Some methods in `src/services/rbac.service.ts` use old paths like `collection(db
 
 ### 9. `@` alias in Vite
 
-`vite.config.ts` sets `@` → project root. So `@/src/...` works in imports.
+`vite.config.ts` sets `@` â†’ project root. So `@/src/...` works in imports.
 
 ### 10. TypeScript check
 
@@ -945,7 +948,7 @@ When staff role changes, a `CustomEvent('serveflow:staff-session-changed')` is d
 | Business ID | `seoul-jib-restaurant-pvt-ltd` |
 | Tax enabled | `true` |
 | Tax rate | 13% VAT (`is_inclusive: false`) |
-| Currency | `NPR` (`रु`) |
+| Currency | `NPR` (`à¤°à¥`) |
 | Invoice prefix | (configured in `tax_settings/default`) |
 | Firestore path | `businesses/seoul-jib-restaurant-pvt-ltd` |
 
@@ -968,15 +971,15 @@ From `.env.example`:
 | `OTP_MAX_ATTEMPTS` | Max OTP tries |
 | `OTP_RESEND_COOLDOWN_SECONDS` | Resend rate limit |
 | `OTP_MAX_REQUESTS_PER_HOUR` | Hourly OTP limit |
-| `DEV_OTP_MODE` | `true` → OTP returned in API response for dev |
+| `DEV_OTP_MODE` | `true` â†’ OTP returned in API response for dev |
 | `WHATSAPP_PROVIDER` | `meta` \| `twilio` \| `mock` |
 | `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp API token |
 | `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp phone ID |
 | `WHATSAPP_BUSINESS_ACCOUNT_ID` | Meta business account ID |
 | `TWILIO_ACCOUNT_SID` | Twilio credentials |
-| `TWILIO_AUTH_TOKEN` | — |
-| `TWILIO_WHATSAPP_FROM` | — |
-| `TWILIO_CONTENT_SID` | — |
+| `TWILIO_AUTH_TOKEN` | â€” |
+| `TWILIO_WHATSAPP_FROM` | â€” |
+| `TWILIO_CONTENT_SID` | â€” |
 | `EMAIL_PROVIDER` | `mock` \| `smtp` |
 | `EMAIL_HOST` | SMTP host |
 | `EMAIL_PORT` | SMTP port |
@@ -986,7 +989,7 @@ From `.env.example`:
 | `APP_URL` | Public app URL |
 | `GEMINI_API_KEY` | Google Gemini API key |
 
-**Firebase config** is NOT in `.env` — it's in `firebase-applet-config.json` at project root.
+**Firebase config** is NOT in `.env` â€” it's in `firebase-applet-config.json` at project root.
 
 ---
 
@@ -994,7 +997,7 @@ From `.env.example`:
 
 > Update this section whenever significant changes are made to the codebase.
 
-### 2026-10-13 — Order Number Persistence Fix on Page Reload (Sales Register & Excel Export)
+### 2026-10-13 â€” Order Number Persistence Fix on Page Reload (Sales Register & Excel Export)
 
 **Problem**: After reloading the page, the Order Number column in the Sales Register / Excel Preview table rendered `-` instead of the actual order number (e.g., `ORD-01`, `ORD-03`, `ORD-04`, `ORD-05`).
 
@@ -1011,7 +1014,7 @@ From `.env.example`:
 - Verified live Firestore response for `7-spices`: All sales now return their real `order_number` (`INV-1` -> `ORD-01`, `INV-2` -> `ORD-03`, `INV-3` -> `ORD-04`, `INV-4` -> `ORD-05`).
 - Verified full test suite passes (`vat_inclusive_exclusive.test.ts` 12/12) and both `ServeFlow-test` and `Serveflow` workspaces build cleanly (exit code 0).
 
-### 2026-10-13 — Customer View Live Tracker & Cart Card Spacing Reduction
+### 2026-10-13 â€” Customer View Live Tracker & Cart Card Spacing Reduction
 
 **Goal**: Reduce the vertical spacing inside and between cards in the Customer View Live Tracker modal (`OrderSuccessModal.tsx`) and Customer Cart drawer (`CustomerCartModal.tsx`) so customers can see more dishes/items fitted in their viewport without excessive scrolling.
 
@@ -1032,7 +1035,7 @@ From `.env.example`:
    - General Notes & Guest Details: Reduced container margin/padding from `pt-4 space-y-3.5` to `pt-2.5 space-y-2`, textarea rows to 1, and input padding to `py-1`.
    - Cart Footer: Tightened footer padding from `p-5 sm:p-6 space-y-3.5` to `px-4 py-2.5 sm:px-5 sm:py-3 space-y-2`, breakdown lines to `space-y-0.5`, and checkout button padding to `py-2.5`.
 
-### 2026-10-13 — Full Production Migration to PostgreSQL (Supabase) + Prisma ORM + Socket.io Real-Time Engine
+### 2026-10-13 â€” Full Production Migration to PostgreSQL (Supabase) + Prisma ORM + Socket.io Real-Time Engine
 
 **Goal**: Complete end-to-end production migration of all core database storage and real-time event mechanisms from Firebase Firestore to PostgreSQL (hosted on Supabase via AWS ap-south-1 pooler), using Prisma ORM as primary data layer and Socket.io for bidirectional real-time event distribution. Maintain 100% UI layout fidelity, zero downtime dual-write backward compatibility, and 100% test parity.
 
@@ -1060,7 +1063,7 @@ From `.env.example`:
    - Clean production build (`npm run build`: Vite frontend + esbuild server bundle).
    - 136/136 tests passing across all 7 test suites (auth, rbac security audit, custom permissions, vat inclusive/exclusive, credit GL, pay-first, and pay-first tracking).
 
-### 2026-10-13 — Exclusive vs. Inclusive of VAT% Pricing Configuration & Calculation
+### 2026-10-13 â€” Exclusive vs. Inclusive of VAT% Pricing Configuration & Calculation
 
 **Goal**: Provide a master configuration toggle in **Taxes, Currency & Invoicing** (`TaxConfigurationPanel.tsx`) to switch between **Exclusive of VAT%** (`tax_inclusive = false`) and **Inclusive of VAT%** (`tax_inclusive = true`), and unify all order/bill/POS/receipt/Excel calculations so that:
 - In **Exclusive of VAT%** mode, menu item prices represent the **Subtotal**, and VAT is calculated on top (`grossTotal = subtotal + totalTax`).
@@ -1078,7 +1081,7 @@ From `.env.example`:
 - `src/utils/excelExport.ts` & `src/services/print.service.ts`: Fixed `rate_percent` in Excel `Taxes Breakdown`, scaled beverage revenue split (including `station === 'BAR'`) to net `subtotal` in inclusive mode, separated pure VAT from `service_charge` when `total_tax` includes `service_charge` so Sheet 3 (`GL Journal Summary`) never double-counts service charge, and added `total_tax`/`discount` support in thermal print receipts.
 - `server/test/vat_inclusive_exclusive.test.ts` (new): Automated verification test suite for Exclusive/Inclusive VAT calculations, Grand-Total-only discount deduction, Excel GL Journal Summary balance, and Firestore order recalculation.
 
-### 2026-10-12 — Customer View UI Spacing Reduction (CustomerMenuPreviewPage)
+### 2026-10-12 â€” Customer View UI Spacing Reduction (CustomerMenuPreviewPage)
 
 **Goal**: Tighten vertical layout spacing on customer menu browsing screens (CustomerMenuPreviewPage.tsx) for a cleaner, higher-density mobile and desktop presentation without altering headers, branding, logos, or functionality.
 
@@ -1107,18 +1110,18 @@ From `.env.example`:
    - Quantity selector controls vertical padding reduced: py-1 -> py-0.5.
    - Cart pill badge padding & positioning adjusted: top-2.5 right-2.5 -> top-2 right-2.
 
-### 2026-10-11 — Tab-Based RBAC Rewrite (COMPLETED — spec in §19)
+### 2026-10-11 â€” Tab-Based RBAC Rewrite (COMPLETED â€” spec in Â§19)
 
 **Goal**: replace action-level, role-driven permissions with a single per-account list of permitted dashboard tabs (+ franchise switcher). Remove "Mark Delivered" (Kitchen/Bar) and "Settle & Free Table" (Waiter station). Implementation is split into Parts 1-6 (Claude: 1, 6 / Gemini: 2-5). Tick each part here as it lands:
 
-- [x] Part 1 — Server core: `allowed_tabs` type + migration + tab-based `hasPermission` + anti-escalation + tests
-- [x] Part 2 — Remove "Mark Delivered" and Waiter "Settle & Free Table" (UI + handlers)
-- [x] Part 3 — Client foundation: `tabAccess.ts`, `Sidebar`, `DashboardPage`, `BranchSwitcher`, session types
-- [x] Part 4 — Staff tab UI: tab-checklist modal + create-staff form + API client
-- [x] Part 5 — Strip action-level gating inside tabs
-- [x] Part 6 — Audit, security review, tests, build, final docs
+- [x] Part 1 â€” Server core: `allowed_tabs` type + migration + tab-based `hasPermission` + anti-escalation + tests
+- [x] Part 2 â€” Remove "Mark Delivered" and Waiter "Settle & Free Table" (UI + handlers)
+- [x] Part 3 â€” Client foundation: `tabAccess.ts`, `Sidebar`, `DashboardPage`, `BranchSwitcher`, session types
+- [x] Part 4 â€” Staff tab UI: tab-checklist modal + create-staff form + API client
+- [x] Part 5 â€” Strip action-level gating inside tabs
+- [x] Part 6 â€” Audit, security review, tests, build, final docs
 
-### 2026-10-02 — Order Number Sequence Normalization & Clean Display (Task 1)
+### 2026-10-02 â€” Order Number Sequence Normalization & Clean Display (Task 1)
 
 **Problem**: Order references across the app showed random alphanumeric Firestore document IDs (e.g. `ref: ORD-1A2B3C...`) in customer tracker, bill cards, and KOT/BOT thermal slips. Furthermore, order numbering was defaulting to single letter prefixes (`A1`, `A2`) instead of `ORD-01`.
 
@@ -1138,7 +1141,7 @@ From `.env.example`:
 - `src/components/billing/BillingPOS.tsx`: Updated placeholder to `e.g. ORD-01`.
 - Database: Reset `counters/order` for `seoul-jib-restaurant-pvt-ltd` so next orders cleanly start at `ORD-01`.
 
-### 2026-10-02 — VAT Display Fix (Session with Antigravity)
+### 2026-10-02 â€” VAT Display Fix (Session with Antigravity)
 
 **Problem**: VAT amount was computed and stored correctly in Firestore but NOT displayed in:
 1. Customer Live Tracker (`OrderSuccessModal.tsx`)
@@ -1150,11 +1153,11 @@ From `.env.example`:
 - Both components gated tax display on `taxConfig?.tax_enabled &&` which failed when `taxConfig` was null
 
 **Files changed**:
-- `server/src/services/rbac.service.ts` (~lines 1807–1915): Real tax computation using `getTaxConfig()`, stored in `taxes[]` and `tax_amount`
+- `server/src/services/rbac.service.ts` (~lines 1807â€“1915): Real tax computation using `getTaxConfig()`, stored in `taxes[]` and `tax_amount`
 - `src/components/cart/OrderSuccessModal.tsx` (~lines 115, 268, 887, 1222): Added `taxes`/`tax_amount` to snapshot mapping, removed `taxConfig?.tax_enabled` gates, added 13% fallback
 - `src/components/billing/FinalTableBillPage.tsx` (~lines 23, 104, 202, 740, 909): Added `rbacService` import, immediate tax API fetch, robust fallback useMemo, unconditional VAT display
 
-### 2026-10-01 — Multiple Customer View Fixes
+### 2026-10-01 â€” Multiple Customer View Fixes
 
 - **Waiter table call**: Moved from table-selection overlay to WaiterStationDashboard queue
 - **Table number in customer header**: Displayed beside "Live Menu" heading after QR scan
@@ -1165,14 +1168,14 @@ From `.env.example`:
 - **Item pop-up behavior**: `+`/`-` direct cart update, "Add to Order" button removed, "X in cart" shown
 - **Nepali date format**: 12hr only (no 24hr), time before date, bold in navbar
 
-### 2026-09-30 — KOT/Bill Date Config
+### 2026-09-30 â€” KOT/Bill Date Config
 
 - Bill and KOT now read date format from `Business.date_format_billing` (Firestore)
 - Fixed date resetting to default on page reload by reading from saved configuration
 
 ---
 
-## 19. Tab-Based Access Control (RBAC rewrite — SPEC, source of truth)
+## 19. Tab-Based Access Control (RBAC rewrite â€” SPEC, source of truth)
 
 > **Status**: Being implemented (see change log 2026-10-11). The old action-level permission system (`custom_permissions`, `AppAction`, per-role defaults) is **removed**. Everything below is the target design every prompt/part must follow.
 
@@ -1194,7 +1197,7 @@ Access is decided **only** by which dashboard tabs a staff account may open (plu
 | `account` | Business Details | |
 | `franchise` | Franchise / Branch Switcher | Navbar `BranchSwitcher` (not a tab; same list) |
 
-`audit` exists in `DashboardTab` but has no sidebar entry — not grantable.
+`audit` exists in `DashboardTab` but has no sidebar entry â€” not grantable.
 
 ### 19.3 Data model
 - New field **`allowed_tabs?: TabPermissionId[]`** on: server `User` (`server/src/types/index.ts`, Firestore `users` doc via `db.service.ts`), client `TeamMember`, `StaffAccountSession`, `AuthUser` (`src/types/auth.ts`).
@@ -1203,22 +1206,22 @@ Access is decided **only** by which dashboard tabs a staff account may open (plu
 - `AppAction`, `AppResource`-per-action checks, `ROLE_POLICIES` action matrices and the "Role Defaults" blocks in `Sidebar.tsx`/`DashboardPage.tsx` are removed.
 
 ### 19.4 Who bypasses the list
-Only **business owners/admins** (`OWNER`, `ADMIN`, `RESTAURANT_OWNER`, `HOTEL_OWNER`) always have all 11. Everyone else — **including `MANAGER` roles** — is governed strictly by `allowed_tabs`. Roles (`WAITER`, `CASHIER`, …) remain **display labels / login designations only**; they carry no permissions.
+Only **business owners/admins** (`OWNER`, `ADMIN`, `RESTAURANT_OWNER`, `HOTEL_OWNER`) always have all 11. Everyone else â€” **including `MANAGER` roles** â€” is governed strictly by `allowed_tabs`. Roles (`WAITER`, `CASHIER`, â€¦) remain **display labels / login designations only**; they carry no permissions.
 
 ### 19.5 Migration (lazy, non-destructive)
 When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowedTabsPersisted`) and persist on next save:
-1. `MANAGER`/`RESTAURANT_MANAGER`/`HOTEL_MANAGER` → all 11 (keeps today's behaviour).
-2. Otherwise resource-level merge: for resources present in `custom_permissions`, grants (`read` or `manage`) unlock their matching tab(s): `orders`→`kds`,`waiter`; `check_ins`→`checkins`,`waiter`; `menus`→`menus`; `billing`→`billing`; `staff`→`team`; `settings`→`configurations`; `business_details`→`account`; `franchise: manage`→`franchise`. For resources absent from `custom_permissions`, fall back to legacy role defaults: WAITER/HOUSEKEEPING→`kds`,`waiter`,`checkins`; KITCHEN_STAFF/CHEF→`kds`,`waiter`,`menus`; FRONT_DESK→`checkins`,`billing`,`kds`,`waiter`; CASHIER→`billing`; anything else → `[]`.
+1. `MANAGER`/`RESTAURANT_MANAGER`/`HOTEL_MANAGER` â†’ all 11 (keeps today's behaviour).
+2. Otherwise resource-level merge: for resources present in `custom_permissions`, grants (`read` or `manage`) unlock their matching tab(s): `orders`â†’`kds`,`waiter`; `check_ins`â†’`checkins`,`waiter`; `menus`â†’`menus`; `billing`â†’`billing`; `staff`â†’`team`; `settings`â†’`configurations`; `business_details`â†’`account`; `franchise: manage`â†’`franchise`. For resources absent from `custom_permissions`, fall back to legacy role defaults: WAITER/HOUSEKEEPINGâ†’`kds`,`waiter`,`checkins`; KITCHEN_STAFF/CHEFâ†’`kds`,`waiter`,`menus`; FRONT_DESKâ†’`checkins`,`billing`,`kds`,`waiter`; CASHIERâ†’`billing`; anything else â†’ `[]`.
 
 ### 19.6 Client enforcement (`src/utils/tabAccess.ts`, new)
-`isBusinessOwner(role)`, `canAccessTab(subject, tab)`, `getFirstPermittedTab(subject)`, `TAB_LABELS`. Used by `Sidebar`, `DashboardPage` (active-tab guard + redirect), `BranchSwitcher`. If a staff account has zero tabs, `DashboardPage` renders a "No tabs assigned — contact the owner" screen with Switch Role / Sign out. **No other component may do role- or permission-based hiding** (only `isViewOnly` = not signed in remains).
+`isBusinessOwner(role)`, `canAccessTab(subject, tab)`, `getFirstPermittedTab(subject)`, `TAB_LABELS`. Used by `Sidebar`, `DashboardPage` (active-tab guard + redirect), `BranchSwitcher`. If a staff account has zero tabs, `DashboardPage` renders a "No tabs assigned â€” contact the owner" screen with Switch Role / Sign out. **No other component may do role- or permission-based hiding** (only `isViewOnly` = not signed in remains).
 
 ### 19.7 Server enforcement
-- `rbacService.hasPermission/evaluateAccess` are rewritten to be **tab-based and action-agnostic** via `RESOURCE_TAB_MAP` (resource → owning tab ids).
+- `rbacService.hasPermission/evaluateAccess` are rewritten to be **tab-based and action-agnostic** via `RESOURCE_TAB_MAP` (resource â†’ owning tab ids).
 - Menus and tables have public read access (`menus: publicRead`, `tables: publicRead`), allowing QR menu browsing and table scanning without credentials. Category and menu item writes (`POST/PUT/PATCH/DELETE`) on both `/api/menus` and `/api/rbac/menus` are authenticated and guarded by `requireResourceAccess('menus', 'write')`.
 - PIN staff session (`x-staff-session`) overlays on owner JWTs are resolved via `acting_as` on the server, safely scoping permissions to the staff member's DB-verified tabs without trusting client-sent roles.
 - **Scope limit (known gap, do not "fix" in this task)**: `/orders*`, `/table-orders`, `/tables/scan-checkin`, `/tables/reset-status` are public (customers use them) and `/sales`, `/tax-config`, `/gl-accounts` are *optional-auth*. Server tab enforcement applies only to routes that use `authenticate` (menus writes, staff, check-ins, tables CRUD, business config). The public/optional routes keep today's behaviour; flag them in the final report as a pre-existing hardening item.
-- Synthetic callers (`public-guest`, `{ id: 'staff' }`, customer flows) must keep working — they get an explicit `system`/`guest` context instead of relying on a fake `KITCHEN_STAFF` role.
+- Synthetic callers (`public-guest`, `{ id: 'staff' }`, customer flows) must keep working â€” they get an explicit `system`/`guest` context instead of relying on a fake `KITCHEN_STAFF` role.
 - `PATCH /staff/:id/role` and `POST /staff` accept `allowed_tabs`; `custom_permissions` in the body is ignored. Anti-escalation: a caller may only grant tabs they hold themselves, and only owners/admins may change another `OWNER`/`ADMIN`/`MANAGER` account or grant `franchise`/`team`.
 - `/api/auth/login`, `/api/auth/me` and the 4 `auth.middleware.ts` user builders return/attach `allowed_tabs` (effective, post-migration).
 
@@ -1277,12 +1280,12 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ## 22. Removal of "Open Waiter View" Banner & Isolation of Orders Section
 
-- **Issue**: In the **Orders** section (`activeTab === 'kds'`), marking dishes or drinks ready triggered a prominent blue alert banner containing `"Open Waiter View →"` (and in fullscreen mode, `"View Waiter Queue →"`). Clicking it switched the station view to `'WAITER'` within the Orders tab, breaking layout consistency and confusing kitchen staff who have a dedicated **Waiter Station** tab in the sidebar.
+- **Issue**: In the **Orders** section (`activeTab === 'kds'`), marking dishes or drinks ready triggered a prominent blue alert banner containing `"Open Waiter View â†’"` (and in fullscreen mode, `"View Waiter Queue â†’"`). Clicking it switched the station view to `'WAITER'` within the Orders tab, breaking layout consistency and confusing kitchen staff who have a dedicated **Waiter Station** tab in the sidebar.
 - **Root Cause**:
   1. Relic from the legacy single-view KDS where Kitchen, Bar, and Waiter were 3 sub-tabs in one component. When Waiter Station was separated into its own top-level sidebar entry (`activeTab === 'waiter'`), the `lastPingedOrder` banner with `setActiveStation('WAITER')` was left behind in `KitchenDisplaySystem.tsx`.
   2. The header description in Orders also redundantly advertised "and Waiter ready-to-serve notifications".
 - **Fix**:
-  1. Removed `lastPingedOrder` banner and its buttons (`Open Waiter View →` and `View Waiter Queue →`) from both standard and fullscreen views in [`KitchenDisplaySystem.tsx`](file:///C:/Users/Sansl/antigravity/ServeFlow-test---Restaurant-&-Hotel-Management-Portal/src/components/kds/KitchenDisplaySystem.tsx).
+  1. Removed `lastPingedOrder` banner and its buttons (`Open Waiter View â†’` and `View Waiter Queue â†’`) from both standard and fullscreen views in [`KitchenDisplaySystem.tsx`](file:///C:/Users/Sansl/antigravity/ServeFlow-test---Restaurant-&-Hotel-Management-Portal/src/components/kds/KitchenDisplaySystem.tsx).
   2. Added an explicit guard `useEffect` ensuring `activeStation` can never be set to `'WAITER'` when `defaultStation !== 'WAITER'`.
   3. Contextualized header subtitle: Displays `"Separated station queues for Kitchen dishes and Bar drinks."` in the Orders section, and `"Live queue for prepared dishes, drink delivery, and customer table assistance."` in the Waiter Station.
   4. Mirrored changes to `C:\Users\Sansl\antigravity\Serveflow`.
@@ -1329,7 +1332,7 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
   - `src/components/layout/Navbar.tsx` & `src/components/layout/Footer.tsx`: Updated brand links, support email (`support@namasteqr.com`), and copyright notices to "NamasteQR Inc.".
   - `src/components/billing/BillingPOS.tsx`: Updated receipt footer engine branding to "Powered by NamasteQR Restaurant POS Engine".
   - `src/components/tables/TableQrCardModal.tsx`: Updated table QR printable card footer to "Powered by NamasteQR".
-  - `src/pages/CustomerMenuPreviewPage.tsx`: Updated digital guest menu footer to "NamasteQR Hospitality • Real-Time Dining System".
+  - `src/pages/CustomerMenuPreviewPage.tsx`: Updated digital guest menu footer to "NamasteQR Hospitality â€¢ Real-Time Dining System".
 - **Backend & Communication Updates**:
   - `server/src/app.ts`: Health check service name updated to "NamasteQR Core API".
   - `server/src/config/env.ts` & `.env` / `.env.example`: Updated fallback JWT secrets and `EMAIL_FROM` sender to "NamasteQR Support" / `no-reply@namasteqr.com`.
@@ -1377,7 +1380,7 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
   1. **Book Demo Modal**:
      - Created `src/components/landing/BookDemoModal.tsx` containing all 6 required fields:
        - `name`: Full Name
-       - `businessName`: Restaurant, Café, or Hotel Name
+       - `businessName`: Restaurant, CafÃ©, or Hotel Name
        - `email`: Business Email Address
        - `phone`: Contact Phone Number
        - `location`: City, Country, or Region
@@ -1387,7 +1390,7 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
      - **Navbar**: Added a "Book Demo" button in the center navigation links and right-hand action bar for unauthenticated visitors.
      - **Hero Section**: Added an amber "Book a Demo" CTA button between "Create Business Account" and "Sign In to Portal".
      - **Pre-Footer Section 8 ("Still have questions?")**: Added a "Book a Live Demo" button alongside direct contact email.
-     - **Footer**: Added a "📅 Book a Live Demo" link in Platform & Access.
+     - **Footer**: Added a "ðŸ“… Book a Live Demo" link in Platform & Access.
   3. **Send Enquiry Routing**:
      - Updated `src/components/layout/Footer.tsx` to route all enquiries to `info@namasteqr.com` via `contactApi.sendEnquiry`.
      - Added phone number field to the footer enquiry form.
@@ -1416,7 +1419,7 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
   - Mounted a single fixed viewport canvas layer (`fixed inset-0 pointer-events-none z-0`) in `src/pages/LandingPage.tsx`.
   - The sticky header navbar (`Navbar.tsx`) is styled with solid `bg-white shadow-2xs z-40`, completely excluding it from the moving gradient.
   - The footer (`Footer.tsx`) has solid `bg-zinc-950 relative z-20`, completely concealing the gradient upon scroll.
-  - Intermediate landing page sections (1–8) are styled with semi-transparent frosted backdrops (`bg-white/40 backdrop-blur-xs`), allowing the serene gradient to flow gently behind all sections while keeping cards, POS tables, and Section 3 phone mockup crisp and locked.
+  - Intermediate landing page sections (1â€“8) are styled with semi-transparent frosted backdrops (`bg-white/40 backdrop-blur-xs`), allowing the serene gradient to flow gently behind all sections while keeping cards, POS tables, and Section 3 phone mockup crisp and locked.
 - **Jitter Elimination & Serene Motion**:
   - In `HeroShaderGradient.tsx`: Set `enableTransition={false}` and `smoothTime={0}` to disable CameraControls initial camera swing across 50ms upon mount.
   - Added `lazyLoad={false}` to eliminate IntersectionObserver mount deferral.
@@ -1434,4 +1437,437 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 
 ---
 
-*Last updated: 2026-10-15 by Antigravity (Full-page ShaderGradient, jitter elimination & frosted badge contrast)*
+## 28. Live Order Tracker Delivered Tag & Final Table Folio Whitespace Compact Refactor
+
+- **Live Tracker Delivered Step Orange Styling (`src/components/cart/OrderSuccessModal.tsx`)**:
+  - Replaced hardcoded `bg-zinc-900 text-white` and `text-zinc-900 font-extrabold` active state with `bg-amber-500 text-white ring-3 ring-amber-400/40 scale-105` and `text-amber-800 font-extrabold`.
+  - The `Delivered` step circle and label now render in brand orange matching the `Received`, `Preparing`, and `Prepared` steps instead of rendering as a black node.
+- **Final Table Folio Whitespace & Compact Redesign (`src/components/billing/FinalTableBillPage.tsx`)**:
+  - **Outer Container**: Reduced container padding from `p-5 sm:p-7` with `space-y-6` down to `p-3.5 sm:p-4` with `space-y-3`, cutting excess whitespace by over 50%.
+  - **Card Header**: Tightened header padding to `px-3.5 py-2.5 sm:px-4 sm:py-3` with cleaner font sizing and compact status badges.
+  - **Dine-In Table & Timestamp Banner**: Reduced padding from `p-4 rounded-2xl gap-3` to `p-2.5 sm:p-3 rounded-xl gap-2`, with smaller crisp label typography (`text-[9px] uppercase font-bold`).
+  - **Promo Code Box**: Compressed from `p-4 rounded-2xl` to `p-2.5 sm:p-3 rounded-xl space-y-1.5`, with compact input and button heights (`py-1.5 px-2.5 text-xs rounded-lg`).
+  - **Itemized Dishes List**: Reduced item padding from `p-3.5 rounded-2xl` to `px-3 py-2 sm:py-2.5 rounded-xl`, tightening row heights and dish status badges.
+  - **Tax & Total Card**: Reduced padding from `p-5 rounded-2xl` to `p-3 sm:p-3.5 rounded-xl space-y-1.5`, tight separator divider (`pt-2 mt-1`), and refined total typography (`text-xl sm:text-2xl font-black font-mono`).
+  - **Bill Actions & Dispatched Cards**: Shrunk button padding to `py-2.5 sm:py-3 rounded-xl` and dispatched confirmation card from `p-4 sm:p-5` to `p-3 sm:p-3.5 rounded-xl`.
+- **Verification**:
+  - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+  - `npm run build` (Vite + esbuild): PASSED (0 errors).
+  - Unit tests (`server/test/pay_first_payment_method.test.ts`): 18/18 PASSED.
+
+---
+
+## 29. Kitchen Display System (KDS) Active Queue Display Fix
+
+- **Root Cause Analysis**:
+  - The KDS Station header tab correctly computed `stationCounts.kitchenActive = 1` by filtering active uncompleted tickets from `orders`.
+  - However, inside the `stationOrders` rendering pipeline (`src/components/kds/KitchenDisplaySystem.tsx` line 660), a hardcoded check `if (kdsPrintMode === 'PRINT_ONLY' && (activeStation === 'KITCHEN' || activeStation === 'BAR')) return [];` suppressed the entire active orders array if the browser's printer dispatch mode was set to `PRINT_ONLY` (saved in localStorage).
+  - This caused the Kitchen Station tab to display `1 Active`, while the orders list below rendered the empty state: `No kitchen orders in this queue`.
+  - Similarly, `batchPrepRepeatedGroups` suppressed repeated dish grouping under `PRINT_ONLY`.
+  - Furthermore, in Pay-First orders (`server/src/services/rbac.service.ts`), order confirmation updated `order.status` to `RECEIVED`, but left `order.items[].status` in `AWAITING_PAYMENT` without syncing item statuses in the DB upsert.
+- **Fixes Applied**:
+  - **KDS Display Unblocking**: Removed the `PRINT_ONLY` return override from `stationOrders` and `batchPrepRepeatedGroups` in `src/components/kds/KitchenDisplaySystem.tsx`. The kitchen dispatch policy (`DISPLAY_ONLY`, `BOTH`, `PRINT_ONLY`) now strictly controls automatic background KOT paper printing (`dispatchPrint('KOT', ...)`), ensuring active kitchen and bar orders are always visible on screen when viewed by staff.
+  - **Station Categorization Alignment**: Aligned station item filtering across `stationOrders` and `stationCounts` so that `(itemStation !== 'BAR')` is consistently treated as Kitchen (food) and `(itemStation === 'BAR')` as Bar, matching the system's design intent.
+  - **Pay-First Item Status Transition**: Updated `confirmTableOrderPayment` in `server/src/services/rbac.service.ts` to transition all non-cancelled item statuses from `AWAITING_PAYMENT` to `RECEIVED` both in PostgreSQL (`prisma.tableOrder.upsert`) and Socket.io broadcasts.
+- **Verification**:
+  - Verified against real database order `ORD-MVACCP3O-144` (`ORD-25`, Table #5, 7 SPICES).
+  - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+  - `npm run build` (Vite + esbuild): PASSED (0 errors).
+  - Unit tests (`server/test/pay_first_payment_method.test.ts`): 18/18 PASSED.
+
+---
+
+## 30. Customer Thank You Dialog Bill Amount Resolution Fix
+
+- **Problem Description**:
+  - In the customer table order view, upon bill settlement or session conclusion, the full-page "Thank You for Dining with Us!" card displayed `Payment received: Cash Rs. 0` instead of the actual settled bill amount (e.g. `Payment received: Cash Rs. 495.00`).
+- **Root Cause Analysis**:
+  1. **Sparse Server Socket Emission (`server/src/services/rbac.service.ts`)**:
+     - In `createSale()`, when completing table orders upon cashier settlement, the server previously emitted `realtimeEmitter.orderUpdated` with ONLY `{ id: saleData.order_id, status: 'COMPLETED', payment_status: 'PAID' }`.
+     - Fields such as `total_amount`, `subtotal`, `currency`, and `payment_method` were omitted from the socket payload.
+     - Furthermore, if settled by table number instead of order ID, `orderUpdated` was not emitted at all.
+  2. **Flawed Fallback Hierarchy in `handleOrderSettled` (`CustomerMenuPreviewPage.tsx`)**:
+     - `const resolvedOrder = orderObj || activeOrder || successOrderData;`
+     - When `orderObj` arrived from the sparse socket broadcast, `orderObj` was truthy, so JavaScript selected `orderObj` and ignored `activeOrder` (which contained the real amount and item list).
+     - Because `orderObj.total_amount` and `subtotal` were undefined, `resolvedOrder.total_amount ?? resolvedOrder.subtotal ?? 0` resolved to `0`.
+     - The corrupt `{ mode: 'Cash', amount: 0, currency: 'Rs.' }` was saved to `localStorage` under `serveflow_last_settled_payment`, persisting the `Rs. 0` state even across page refreshes.
+  3. **Final Bill Page Disconnect (`FinalTableBillPage.tsx`)**:
+     - When receiving the completion socket event, `FinalTableBillPage` invoked `onDoneReturnToMenu()` without passing the merged order. `CustomerMenuPreviewPage.tsx` did not invoke `handleOrderSettled()`, leaving payment data unupdated.
+  4. **Permissive Card Render Condition**:
+     - `settledPaymentInfo && (settledPaymentInfo.amount !== undefined || ...)` evaluated `0 !== undefined` to `true`, causing `Cash Rs. 0` to be printed.
+- **Fixes Applied**:
+  - **Server-Side Full Payload Broadcast (`server/src/services/rbac.service.ts`)**:
+    - In `createSale()`, queried all active matching table orders (`prisma.tableOrder.findMany`) matching `orderWhere`.
+    - Updated `payment_method` and `sale_id` in database records.
+    - Emitted `realtimeEmitter.orderUpdated` for every matching order (and/or `saleData.order_id`) containing full details: `total_amount`, `subtotal`, `currency`, `payment_method`, `sale_id`, and `settled: true`.
+  - **Robust Client Settlement Hierarchy (`CustomerMenuPreviewPage.tsx`)**:
+    - Rewrote `handleOrderSettled` to scan all candidate sources (`[orderObj, activeOrder, successOrderData, cachedActiveOrder]`) for positive (> 0) amounts.
+    - Added item sum calculation fallback if `total_amount` or `subtotal` is missing or 0.
+    - Guarded `localStorage.setItem('serveflow_last_settled_payment')` to strictly require `amount > 0` (never writes `amount: 0`).
+    - Filtered out non-positive/zero amounts on initial state load from `localStorage`.
+    - Merged `activeOrder` into `updatedOrder` in `unsubOrder` when triggering settlement.
+    - Added `handleOrderSettled(activeOrder?.id, tableParams.tableNumber, activeOrder)` call in `unsubTable` when the cashier resets the table to `ACTIVE`.
+    - Hardened Thank You card JSX to only display the amount if `settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0`, falling back gracefully to `Payment received via {mode}` or `Payment received successfully`, NEVER `Rs. 0`.
+  - **Connected Final Table Bill Return (`FinalTableBillPage.tsx`)**:
+    - Updated `FinalTableBillPageProps` to `onDoneReturnToMenu: (settledOrder?: TableOrder) => void`.
+    - Constructed `mergedOrder` with real `total_amount`, `subtotal`, `currency`, and `payment_method` in the order subscription listener, passing `mergedOrder` into `onDoneReturnToMenu(mergedOrder)`.
+- **Verification**:
+  - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+  - `npm run build` (Vite + esbuild): PASSED (0 errors).
+  - Unit tests (`server/test/pay_first_payment_method.test.ts`): 18/18 PASSED.
+
+---
+
+## 31. Unified Printer Driver Architecture & Hardware & Printers Settings Overhaul
+
+- **Overview**:
+  - Implemented an enterprise-grade, multi-driver thermal and desktop printing architecture that enables **any printer** (USB, Network/LAN, Bluetooth, or Standard Desktop/System Spooler) to connect and print instantly from ServeFlow.
+  - Redesigned the **Hardware & Printers** settings section to match the user reference design with live active status indicators, pairing tools, and reachability diagnostics.
+- **Architectural Components**:
+  1. **Unified Driver Interface (`ThermalPrinterDriver`)**:
+     - Standardized driver interface with `connect()`, `disconnect()`, `sendRaw(data: Uint8Array)`, and `isConnected`.
+     - Four concrete drivers implemented in `src/services/printer-drivers/`:
+       - `WebUsbDriver.ts`: Direct browser WebUSB (`navigator.usb`) with bulkOut stream discovery, idempotent session management, and stall halt recovery.
+       - `WebBluetoothDriver.ts`: Direct BLE (`navigator.bluetooth`) with standard GATT print characteristics, GATT server caching, and MTU-safe data chunking.
+       - `NetworkLanDriver.ts`: Streams binary ESC/POS buffers over HTTP POST to the backend bridge (`/api/print/lan`) or local port 9100 bridge, with automatic `host:port` parsing.
+       - `BrowserPrintDriver.ts`: Universal fallback driver for **any standard printer** (HP, Canon, Brother, Epson, PDF spooler). Uses `cleanEscPosText()` to strip ESC/POS control bytes while strictly preserving column alignments, line feeds, and monospace receipt typography.
+  2. **ESC/POS Binary Encoder (`src/utils/escpos.ts`)**:
+     - Comprehensive byte builder supporting initialization (`ESC @`), text alignment (left, center, right), bold weights, character double-width/height, line feeds, paper cutting (`GS V`), and cash drawer kick pulse (`ESC p`).
+     - Safe `row()` formatting enforcing 80mm (48 col) and 58mm (32 col) line boundaries with right-aligned values and left-aligned truncated item names.
+  3. **Backend Network Print Endpoints (`server/src/routes/print.routes.ts`)**:
+     - `/api/print/status`: Real-time capability and environment discovery.
+     - `/api/print/test-connection`: Non-printing TCP socket ping to verify host and port reachability with latency reporting.
+     - `/api/print/lan`: Direct Node.js `net.Socket` streaming of raw ESC/POS binary buffers directly to any thermal printer on the local subnet.
+     - Standalone background bridge script provided in `scripts/printer-bridge.cjs` for air-gapped or dedicated hardware setups.
+  4. **React Context & Hook (`PrinterContext.tsx`)**:
+     - Provides `PrinterProvider` and `usePrinter()` (`useThermalPrinter()`).
+     - Exposes `activeDriver`, `isConnected`, `isPrinting`, `error`, `selectDriver()`, `connect()`, `disconnect()`, `testPrinter()`, and `printReceipt()`.
+  5. **Hardware & Printers UI Redesign (`PrinterConfiguration.tsx`)**:
+     - Matches the clean card-based layout from `media_1792202665232_81d2144b.png`.
+     - Header banner with "+ Add Printer" CTA and quick diagnostic capability badges (System Spooler, Network/LAN, WebUSB Direct, WebBluetooth).
+     - Expandable "Any Printer Guide" explaining desktop vs POS thermal setup.
+     - Live status badges (`Connected`, `Testing`, `Standby`, `Disconnected`) with animated indicators.
+     - Modal configuration for Printer Name, Routing Role (Cashier / Kitchen KOT / Bar), Connection Type, IP/Port, Paper Width, Feed Lines, Auto-cut, and Drawer Kick.
+     - Instant Test Print button with real-time feedback banner.
+     - Integrated with POS register billing (`dispatchPrint('BILL', ...)`) to eliminate raw full-page browser print bugs.
+- **Verification**:
+  - `server/test/printer_hardware.test.ts`: 7/7 PASSED in 2s (ESC/POS encoder, 80mm/58mm layouts, status endpoint, socket reachability validation, direct LAN TCP streaming, host:port parsing, monospace text cleaner).
+  - `server/test/auth.test.ts`: 6/6 PASSED.
+  - `npm run lint` (`tsc --noEmit`): PASSED (0 errors).
+  - `npm run build` (Vite + esbuild): PASSED (0 errors).
+
+---
+
+## 32. Deep Security Audit & Hardening
+
+*Audited and patched: 2026-10-18 (Antigravity Defense Engineering)*
+
+### 1. Multi-Tier Rate Limiting (`express-rate-limit`)
+- **Package Installed**: Migrated from ad-hoc in-memory store to industry-standard `express-rate-limit` with draft-8 headers and RFC 7231 `Retry-After` headers.
+- **Reverse Proxy IP Trust**: Configured `app.set('trust proxy', 1)` in `server/src/app.ts` so rate limiters and audit logs accurately detect real client IPs behind Cloudflare, Nginx, ALB, and Cloud Run without spoofing or shared-IP throttling.
+- **Strict Authentication Limiting**:
+  - `/api/auth/signup`: 15 req/hr (`SIGNUP_RATE_LIMITED`)
+  - `/api/auth/login`: 15 req/15m (`LOGIN_RATE_LIMITED`)
+  - `/api/auth/verify-email`, `/api/auth/verify-whatsapp`, `/api/auth/verify-otp`: 25 req/15m (`OTP_RATE_LIMITED`)
+  - `/api/auth/resend-otp`: 10 req/hr (`OTP_RATE_LIMITED`)
+  - `/api/auth/forgot-password`, `/api/auth/request-reset`: 10 req/hr (`PASSWORD_RESET_RATE_LIMITED`)
+  - `/api/auth/reset-password`: 15 req/hr (`PASSWORD_RESET_RATE_LIMITED`)
+- **Contact & Demo Enquiry Limiter**:
+  - Attached `contactLimiter` (10 req/hr, `CONTACT_RATE_LIMITED`) to `/api/contact/demo` and `/api/contact/enquiry` to prevent automated SMTP email spamming, mail server blacklisting, and quota exhaustion.
+- **Public Dining & Customer Flooding Limiter**:
+  - Attached `customerDiningLimiter` (60 req/min) to `/tables/scan-checkin`, `/tables/reset-status`, `/orders`, `/table-orders`, `/orders/:id/payment-method`, `/orders/:id/request-bill`, `/service-requests`, and `/tables/:tableId/acknowledge-ping`. Prevents automated bots and malicious diners from spamming KDS queues, bill pings, or service alerts.
+- **Hardware & LAN Printer Bridge Limiting**:
+  - Attached `printerLimiter` (60 req/min) to `/api/print/*`. Throttles network socket sweeping and print buffer floods.
+- **General API Limiter & Health Check Skip**:
+  - Attached `generalApiLimiter` (1000 req/15m) to all `/api` routes.
+  - Implemented `shouldSkipGeneralApiLimit` inspecting `req.path === '/health'`, `req.path === '/api/health'`, and `req.originalUrl.startsWith('/api/health')` to prevent the Express router path-stripping bug when mounted on `/api`.
+
+### 2. Security Headers & CORS Policy Lockdown
+- **Security Headers (`helmet`)**:
+  - `X-Frame-Options: SAMEORIGIN` (prevents UI clickjacking in external iframes).
+  - `X-Content-Type-Options: nosniff` (prevents MIME-sniffing exploits).
+  - `Strict-Transport-Security` (maxAge 31536000, includeSubDomains, preload in production).
+  - `Referrer-Policy: strict-origin-when-cross-origin`.
+  - Disabled `X-Powered-By` in Express and Helmet to eliminate server technology fingerprinting.
+  - Set `crossOriginResourcePolicy: cross-origin` and `crossOriginOpenerPolicy: same-origin-allow-popups`.
+- **CORS Hardening**:
+  - Replaced wildcard reflection (`origin: true`) with strict origin validation.
+  - In development, permits `localhost`, `127.0.0.1`, and private LAN IP ranges (192.168.x.x, 10.x.x.x, 172.16-31.x.x).
+  - In production, strictly matches `config.frontendUrl`, `process.env.APP_URL`, and comma-separated `process.env.ALLOWED_ORIGINS`.
+  - Returns `callback(null, false)` on unauthorized origins instead of throwing an Error, eliminating 500 internal server crashes on rejected CORS origins.
+
+### 3. Tenant Isolation & IDOR Remediation
+- **Audit Logs Protection**:
+  - Upgraded `/api/auth/audit-logs` and `/api/auth/audit-logs/delete` from `optionalAuthenticate` to `authenticate`.
+  - Scoped query and delete operations strictly to `req.user.business.id`. Unauthenticated users receive 401; users cannot supply arbitrary `businessId` parameters to view or delete another tenant's logs.
+  - Deletion restricted to owners or staff with explicit `configurations` tab permission.
+- **RBAC & Menu Route Validation (`assertBusinessAccess`)**:
+  - Created centralized `assertBusinessAccess(user, targetBusinessId)` in `server/src/middleware/auth.middleware.ts`.
+  - Upgraded `getTargetBusinessId(req)` in `server/src/routes/rbac.routes.ts` and `resolveBusinessId(req)` in `server/src/routes/menu.routes.ts` to enforce tenant boundary checks for all authenticated operations.
+  - Protected Menu CRUD routes (`PUT /categories/:id`, `DELETE /categories/:id`, `PUT /categories/reorder`, `PUT /:id`, `PATCH /:id/status`, `DELETE /:id`) by verifying target category/item ownership against `req.user` before mutation.
+  - Enforced tenant isolation in `rbac.service.ts` across `updateCategory`, `deleteCategory`, `updateMenuItem`, `deleteMenuItem`, `updateTable`, `deleteTable`, `updateCheckIn`, `deleteCheckIn`, `updateTableOrderStatus`, `updateTableOrderItemStatus`, `confirmTableOrderPayment`, and `rejectTableOrderPayment`.
+  - Rejects cross-tenant mutation or read attempts with HTTP 403 `TENANT_ACCESS_DENIED` unless the target venue is a validated child franchise branch in the owner's network or the user is a superadmin.
+
+### 4. Information Disclosure & Error Sanitization
+- **Global Error Handler Hardening (`server/src/middleware/errorHandler.ts`)**:
+  - In production (`NODE_ENV === 'production'`), suppresses raw database messages, Prisma exception strings, table names, SQL query syntax, and internal stack traces.
+  - Returns sanitized `INTERNAL_SERVER_ERROR` with a generic, safe client message.
+  - Suppressed `devOtp` in `resendOtp` and `devResetLink` in `forgotPassword` when in production mode.
+  - Disabled `/api/auth/dev-info` (returns HTTP 403) in production mode.
+- **Environment Configuration**:
+  - In `server/src/config/env.ts`, forced `devOtpMode` to `false` whenever `NODE_ENV === 'production'`.
+
+### 5. Input Validation & Prototype Pollution Defense
+- **Payload Sanitization (`server/src/middleware/sanitize.middleware.ts`)**:
+  - Recursively sanitizes `req.body`, `req.query`, and `req.params`.
+  - Strips dangerous prototype pollution keys (`__proto__`, `constructor`, `prototype`).
+  - Strips null bytes (`\0`) from all string inputs to prevent string truncation exploits in native libraries.
+  - Preserves `Date` and `RegExp` instances intact (preventing them from being converted to empty objects `{}`).
+  - Enforces recursion depth limit (> 20), nullifying deeply nested payloads to block recursion-exhaustion bypasses.
+- **Printer Bridge SSRF & Port Bounds**:
+  - Added `isRestrictedHost(host)` in `server/src/routes/print.routes.ts` blocking connections to AWS/GCP cloud metadata IP (`169.254.169.254`, `metadata.google.internal`), `0.0.0.0`, `instance-data`, and production loopback addresses.
+  - Added `BLOCKED_SYSTEM_PORTS` blocking TCP connections to internal system and database ports (22, 25, 53, 80, 443, 1433, 1521, 2375, 3000, 3306, 5432, 6379, 27017, etc.) preventing LAN port scanning and internal pivoting.
+  - Enforced TCP port range bounds (1 - 65535) and timeout bounds (100ms - 30000ms).
+  - Enforced a 5MB payload size limit on print buffers.
+
+### 6. Verification Records
+- `server/test/security_hardening.test.ts`: **21/21 PASSED** (headers, CORS, prototype pollution, Date/depth handling, rate limiting, skip check, contact limiter, tenant isolation, cloud metadata blocking, port restrictions, error sanitization, dev-info suppression).
+- `server/test/auth.test.ts`: **6/6 PASSED**.
+- `server/test/printer_hardware.test.ts`: **7/7 PASSED**.
+- `server/test/pay_first_payment_method.test.ts`: **18/18 PASSED**.
+- `server/test/rbac_security_audit.test.ts`: **18/18 PASSED**.
+- `server/test/rbac_custom_permissions.test.ts`: **42/42 PASSED**.
+- `server/test/folio_delivered.test.ts`: **PASSED**.
+- `server/test/menu_clone.test.ts`: **19/19 PASSED**.
+- `server/test/vat_inclusive_exclusive.test.ts`: **12/12 PASSED**.
+- `npm run lint` (`tsc --noEmit`): **PASSED (0 errors)**.
+- `npm run build` (Vite + esbuild): **PASSED (0 errors, 378.7kb server bundle)**.
+
+---
+
+## 33. Kitchen Dispatch Policy & Adaptive Operational Workflow
+
+### Overview & Problem Statement
+Restaurants configure hardware routing via `kds_print_mode` (or `kdsPrintMode`), which accepts one of three policies:
+1. `DISPLAY_ONLY`: Modern digital kitchen screens (KDS & Bar stations) without physical paper printers.
+2. `BOTH`: Dual routing â€” physical paper KOTs printed on ticket arrival, and interactive digital KDS touchscreens for kitchen line cooks.
+3. `PRINT_ONLY`: Traditional/legacy paper KOT routing where physical thermal printers deliver tickets to cooks, but **no digital screens exist in the kitchen or bar**.
+
+In `PRINT_ONLY` mode, kitchen cooks work purely off physical paper KOTs and do not touch digital screens. Previously, this caused operational bottlenecks:
+- Orders stayed permanently in `RECEIVED` status.
+- Waiters could not mark dishes or orders as delivered because the Waiter Station expected dishes to first be marked `READY` by nonexistent kitchen screens.
+- Customers saw a 4-step live order tracker stuck on "Order Received" or waiting for cooking updates that never arrive.
+- Bill requests were blocked because dishes were never marked as served.
+
+### Architecture & Implementation
+
+#### 1. Database Schema & Prisma Model
+- Added `kds_print_mode` column (`VARCHAR(32) DEFAULT 'DISPLAY_ONLY'`) to `businesses` table in Supabase PostgreSQL via raw SQL migration:
+  ```sql
+  ALTER TABLE businesses ADD COLUMN IF NOT EXISTS kds_print_mode VARCHAR(32) DEFAULT 'DISPLAY_ONLY';
+  ```
+- Updated `model Business` in `prisma/schema.prisma` with `kds_print_mode String @default("DISPLAY_ONLY")` and regenerated client via `node .\node_modules\prisma\build\index.js generate`.
+- Loaded and persisted `kds_print_mode` across `findBusinessById`, `getAllBusinesses`, and `updateBusinessProfile` in `server/src/services/db.service.ts`.
+
+#### 2. Backend API & Real-Time Synchronization
+- `GET /api/rbac/business-profile`: Returns `kds_print_mode` (defaults to `'DISPLAY_ONLY'`).
+- `PUT /api/rbac/business-profile`: Updates `kds_print_mode` in database and emits `realtimeEmitter.businessProfileUpdated(businessId, updatedBiz)` via Socket.io.
+- `src/services/socket.service.ts`: Added `subscribeToBusinessProfile(callback)`.
+- `src/contexts/PrinterContext.tsx`: Reactively syncs `kdsPrintMode` with `user.business.kds_print_mode` and `socketService.subscribeToBusinessProfile`. Automatically persists mode switches via `rbacService.updateBusinessProfileApi`.
+
+#### 3. Waiter Station (`KitchenDisplaySystem.tsx`) in `PRINT_ONLY` Mode
+- **Station Counts & Active Queue Filtering**:
+  - `stationOrders`: In `PRINT_ONLY`, the Waiter station includes all active, unserved orders (`order.status !== 'SERVED' && order.status !== 'COMPLETED'`).
+  - `stationCounts.waiterReady`: Accurately counts pending deliveries rather than requiring `status === 'READY'`.
+  - Subtitle updates to "Table Orders & Delivery", and badge shows `"{count} To Deliver"`.
+- **Order Card Header**:
+  - Displays a high-visibility badge: `<Printer className="w-3 h-3 text-amber-400" /> KOT Printed â€¢ Pending Delivery` while orders are pending.
+- **Direct Delivery Actions**:
+  - **Item-Level Action**: Renders an operable "Deliver" button directly on each line-item (`btn-item-serve-${order.id}-${idx}`), updating item status to `SERVED` and auto-completing the order once all dishes are served.
+  - **Card Footer Action**: Renders a full-width primary button `btn-waiter-deliver-${order.id}` with label `Mark Delivered to Table #${order.table_number}`.
+  - Clicking "Mark Delivered" transitions order and items directly from `RECEIVED` to `SERVED` (or `COMPLETED` for pay-first), broadcasting `realtimeEmitter.orderUpdated` instantly.
+
+#### 4. Customer Live Tracker (`OrderSuccessModal.tsx` & `CustomerMenuPreviewPage.tsx`)
+- **Adaptive 2-Step Stepper in `PRINT_ONLY`**:
+  - Automatically collapses the 4-step stepper (`Received` -> `Preparing` -> `Prepared` -> `Delivered`) into 2 clear steps:
+    1. **"Ordered"** (step 0): Indicates paper KOT was dispatched to kitchen.
+    2. **"Delivered"** (step 1): Indicates waiter served the table.
+  - When delivered, step 1 lights up in amber (`bg-amber-500 ring-3 ring-amber-400/40`) with a 100% connector bar.
+  - Intermediate "Preparing" and "Prepared / Ready" steps and granular readiness banners are suppressed to prevent confusing guests when no kitchen screens exist.
+  - Line-item status pills show `"Order Placed"` during prep, and `"Served at table"` once delivered.
+- **`DISPLAY_ONLY` & `BOTH` Compatibility**: Preserves the complete 4-step live digital tracker.
+
+#### 5. Bill Request Gating & Consistency
+- `handleOpenFinalBillPage` in `CustomerMenuPreviewPage.tsx` checks that all non-cancelled dishes are served (`SERVED`, `COMPLETED`, or `served_at`) before allowing guests or staff to request the final bill.
+- When an order is pay-first, marking it as `SERVED` automatically sets `status: 'COMPLETED'` on the backend and resets the table session.
+- **Round 2 Add-On Dish Reset**: When a seated guest orders add-on dishes, `createTableOrder` appends the items, resets order status back to `RECEIVED`, clears `served_at` and `ready_at` to `null` in Prisma PostgreSQL, and updates `CustomerCartModal` with `existingOrderId` and `sessionId`. This strictly re-engages delivery gating so customers cannot request a final bill until the waiter delivers the add-on dishes.
+
+### Verification Records
+- `server/test/kds_print_only_workflow.test.ts`: **7/7 PASSED** (DB persistence, API GET/PUT, direct RECEIVED->SERVED transition, item-level delivery auto-sync, pay-first auto-completion, bill gating, and Round 2 add-on delivery status reset).
+- `server/test/auth.test.ts`: **6/6 PASSED**.
+- `server/test/printer_hardware.test.ts`: **7/7 PASSED**.
+- `server/test/pay_first_payment_method.test.ts`: **18/18 PASSED**.
+- `server/test/security_hardening.test.ts`: **21/21 PASSED**.
+- `server/test/customer_language_preference.test.ts`: **4/4 PASSED**.
+- `npm run lint` (`tsc --noEmit`): **PASSED (0 errors)**.
+- `npm run build` (Vite + esbuild): **PASSED (0 errors, 381.2kb server bundle)**.
+
+---
+
+## 34. Multi-Language Menu Localization & Headless Translation Architecture
+
+ServeFlow integrates a zero-cost, high-performance headless Google Translate engine for the customer-facing QR menu, enabling real-time translation across 10 international languages while maintaining 100% brand consistency, design integrity, and financial accuracy.
+
+### 1. Supported Languages & Native Representation
+| Code | Standard Label | Native Script Label |
+|---|---|---|
+| `en` | English | English (Default) |
+| `ne` | Nepali | à¤¨à¥‡à¤ªà¤¾à¤²à¥€ |
+| `zh-CN` | Chinese (Simplified) | ç®€ä½“ä¸­æ–‡ |
+| `hi` | Hindi | à¤¹à¤¿à¤¨à¥à¤¦à¥€ |
+| `ko` | Korean | í•œêµ­ì–´ |
+| `ja` | Japanese | æ—¥æœ¬èªž |
+| `th` | Thai | à¸ à¸²à¸©à¸²à¹„à¸—à¸¢ |
+| `tl` | Filipino / Tagalog | Filipino |
+| `si` | Sinhala | à·ƒà·’à¶‚à·„à¶½ |
+| `ta` | Tamil | à®¤à®®à®¿à®´à¯ |
+
+Configured in `src/utils/googleTranslate.ts` with `includedLanguages: 'en,ne,zh-CN,hi,ko,ja,th,tl,si,ta'`.
+
+### 2. Zero-Cost Headless Architecture
+- **Script**: `//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit` loaded with `autoDisplay: false`.
+- **DOM Element**: Headless offscreen `<div id="google_translate_element" style="position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-9999"></div>` mounted to the document root, ensuring DOM layout stability and reliable change event dispatch.
+- **Complete Branding & Banner Suppression**:
+  - CSS in `index.html` and `src/index.css` strictly hides `.goog-te-banner-frame`, `.goog-tooltip`, `.goog-te-gadget`, `#goog-gt-tt`, `.VIpgJd-*`, and resets `html body, body, body[style*="top"] { top: 0 !important; position: static !important; }` to prevent header displacement or blue frame popups.
+- **Price & Financial Protection via `notranslate`**:
+  - All prices, currency symbols (`Rs.`, `NPR`, `$`), business names, table number indicators, order totals, and bill breakdowns are protected with the `notranslate` class across `CustomerMenuPreviewPage`, `CustomerCartModal`, `MenuItemDetailModal`, `OrderSuccessModal`, and `FinalTableBillPage`, ensuring financial figures like `Rs. 450` are never garbled by automated translation while keeping surrounding button/action labels translatable.
+
+### 3. Venue Default Language Configuration (Option A)
+- **Database & Prisma Schema**: Added `default_language` column (`VARCHAR(16) DEFAULT 'en'`) to `businesses` table in Supabase PostgreSQL and `prisma/schema.prisma`.
+- **API**:
+  - `GET /api/rbac/business-profile`: Exposes `default_language`.
+  - `PUT /api/rbac/business-profile`: Validates language code against the 10 allowed languages (`INVALID_LANGUAGE` on unrecognized codes), persists `default_language`, and emits real-time updates via Socket.io.
+- **Restaurant Settings UI**:
+  - In **Configurations -> Operations & Localization** (`BusinessConfigurationCenter.tsx`), owners have a clean dropdown to choose their restaurant's default QR menu language with live badge preview and automatic persistence.
+
+### 4. Customer Header UX & Translation Lifecycle
+- **Header Optimization**: Removed the redundant `"Live Menu"` badge from `CustomerMenuPreviewPage.tsx` header (and matched in `CustomerMenuPhoneMockup.tsx`) to reclaim horizontal space.
+- **Language Selector Dropdown**: In that spot, rendered a sleek, frosted-glass language pill with amber `<Globe />` icon, native language label (e.g. `à¤¨à¥‡à¤ªà¤¾à¤²à¥€`, `à¤¹à¤¿à¤¨à¥à¤¦à¥€`, `English`), and native dropdown selector.
+- **Selection Lifecycle**:
+  1. On initial load, if the diner has not chosen a language in `localStorage` (`serveflow_customer_language`), the venue's configured `businessProfile.default_language` is applied automatically (clearing any old translation cookie if default is English).
+  2. If the customer manually picks a language, their choice is saved to `localStorage` and remembered for future visits.
+  3. Dynamic language switches immediately set the `googtrans=/en/${code}` cookie and dispatch bubbling `change` events on `.goog-te-combo` for in-place real-time translation without full page reload.
+
+### 5. Verification Records
+- `server/test/customer_language_preference.test.ts`: **5/5 PASSED** (Language specifications, Supabase PostgreSQL persistence, GET/PUT APIs, fallback logic, and invalid language code rejection).
+- `server/test/kds_print_only_workflow.test.ts`: **7/7 PASSED**.
+- `server/test/auth.test.ts`: **6/6 PASSED**.
+- `server/test/security_hardening.test.ts`: **21/21 PASSED**.
+- `npm run lint` (`tsc --noEmit`): **PASSED (0 errors)**.
+- `npm run build` (Vite + esbuild): **PASSED (0 errors, 381.9kb server bundle)**.
+
+---
+
+*Last updated: 2026-10-20 by Antigravity (Customer Menu Language Preference, Option A Venue Default Setting, Headless Google Translate & Financial Protection)*
+
+
+
+---
+
+## 35. Landing Page Cleanup: Venue Audiences Section Removal
+
+- Removed the "ENGINEERED FOR MODERN HOSPITALITY PROPERTIES" section (Fine Dining & Bistros, Artisan Cafés & Bakeries, Hotels & Resort Dining, Rooftops, Pubs & Bars, Food Courts & Multi-Outlet cards) from `src/pages/LandingPage.tsx`.
+- Cleaned up unused `Hotel`, `Coffee`, `Wine`, and `Store` icons from Lucide imports.
+- Verified with `npm run lint` (0 errors) and `npm run build` (0 errors).
+
+---
+
+*Last updated: 2026-10-20 by Antigravity (Landing Page Venue Audiences Section Removal)*
+
+
+---
+
+## 36. Billing & POS Register Workflow Refactor: Manual POS Sales vs. QR Bill Settlement & Automated Post-Settlement Kitchen Dispatch
+
+### Overview & Operational Problem Statement
+Previously, the POS Register had two buttons ("New POS Sale" and "Create Counter POS Sale") that opened the same modal without clear operational distinction. Furthermore, manually created POS sales did not dispatch kitchen/bar tickets for cooking post-settlement, and kitchen/waiter stations lacked an always-available "Mark as Delivered" mechanism for pre-paid sales.
+
+This refactor establishes two clearly separated operational workflows while leaving the automatic QR dining settlement flow completely intact:
+1. **Manual POS Sales ("New POS Sale" & "Create Counter POS Sale")**: Settle-First Input → Instant Settlement → Automated KOT/KDS/BOT Dispatch → Cooking → Delivery.
+2. **QR Table Ordering & Settlement**: Customer Scans QR → Kitchen Cooks → Waiter Serves → Cashier Settles Bill.
+
+---
+
+### Key Architectural Implementations
+
+#### 1. Distinguishing "New POS Sale" vs. "Create Counter POS Sale" (`BillingPOS.tsx`)
+- **"New POS Sale" (Dine-In Table-Assigned Manual Sale)**:
+  - Header Button: Amber button with `<Utensils />` icon (`id="btn-new-pos-sale"`).
+  - Modal Mode: `mode: 'TABLE'`, `saleType: 'DINE_IN'`.
+  - Header: `"New Dine-In POS Sale"` with badge `"Table Dine-In"`.
+  - Table Selection: Prominent, required dining table selection dropdown (`* Required`). Cashier assigns table, enters guest count/name, selects items, and completes payment immediately.
+  - Subtitle: *"Table-assigned dine-in • Settle payment upfront • Auto-dispatches to Kitchen & Bar (KOT/BOT)"*.
+- **"Create Counter POS Sale" (Counter / Takeaway Quick Service)**:
+  - Header Button: Dark zinc button with `<ShoppingBag />` icon (`id="btn-counter-pos-sale"`).
+  - Modal Mode: `mode: 'COUNTER'`, `saleType: 'TAKEAWAY'`.
+  - Header: `"Create Counter POS Sale"` with badge `"Counter / Quick Service"`.
+  - Streamlined Workflow: Table selection is bypassed (locked to `"Counter / Takeaway (No Table)"`). Default customer name is `"Counter Guest"`.
+  - Subtitle: *"Fast counter entry • Settle payment upfront • Auto-dispatches to Kitchen & Bar (KOT/BOT)"*.
+- **"Settle Table Bill" (Existing QR Order Bill Settlement)**:
+  - Displayed when pending active table orders exist (`id="btn-settle-table-orders"`).
+  - Modal Mode: `mode: 'SETTLE_TABLE'`, shows fast selector bar for active tables and imports active order items.
+
+#### 2. Backend Automated Post-Settlement Kitchen Dispatch (`server/src/services/rbac.service.ts`)
+- **Workflow 1: Manual POS Sales (`!saleData.order_id` & `source: 'POS_MANUAL'`)**:
+  - `createSale()` settles the sale immediately (`payment_status: 'PAID'`).
+  - Pre-generates `posTableOrderId = order-pos-${timestamp}-${shortRandom}` and links `sale.order_id = posTableOrderId`.
+  - Automatically creates a linked `TableOrder` in PostgreSQL via `prisma.tableOrder.create`:
+    - `id`: `posTableOrderId`
+    - `status`: `'RECEIVED'`
+    - `pay_first`: `true`
+    - `payment_status`: `'PAID'`
+    - `source`: `'POS_MANUAL'`
+    - `sale_id`: `newSale.id`
+    - `table_number`: Assigned table number (or `'Counter'` for counter sales)
+    - Line items: Auto-categorized to `'KITCHEN'` vs `'BAR'` using `determineItemStation()`.
+  - If a dining table is assigned, marks table as `OCCUPIED` in PostgreSQL.
+  - Emits real-time Socket.io events:
+    - `realtimeEmitter.orderCreated(businessId, tableOrderRecord)`
+    - `realtimeEmitter.orderUpdated(businessId, { ...tableOrderRecord, pos_sale_id: newSale.id })`
+    - `realtimeEmitter.tableUpdated(businessId, { id, table_number, status: 'OCCUPIED' })`
+- **Workflow 2: Existing QR Table Order Settlement (`saleData.order_id` provided)**:
+  - Unmodified and fully safeguarded.
+  - Resolves service requests, marks existing order as `COMPLETED`, resets dining table to `ACTIVE`, and does not create duplicate kitchen tickets.
+
+#### 3. Kitchen & Waiter Station "Mark as Delivered" Rule (`KitchenDisplaySystem.tsx`)
+- **Identifier Helper**: `isPosManualOrder(order)` detects `order.source === 'POS_MANUAL' || order.pos_sale_id`.
+- **Card Header Badge**: Displays emerald badge `<Receipt /> POS Pre-Paid` on POS-manual cards.
+- **Waiter Station**:
+  - The `"Mark as Delivered"` button is **ALWAYS rendered and active** for POS-manual orders as long as `order.status !== 'SERVED' && order.status !== 'COMPLETED'`.
+  - Bypasses intermediate status restrictions (works in `PRINT_ONLY`, `DISPLAY_ONLY`, and `BOTH` modes).
+  - Item-level `"Deliver"` button is accessible for individual dishes.
+- **Kitchen & Bar Stations**:
+  - The `"Mark as Delivered"` action button is also rendered directly on kitchen and bar displays for POS-manual tickets, allowing line cooks or bartenders to hand off counter orders immediately.
+- **Auto-Completion & Table Release**:
+  - Marking a `pay_first` / POS-manual order as `SERVED` automatically transitions the order to `COMPLETED` and resets the dining table to `ACTIVE` in `updateTableOrderStatus()`.
+
+---
+
+### Verification & Test Suite
+- `server/test/pos_manual_sales_workflow.test.ts`: **4/4 PASSED**:
+  1. Manual Dine-In POS Sale immediate settlement & automated KDS dispatch with station routing (KITCHEN vs BAR).
+  2. Manual Counter POS Sale creation and routing to counter KOT.
+  3. Mark as Delivered auto-completes pay-first POS manual order and resets table to ACTIVE.
+  4. Safeguarding existing QR table order settlement flow.
+- All regression suites passing:
+  - `server/test/kds_print_only_workflow.test.ts`: **7/7 PASSED**
+  - `server/test/auth.test.ts`: **6/6 PASSED**
+  - `server/test/pay_first_payment_method.test.ts`: **18/18 PASSED**
+  - `server/test/customer_language_preference.test.ts`: **5/5 PASSED**
+  - `server/test/security_hardening.test.ts`: **21/21 PASSED**
+- `npm run lint` (`tsc --noEmit`): **0 errors**.
+- `npm run build`: **0 errors (386.1kb server bundle)**.
+
+---
+
+*Last updated: 2026-10-22 by Antigravity (Manual POS Sales Refactor, Post-Settlement Kitchen Dispatch & Always-Available Delivery Action)*

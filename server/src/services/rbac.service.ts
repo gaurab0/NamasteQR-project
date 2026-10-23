@@ -275,6 +275,11 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Manager role required to rename categories.');
     }
 
+    const existing = await prisma.menuCategory.findUnique({ where: { id: categoryId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Category not found in venue '${businessId}'.`);
+    }
+
     try {
       await prisma.menuCategory.update({
         where: { id: categoryId },
@@ -298,6 +303,11 @@ export class RBACService {
     const access = this.evaluateAccess(user, 'menus', 'delete');
     if (!access.granted) {
       throw new Error(access.reason || 'Permission denied: Manager role required to delete categories.');
+    }
+
+    const existing = await prisma.menuCategory.findUnique({ where: { id: categoryId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Category not found in venue '${businessId}'.`);
     }
 
     try {
@@ -423,6 +433,11 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot update menu item');
     }
 
+    const existing = await prisma.menuItem.findUnique({ where: { id: itemId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Menu item not found in venue '${businessId}'.`);
+    }
+
     try {
       const prismaData: any = {};
       if (updates.name !== undefined) prismaData.name = updates.name.trim();
@@ -472,6 +487,11 @@ export class RBACService {
     const access = this.evaluateAccess(user, 'menus', 'delete');
     if (!access.granted) {
       throw new Error(access.reason || 'Permission denied: Staff role cannot delete menu items. Manager role required.');
+    }
+
+    const existing = await prisma.menuItem.findUnique({ where: { id: itemId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Menu item not found in venue '${businessId}'.`);
     }
 
     try {
@@ -616,6 +636,11 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot update check-in record');
     }
 
+    const existing = await prisma.checkIn.findUnique({ where: { id: checkInId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Check-in record not found in venue '${businessId}'.`);
+    }
+
     const prismaData: any = {};
     if (updates.guest_name !== undefined) prismaData.guest_name = updates.guest_name.trim();
     if (updates.guest_phone !== undefined) prismaData.guest_phone = updates.guest_phone;
@@ -651,6 +676,11 @@ export class RBACService {
     const access = this.evaluateAccess(user, 'check_ins', 'delete');
     if (!access.granted) {
       throw new Error(access.reason || "Permission denied: Staff role cannot delete check-in records. Manager role required for record removal.");
+    }
+
+    const existing = await prisma.checkIn.findUnique({ where: { id: checkInId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Check-in record not found in venue '${businessId}'.`);
     }
 
     try {
@@ -1290,6 +1320,11 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot update table');
     }
 
+    const existingTable = await prisma.restaurantTable.findUnique({ where: { id: tableId } });
+    if (existingTable && existingTable.business_id !== businessId) {
+      throw new Error(`Table not found in venue '${businessId}'.`);
+    }
+
     try {
       await db.ensureBusiness(businessId);
       const tableUpdates: any = {};
@@ -1428,6 +1463,11 @@ export class RBACService {
     const access = this.evaluateAccess(user, 'tables', 'delete');
     if (!access.granted) {
       throw new Error(access.reason || 'Permission denied: Cannot delete table');
+    }
+
+    const existing = await prisma.restaurantTable.findUnique({ where: { id: tableId } });
+    if (!existing || existing.business_id !== businessId) {
+      throw new Error(`Table not found in venue '${businessId}'.`);
     }
 
     try {
@@ -1817,8 +1857,8 @@ export class RBACService {
         if (tableSnap) {
           tableDocData = tableSnap;
 
-          // If table has been reset to ACTIVE (settled / paid / cleared) or current_session_id is null:
-          if (tableSnap.status === 'ACTIVE' || !tableSnap.current_session_id) {
+          // If table has been reset to ACTIVE (settled / paid / cleared) and no explicit order id provided:
+          if (tableSnap.status === 'ACTIVE' && !orderData.existing_order_id) {
             existingDocSnap = null;
             targetOrderId = undefined;
           }
@@ -1962,6 +2002,10 @@ export class RBACService {
             tax_amount: updatedOrder.tax_amount || 0,
             total_amount: updatedOrder.total_amount,
             status: updatedOrder.status,
+            ready_at: null,
+            served_at: null,
+            bill_requested: false,
+            updated_at: now,
             order_notes: updatedOrder.order_notes || '',
             taxes: (updatedOrder.taxes as any) || [],
             promo_code: updatedOrder.promo_code || null,
@@ -1977,7 +2021,10 @@ export class RBACService {
         try {
           await prisma.restaurantTable.updateMany({
             where: { id: updatedOrder.table_id },
-            data: { status: 'OCCUPIED' },
+            data: {
+              status: 'OCCUPIED',
+              current_session_id: updatedOrder.session_id || updatedOrder.id,
+            },
           });
         } catch (e) {}
       }
@@ -2088,7 +2135,10 @@ export class RBACService {
       try {
         await prisma.restaurantTable.updateMany({
           where: { id: order.table_id },
-          data: { status: 'OCCUPIED' },
+          data: {
+            status: 'OCCUPIED',
+            current_session_id: order.session_id || order.id,
+          },
         });
       } catch (e) {}
     }
@@ -2142,6 +2192,12 @@ export class RBACService {
         payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
         payment_confirmed_by: d.payment_confirmed_by || null,
         sale_id: d.sale_id || null,
+        source: d.source || (d.sale_id ? 'POS_MANUAL' : 'QR'),
+        pos_sale_id: d.sale_id || null,
+        invoice_number: d.invoice_number || null,
+        folio_delivered: Boolean(d.folio_delivered),
+        folio_delivered_at: d.folio_delivered_at ? new Date(d.folio_delivered_at) : null,
+        bill_acknowledged: Boolean(d.bill_acknowledged),
         payment_rejected_reason: d.payment_rejected_reason || null,
         session_id: d.session_id || null,
         bill_requested: Boolean(d.bill_requested),
@@ -2174,6 +2230,9 @@ export class RBACService {
     const currentOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     if (!currentOrder) {
       throw new Error(`Order ${orderId} not found.`);
+    }
+    if (currentOrder.business_id !== businessId) {
+      throw new Error(`Order ${orderId} not found in venue '${businessId}'.`);
     }
     if (currentOrder.pay_first && currentOrder.payment_status === 'UNPAID' && status !== 'CANCELLED') {
       throw new Error('Use the confirm-payment endpoint to process this order.');
@@ -2259,6 +2318,8 @@ export class RBACService {
       payment_status: (updated.payment_status as any) || null,
       payment_method: updated.payment_method || null,
       sale_id: updated.sale_id || null,
+      source: updated.source || (updated.sale_id ? 'POS_MANUAL' : 'QR'),
+      pos_sale_id: updated.sale_id || null,
       ready_at: updated.ready_at ? new Date(updated.ready_at) : null,
       served_at: updated.served_at ? new Date(updated.served_at) : null,
       created_at: new Date(updated.created_at),
@@ -2283,6 +2344,9 @@ export class RBACService {
 
     if (!currentOrder) {
       throw new Error(`Order ${orderId} not found.`);
+    }
+    if (currentOrder.business_id !== businessId) {
+      throw new Error(`Order ${orderId} not found in venue '${businessId}'.`);
     }
 
     const currentData: any = currentOrder;
@@ -2342,7 +2406,7 @@ export class RBACService {
       const anyPreparing = activeItems.some((it) => it.status === 'PREPARING');
 
       if (allServed) {
-        nextOrderStatus = 'SERVED';
+        nextOrderStatus = currentData.pay_first ? ('COMPLETED' as any) : 'SERVED';
       } else if (allReadyOrServed) {
         nextOrderStatus = 'READY';
       } else if (anyReady || anyPreparing) {
@@ -2365,7 +2429,7 @@ export class RBACService {
     if (nextOrderStatus === 'READY' && !currentData.ready_at) {
       updates.ready_at = now.toISOString();
     }
-    if (nextOrderStatus === 'SERVED' && !currentData.served_at) {
+    if ((nextOrderStatus === 'SERVED' || nextOrderStatus === 'COMPLETED') && !currentData.served_at) {
       updates.served_at = now.toISOString();
     }
 
@@ -2384,6 +2448,21 @@ export class RBACService {
       });
     } catch (e: any) {
       console.warn('Prisma updateTableOrderItemStatus error:', e.message);
+    }
+
+    // Reset table session if a pay_first order was completed
+    if (nextOrderStatus === ('COMPLETED' as any) && currentData.pay_first && currentData.table_id) {
+      try {
+        await prisma.restaurantTable.updateMany({
+          where: { id: currentData.table_id },
+          data: {
+            status: 'ACTIVE',
+            current_session_id: null,
+            host_token: null,
+            last_scanned_at: null,
+          },
+        });
+      } catch (e) {}
     }
 
     // If order was cancelled completely, check if table can be marked AVAILABLE
@@ -3580,12 +3659,17 @@ export class RBACService {
       orderNumber = await this.getNextSequenceNumber(businessId, 'order', saleData.order_number, 'ORD-0', taxConfig);
     }
 
+    const isManualPosSale = !options?.skipOrderCompletion && !saleData.order_id;
+    const posTableOrderId = isManualPosSale
+      ? `order-pos-${timestamp}-${shortRandom}`
+      : (saleData.order_id || null);
+
     const newSale: any = {
       id,
       invoice_number: invoiceNumber || null,
       order_number: orderNumber || null,
       business_id: businessId,
-      order_id: saleData.order_id || null,
+      order_id: posTableOrderId,
       table_id: saleData.table_id || null,
       table_number: saleData.table_number || null,
       customer_name: (() => {
@@ -3670,8 +3754,122 @@ export class RBACService {
 
 
 
-    // If linked to a table order or table, complete all associated active orders and reset table
-    if (!options?.skipOrderCompletion && (saleData.order_id || saleData.table_id || saleData.table_number)) {
+    // =========================================================================
+    // WORKFLOW 1: MANUAL POS SALE ("New POS Sale" / "Create Counter POS Sale")
+    // =========================================================================
+    // Cashier manually created & settled bill immediately.
+    // Automatically dispatch a linked TableOrder (status: RECEIVED, pay_first: true)
+    // to Kitchen & Bar (KOT/KDS/BOT/BDS) and notify Waiter Station.
+    if (!options?.skipOrderCompletion && !saleData.order_id) {
+      const orderTimestamp = Date.now();
+      const orderRandom = Math.floor(1000 + Math.random() * 9000);
+      const tableOrderId = newSale.order_id || `order-pos-${orderTimestamp}-${orderRandom}`;
+
+      const orderItems: TableOrderItem[] = (saleData.items || []).map((it: any, idx: number) => {
+        const itemKey = it.item_key || `${it.id || it.item_id || 'dish'}_pos_${orderTimestamp}_${idx}`;
+        const station = it.station || this.determineItemStation(it);
+        return {
+          item_id: it.item_id || it.id || `dish-${idx}`,
+          item_key: itemKey,
+          name: it.name,
+          price: Number(it.unit_price ?? it.price) || 0,
+          currency: newSale.currency || 'Rs.',
+          quantity: Number(it.quantity) || 1,
+          special_instructions: it.special_instructions || it.notes || undefined,
+          variant_id: it.variant_id || undefined,
+          variant_name: it.variant_name || undefined,
+          food_type: it.food_type || undefined,
+          category: it.category || undefined,
+          station: station,
+          status: 'RECEIVED',
+          ready_at: null,
+          served_at: null,
+          ordered_at: now.toISOString(),
+        };
+      });
+
+      let finalTableNumber = (saleData.table_number || '').trim();
+      if (!finalTableNumber && saleData.table_id) {
+        try {
+          const tbl = await prisma.restaurantTable.findUnique({ where: { id: saleData.table_id } });
+          if (tbl?.table_number) finalTableNumber = tbl.table_number;
+        } catch (e) {}
+      }
+      if (!finalTableNumber) {
+        finalTableNumber = saleData.sale_type === 'TAKEAWAY' || !saleData.table_id ? 'Counter' : 'Dine-In';
+      }
+
+      const tableOrderRecord: any = {
+        id: tableOrderId,
+        business_id: businessId,
+        table_id: saleData.table_id || null,
+        table_number: finalTableNumber,
+        order_number: newSale.order_number || `ORD-${orderRandom}`,
+        invoice_number: newSale.invoice_number || null,
+        items: orderItems,
+        subtotal: newSale.subtotal,
+        tax_amount: newSale.total_tax || 0,
+        total_amount: newSale.total_amount,
+        currency: newSale.currency || 'Rs.',
+        customer_name: newSale.customer_name || 'Walk-in Guest',
+        customer_phone: newSale.customer_phone || null,
+        order_notes: newSale.notes || null,
+        status: 'RECEIVED',
+        pay_first: true,
+        payment_status: 'PAID',
+        payment_method: newSale.payment_method || 'Cash',
+        payment_confirmed_at: now,
+        payment_confirmed_by: user?.email || 'POS_CASHIER',
+        sale_id: newSale.id,
+        source: 'POS_MANUAL',
+        taxes: newSale.taxes || null,
+        created_at: now,
+        updated_at: now,
+      };
+
+      try {
+        await prisma.tableOrder.create({
+          data: tableOrderRecord,
+        });
+      } catch (e: any) {
+        console.warn('Prisma createTableOrder for manual POS sale error:', e.message);
+      }
+
+      // If linked to a dining table, maintain OCCUPIED status
+      if (saleData.table_id) {
+        try {
+          await prisma.restaurantTable.updateMany({
+            where: { id: saleData.table_id, business_id: businessId },
+            data: {
+              status: 'OCCUPIED',
+              current_session_id: tableOrderId,
+            },
+          });
+          realtimeEmitter.tableUpdated(businessId, {
+            id: saleData.table_id,
+            table_number: finalTableNumber,
+            status: 'OCCUPIED',
+          });
+        } catch (e) {}
+      }
+
+      // Realtime notification to KDS screens, Bar screens, and Waiter stations
+      realtimeEmitter.orderCreated(businessId, {
+        ...tableOrderRecord,
+        pos_sale_id: newSale.id,
+      });
+      realtimeEmitter.orderUpdated(businessId, {
+        ...tableOrderRecord,
+        pos_sale_id: newSale.id,
+      });
+    }
+
+    // =========================================================================
+    // WORKFLOW 2: QR-SCANNED ORDER / ACTIVE TABLE BILL SETTLEMENT
+    // =========================================================================
+    // Only runs when settling an existing order (saleData.order_id exists)
+    else if (!options?.skipOrderCompletion && (saleData.order_id || saleData.table_id || saleData.table_number)) {
+      let matchingOrders: any[] = [];
       try {
         const orderWhere: any = {
           business_id: businessId,
@@ -3685,11 +3883,17 @@ export class RBACService {
           orderWhere.table_number = saleData.table_number;
         }
 
+        matchingOrders = await prisma.tableOrder.findMany({
+          where: orderWhere,
+        });
+
         await prisma.tableOrder.updateMany({
           where: orderWhere,
           data: {
             status: 'COMPLETED',
             payment_status: 'PAID',
+            payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
+            sale_id: newSale.id,
             bill_requested: false,
           },
         });
@@ -3743,18 +3947,44 @@ export class RBACService {
         }
       } catch (e) {}
 
-
-
       realtimeEmitter.tableUpdated(businessId, {
         id: saleData.table_id || '',
         table_number: saleData.table_number || '',
         status: 'ACTIVE',
       });
-      if (saleData.order_id) {
+
+      const emittedOrderIds = new Set<string>();
+      if (matchingOrders && matchingOrders.length > 0) {
+        for (const ord of matchingOrders) {
+          emittedOrderIds.add(ord.id);
+          realtimeEmitter.orderUpdated(businessId, {
+            id: ord.id,
+            table_id: ord.table_id || saleData.table_id || '',
+            table_number: ord.table_number || saleData.table_number || '',
+            status: 'COMPLETED',
+            payment_status: 'PAID',
+            payment_method: newSale.payment_method || saleData.payment_method || ord.payment_method || 'Cash',
+            total_amount: ord.total_amount ?? newSale.total_amount,
+            subtotal: ord.subtotal ?? newSale.subtotal,
+            currency: ord.currency || newSale.currency || 'Rs.',
+            sale_id: newSale.id,
+            settled: true,
+          });
+        }
+      }
+      if (saleData.order_id && !emittedOrderIds.has(saleData.order_id)) {
         realtimeEmitter.orderUpdated(businessId, {
           id: saleData.order_id,
+          table_id: saleData.table_id || '',
+          table_number: saleData.table_number || '',
           status: 'COMPLETED',
           payment_status: 'PAID',
+          payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
+          total_amount: newSale.total_amount,
+          subtotal: newSale.subtotal,
+          currency: newSale.currency || 'Rs.',
+          sale_id: newSale.id,
+          settled: true,
         });
       }
     }
@@ -4181,6 +4411,9 @@ export class RBACService {
     const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     if (!existingOrder) throw new Error('Order not found');
     const order: any = existingOrder;
+    if (order.business_id !== businessId) {
+      throw new Error(`Order ${orderId} not found in venue '${businessId}'.`);
+    }
     
     if (!order.pay_first) throw new Error('Not a pay-first order');
     if (order.status !== 'AWAITING_PAYMENT') throw new Error('Order is not awaiting payment');
@@ -4233,6 +4466,11 @@ export class RBACService {
     
     const createdSale = await this.createSale(businessId, salePayload as any, { id: 'system', role: 'SYSTEM' }, { skipOrderCompletion: true });
     
+    const updatedItems = activeItems.map((it: any) => ({
+      ...it,
+      status: it.status === 'AWAITING_PAYMENT' ? 'RECEIVED' : (it.status || 'RECEIVED'),
+    }));
+
     try {
       await db.ensureBusiness(businessId);
       if (order.table_id) {
@@ -4265,7 +4503,7 @@ export class RBACService {
           payment_confirmed_at: new Date(),
           payment_confirmed_by: cashierName,
           sale_id: createdSale.id,
-          items: activeItems as any,
+          items: updatedItems as any,
         },
         update: {
           status: 'RECEIVED',
@@ -4278,6 +4516,7 @@ export class RBACService {
           payment_confirmed_at: new Date(),
           payment_confirmed_by: cashierName,
           sale_id: createdSale.id,
+          items: updatedItems as any,
         },
       });
     } catch (e: any) {
@@ -4288,6 +4527,7 @@ export class RBACService {
     realtimeEmitter.orderUpdated(businessId, {
       ...(existingOrder as any),
       ...(updatedPrismaOrder || {}),
+      items: updatedItems,
       id: orderId,
       pay_first: true,
       status: 'RECEIVED' as const,
@@ -4308,13 +4548,16 @@ export class RBACService {
     const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     if (!existingOrder) throw new Error('Order not found');
     const order: any = existingOrder;
+    if (order.business_id !== businessId) {
+      throw new Error(`Order ${orderId} not found in venue '${businessId}'.`);
+    }
     
     if (!order.pay_first) throw new Error('Not a pay-first order');
     if (order.status !== 'AWAITING_PAYMENT') throw new Error('Order is not awaiting payment');
     
     try {
       await prisma.tableOrder.updateMany({
-        where: { id: orderId },
+        where: { id: orderId, business_id: businessId },
         data: {
           status: 'CANCELLED',
           payment_rejected_reason: reason || 'Payment rejected',

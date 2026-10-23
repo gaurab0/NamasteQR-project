@@ -1,4 +1,5 @@
 import type { TabPermissionId } from './rbac';
+import type { KdsPrintMode } from './printer.types';
 
 export type BusinessType = 'RESTAURANT' | 'HOTEL' | 'CAFE' | 'RESORT' | 'BAR' | 'OTHER';
 export type BusinessStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
@@ -34,6 +35,7 @@ export interface BusinessOperatingHours {
   openTime: string;
   closeTime: string;
   autoDateAdvance: boolean;
+  default_language?: string;
 }
 
 export interface OperationalDayRecord {
@@ -79,6 +81,8 @@ export interface Business {
   date_format_billing?: "BOTH" | "ENGLISH" | "NEPALI";
   operations_config?: BusinessOperatingHours;
   current_operational_day?: OperationalDayRecord;
+  kds_print_mode?: KdsPrintMode;
+  default_language?: string;
 }
 
 export interface UserPhone {

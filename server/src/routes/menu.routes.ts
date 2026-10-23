@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import { authenticate, optionalAuthenticate, requireResourceAccess, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate, requireResourceAccess, AuthenticatedRequest, assertBusinessAccess } from '../middleware/auth.middleware';
 import { db } from '../services/db.service';
 import { MenuItem, MenuCategory, FoodType, MenuStatus, MenuItemVariant } from '../types/rbac.types';
 import { generateMenuDocId, generateCategoryDocId } from '../utils/id.utils';
@@ -11,30 +11,48 @@ const DEFAULT_BIZ_ID = 'maya-forest-resort';
 
 /**
  * Robust helper to resolve the business ID from query, header, body, or authenticated user
+ * Enforces tenant isolation for authenticated staff/users to prevent IDOR vulnerabilities.
  */
 async function resolveBusinessId(req: AuthenticatedRequest): Promise<string> {
   const queryBiz = req.query.businessId as string;
+  let targetBiz = '';
   if (queryBiz && typeof queryBiz === 'string' && queryBiz.trim()) {
-    return queryBiz.trim();
+    targetBiz = queryBiz.trim();
+  } else {
+    const headerBiz = req.headers['x-business-id'] as string;
+    if (headerBiz && typeof headerBiz === 'string' && headerBiz.trim()) {
+      targetBiz = headerBiz.trim();
+    } else {
+      const bodyBiz = req.body?.business_id || req.body?.businessId;
+      if (bodyBiz && typeof bodyBiz === 'string' && bodyBiz.trim()) {
+        targetBiz = bodyBiz.trim();
+      } else if (req.user?.business?.id) {
+        targetBiz = req.user.business.id;
+      }
+    }
   }
-  const headerBiz = req.headers['x-business-id'] as string;
-  if (headerBiz && typeof headerBiz === 'string' && headerBiz.trim()) {
-    return headerBiz.trim();
+
+  if (!targetBiz) {
+    try {
+      const defaultBiz = await db.getDefaultBusiness();
+      if (defaultBiz?.id) targetBiz = defaultBiz.id;
+    } catch (err) {
+      // fallback
+    }
   }
-  const bodyBiz = req.body?.business_id || req.body?.businessId;
-  if (bodyBiz && typeof bodyBiz === 'string' && bodyBiz.trim()) {
-    return bodyBiz.trim();
+  if (!targetBiz) targetBiz = DEFAULT_BIZ_ID;
+
+  if (req.user) {
+    const isAuthorized = await assertBusinessAccess(req.user, targetBiz);
+    if (!isAuthorized) {
+      const err: any = new Error(`Access denied: You do not have permission to access or modify menus for venue '${targetBiz}'.`);
+      err.statusCode = 403;
+      err.code = 'TENANT_ACCESS_DENIED';
+      throw err;
+    }
   }
-  if (req.user?.business?.id) {
-    return req.user.business.id;
-  }
-  try {
-    const defaultBiz = await db.getDefaultBusiness();
-    if (defaultBiz?.id) return defaultBiz.id;
-  } catch (err) {
-    // fallback
-  }
-  return DEFAULT_BIZ_ID;
+
+  return targetBiz;
 }
 
 // ============================================================================
@@ -160,8 +178,8 @@ router.put('/categories/reorder', authenticate, requireResourceAccess('menus', '
     await Promise.all(
       order.map((catId: string, idx: number) =>
         prisma.menuCategory
-          .update({
-            where: { id: catId },
+          .updateMany({
+            where: { id: catId, business_id: businessId },
             data: { order: idx },
           })
           .catch(() => {})
@@ -211,6 +229,22 @@ router.put('/categories/:id', authenticate, requireResourceAccess('menus', 'writ
       });
     }
 
+    const existing = await prisma.menuCategory.findUnique({ where: { id: categoryId } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'CATEGORY_NOT_FOUND', message: 'Category not found.' },
+      });
+    }
+
+    const isAuthorized = await assertBusinessAccess(req.user, existing.business_id);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied: You do not have permission to modify categories for venue '${existing.business_id}'.` },
+      });
+    }
+
     const updated = await prisma.menuCategory.update({
       where: { id: categoryId },
       data: { name: name.trim() },
@@ -237,6 +271,22 @@ router.put('/categories/:id', authenticate, requireResourceAccess('menus', 'writ
 router.delete('/categories/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const categoryId = req.params.id;
+    const existing = await prisma.menuCategory.findUnique({ where: { id: categoryId } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'CATEGORY_NOT_FOUND', message: 'Category not found.' },
+      });
+    }
+
+    const isAuthorized = await assertBusinessAccess(req.user, existing.business_id);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied: You do not have permission to delete categories for venue '${existing.business_id}'.` },
+      });
+    }
+
     await prisma.menuCategory.delete({ where: { id: categoryId } });
 
     return res.json({
@@ -525,6 +575,22 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
 router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const itemId = req.params.id;
+    const existing = await prisma.menuItem.findUnique({ where: { id: itemId } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'ITEM_NOT_FOUND', message: 'Menu item not found.' },
+      });
+    }
+
+    const isAuthorized = await assertBusinessAccess(req.user, existing.business_id);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied: You do not have permission to modify menu items for venue '${existing.business_id}'.` },
+      });
+    }
+
     const {
       name,
       category,
@@ -611,6 +677,22 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
 router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const itemId = req.params.id;
+    const existing = await prisma.menuItem.findUnique({ where: { id: itemId } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'ITEM_NOT_FOUND', message: 'Menu item not found.' },
+      });
+    }
+
+    const isAuthorized = await assertBusinessAccess(req.user, existing.business_id);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied: You do not have permission to modify menu items for venue '${existing.business_id}'.` },
+      });
+    }
+
     const { status, is_available } = req.body;
 
     const updates: any = {};
@@ -654,6 +736,22 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
 router.delete('/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const itemId = req.params.id;
+    const existing = await prisma.menuItem.findUnique({ where: { id: itemId } });
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'ITEM_NOT_FOUND', message: 'Menu item not found.' },
+      });
+    }
+
+    const isAuthorized = await assertBusinessAccess(req.user, existing.business_id);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied: You do not have permission to delete menu items for venue '${existing.business_id}'.` },
+      });
+    }
+
     await prisma.menuItem.delete({ where: { id: itemId } });
 
     return res.json({

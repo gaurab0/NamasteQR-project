@@ -457,3 +457,37 @@ export function requireResourceAccess(resource: AppResource, kind: AccessKind) {
     next();
   };
 }
+
+/**
+ * Tenant Isolation Guard:
+ * Verifies that the authenticated user is authorized to access data for targetBusinessId.
+ * An authenticated user is permitted if:
+ * 1. targetBusinessId matches their own business context (user.business.id)
+ * 2. The user is a super admin
+ * 3. The user is a business owner or holds the 'franchise' tab, and targetBusinessId is a branch
+ *    within their franchise network.
+ * Unauthenticated requests (e.g., public customer QR dining) pass through.
+ */
+export async function assertBusinessAccess(user: AuthSessionUser | undefined, targetBusinessId: string): Promise<boolean> {
+  if (!user) return true;
+
+  if (user.business?.id === targetBusinessId) {
+    return true;
+  }
+
+  if ((user.role as string) === 'SUPER_ADMIN' || (user.role as string) === 'ADMIN') {
+    return true;
+  }
+
+  const isOwner = isBusinessOwnerRole(user.role);
+  const hasFranchise = user.allowed_tabs?.includes('franchise');
+  if (isOwner || hasFranchise) {
+    const parentId = user.business?.id || '';
+    const branches = await db.getBranchesForOwner(user.id, parentId);
+    if (branches.some((b) => b.id === targetBusinessId)) {
+      return true;
+    }
+  }
+
+  return false;
+}

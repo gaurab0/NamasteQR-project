@@ -35,6 +35,8 @@ model Business {
   date_format_billing String   @default("BOTH")
   operations_config   Json?
   current_operational_day Json?
+  kds_print_mode      String   @default("DISPLAY_ONLY")
+  default_language    String   @default("en")
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
 
@@ -220,6 +222,7 @@ model TableOrder {
   taxes                   Json? // Array of SaleTaxBreakdown
   ready_at                DateTime?
   served_at               DateTime?
+  source                  String?   @default("QR")
   created_at              DateTime  @default(now())
   updated_at              DateTime  @updatedAt
 

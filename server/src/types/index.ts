@@ -59,6 +59,8 @@ export interface Business {
   menu_theme_config?: MenuThemeConfig;
   date_format_nav?: "BOTH" | "ENGLISH" | "NEPALI";
   date_format_billing?: "BOTH" | "ENGLISH" | "NEPALI";
+  kds_print_mode?: string;
+  default_language?: string;
   created_at: Date;
   updated_at: Date;
 }

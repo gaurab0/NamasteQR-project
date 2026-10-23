@@ -27,7 +27,7 @@ interface FinalTableBillPageProps {
   order: TableOrder;
   businessId?: string;
   businessName?: string;
-  onDoneReturnToMenu: () => void;
+  onDoneReturnToMenu: (settledOrder?: TableOrder) => void;
   onRequestBillDispatched?: () => void;
 }
 
@@ -119,22 +119,25 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
 
     const unsub = socketService.subscribeToOrders((data) => {
       if (!data || data.id !== liveOrder.id) return;
-      setLiveOrder((prev) => ({
-        ...(prev || liveOrder),
+      const mergedOrder: TableOrder = {
+        ...(liveOrder || order),
         ...data,
-        subtotal: Number(data.subtotal ?? prev?.subtotal ?? 0),
-        total_amount: Number(data.total_amount ?? prev?.total_amount ?? 0),
-      }));
+        subtotal: Number(data.subtotal ?? liveOrder?.subtotal ?? order.subtotal ?? 0),
+        total_amount: Number(data.total_amount ?? liveOrder?.total_amount ?? order.total_amount ?? 0),
+        currency: data.currency || liveOrder?.currency || order.currency || 'Rs.',
+        payment_method: data.payment_method || liveOrder?.payment_method || order.payment_method || selectedPaymentMode || 'Cash',
+      };
+      setLiveOrder(mergedOrder);
       if (data.bill_requested) {
         setBillRequested(true);
       }
       if (data.status === 'COMPLETED' || data.payment_status === 'PAID' || (data as any).settled) {
-        onDoneReturnToMenu();
+        onDoneReturnToMenu(mergedOrder);
       }
     });
 
     return () => unsub();
-  }, [targetBizId, liveOrder.id, onDoneReturnToMenu]);
+  }, [targetBizId, liveOrder.id, onDoneReturnToMenu, order, selectedPaymentMode]);
 
   // Load Business Tax Config
   useEffect(() => {
@@ -405,25 +408,25 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
       </header>
 
       {/* Main Page Container */}
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 pt-6">
-        <div className="bg-white rounded-3xl shadow-xl border border-zinc-200/80 overflow-hidden">
+      <main className="max-w-2xl mx-auto px-3 sm:px-4 pt-3 sm:pt-4">
+        <div className="bg-white rounded-2xl shadow-lg border border-zinc-200/80 overflow-hidden">
           {/* Card Sub-Header */}
-          <div className="p-4 sm:p-5 bg-zinc-900 text-white flex items-center justify-between border-b border-zinc-800">
+          <div className="px-3.5 py-2.5 sm:px-4 sm:py-3 bg-zinc-900 text-white flex items-center justify-between border-b border-zinc-800">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="font-black text-lg sm:text-xl text-white">Final Table Folio</h2>
-                <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-amber-500 text-zinc-950">
+                <h2 className="font-black text-base sm:text-lg text-white">Final Table Folio</h2>
+                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950">
                   Table #{liveOrder?.table_number || ''}
                 </span>
               </div>
-              <p className="text-xs text-zinc-400 font-mono mt-0.5">
+              <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
                 {liveOrder?.invoice_number ? `Invoice #${liveOrder.invoice_number}` : `Order #${liveOrder?.order_number || (liveOrder?.id ? liveOrder.id.slice(0, 8).toUpperCase() : 'ORD')}`} • Dine-In Guest
               </p>
             </div>
 
             <div className="text-right">
-              <span className="text-[10px] uppercase font-bold text-zinc-400 block">Status</span>
-              <span className={`inline-flex items-center gap-1 font-extrabold px-2.5 py-0.5 rounded-md text-xs mt-0.5 ${
+              <span className="text-[9px] uppercase font-bold text-zinc-400 block">Status</span>
+              <span className={`inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-md text-[11px] mt-0.5 ${
                 liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
                   ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/30'
                   : 'text-amber-400 bg-amber-500/20 border border-amber-500/30'
@@ -443,37 +446,37 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
             </div>
           </div>
 
-          <div className="p-5 sm:p-7 space-y-6">
+          <div className="p-3.5 sm:p-4 space-y-3">
             {/* Table & Timestamp Info Banner */}
-            <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-2xl grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+            <div className="p-2.5 sm:p-3 bg-zinc-50 border border-zinc-200/90 rounded-xl grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
               <div>
-                <span className="text-[10px] uppercase font-bold text-zinc-400 block">Dine-In Table</span>
-                <span className="font-extrabold text-zinc-900 text-sm">Table #{liveOrder?.table_number || ''}</span>
+                <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-400 block leading-tight">Dine-In Table</span>
+                <span className="font-extrabold text-zinc-900 text-xs sm:text-sm leading-tight">Table #{liveOrder?.table_number || ''}</span>
                 {(liveOrder?.floor || liveOrder?.building) && (
-                  <span className="text-[11px] text-zinc-500 block">
+                  <span className="text-[10px] text-zinc-500 block leading-tight">
                     {[liveOrder?.floor, liveOrder?.building].filter(Boolean).join(' • ')}
                   </span>
                 )}
               </div>
               <div>
-                <span className="text-[10px] uppercase font-bold text-zinc-400 block">Order Placed</span>
-                <span className="font-bold text-zinc-800 text-xs sm:text-sm block">
+                <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-400 block leading-tight">Order Placed</span>
+                <span className="font-bold text-zinc-800 text-[11px] sm:text-xs block leading-tight">
                   {renderFormattedDate(liveOrder.created_at || new Date(), dateFormatBilling)}
                 </span>
               </div>
               <div className="col-span-2 sm:col-span-1">
-                <span className="text-[10px] uppercase font-bold text-zinc-400 block">Ordering Status</span>
-                <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md text-[11px] mt-0.5">
+                <span className="text-[9px] uppercase font-bold tracking-wider text-zinc-400 block leading-tight">Ordering Status</span>
+                <span className="inline-flex items-center gap-1 font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded text-[10px] mt-0.5 leading-tight">
                   Ordering Locked
                 </span>
               </div>
             </div>
 
             {/* Promo Code & Voucher Section */}
-            <div className="p-4 bg-amber-50/70 border border-amber-200/90 rounded-2xl space-y-2.5">
+            <div className="p-2.5 sm:p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-1.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
-                  <Tag className="w-4 h-4 text-amber-600" />
+                  <Tag className="w-3.5 h-3.5 text-amber-600" />
                   <span>Restaurant Promo Code & Voucher</span>
                 </div>
                 {appliedPromo && (
@@ -484,7 +487,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
               </div>
 
               {!appliedPromo ? (
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <input
                       id="input-bill-promo-code"
@@ -501,7 +504,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                         }
                       }}
                       placeholder="ENTER PROMO CODE"
-                      className="flex-1 bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                      className="flex-1 bg-white border border-amber-300/80 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase tracking-wider text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans focus:outline-hidden focus:ring-1.5 focus:ring-amber-500"
                     />
                     <Button
                       id="btn-apply-bill-promo"
@@ -509,7 +512,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                       variant="primary"
                       size="sm"
                       onClick={handleApplyPromo}
-                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-2 shrink-0 cursor-pointer"
+                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shrink-0 cursor-pointer h-auto"
                     >
                       Apply
                     </Button>
@@ -525,27 +528,27 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                   
                 </div>
               ) : (
-                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 animate-in fade-in duration-150">
+                <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between gap-2.5 animate-in fade-in duration-150">
                   <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-xs text-emerald-900 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-black text-xs text-emerald-900 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-300">
                         {appliedPromo.code}
                       </span>
                       <span className="text-xs font-extrabold text-emerald-700">
                         -{appliedPromo.discountPercent}% Discount
                       </span>
                     </div>
-                    <p className="text-[11px] text-emerald-800 font-medium">
-                      {appliedPromo.description} • Saved {currencySymbol} {promoDiscountAmount.toFixed(2)}
+                    <p className="text-[10px] text-emerald-800 font-medium">
+                      {appliedPromo.description} • Saved <span className="notranslate font-mono font-bold">{currencySymbol} {promoDiscountAmount.toFixed(2)}</span>
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={handleRemovePromo}
-                    className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-white rounded-lg transition cursor-pointer shrink-0"
+                    className="p-1 text-zinc-400 hover:text-rose-600 hover:bg-white rounded transition cursor-pointer shrink-0"
                     title="Remove promo code"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               )}
@@ -553,21 +556,21 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
 
             {/* Itemized Table Bill */}
             <div>
-              <h3 className="text-xs font-black uppercase tracking-wider text-zinc-500 mb-2.5 flex items-center justify-between">
+              <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center justify-between">
                 <span>Itemized Order Details</span>
-                <span>{liveOrder.items.length} dishes</span>
+                <span>{liveOrder.items.length} {liveOrder.items.length === 1 ? 'dish' : 'dishes'}</span>
               </h3>
 
-              <div className="border border-zinc-200 rounded-2xl overflow-hidden divide-y divide-zinc-100 bg-white">
+              <div className="border border-zinc-200 rounded-xl overflow-hidden divide-y divide-zinc-100 bg-white">
                 {liveOrder.items.map((it, idx) => (
-                  <div key={idx} className="p-3.5 flex items-start sm:items-center justify-between gap-3 text-xs hover:bg-zinc-50/50 transition">
-                    <div className="space-y-0.5 min-w-0 flex-1 pr-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-zinc-900 text-sm break-words">
+                  <div key={idx} className="px-3 py-2 sm:py-2.5 flex items-start sm:items-center justify-between gap-2.5 text-xs hover:bg-zinc-50/50 transition">
+                    <div className="space-y-0.5 min-w-0 flex-1 pr-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-bold text-zinc-900 text-xs sm:text-sm break-words leading-tight">
                           {it.name}
                         </span>
                         {it.variant_name && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
                             [{it.variant_name}]
                           </span>
                         )}
@@ -587,14 +590,14 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-zinc-500">
+                      <div className="text-[10px] sm:text-[11px] text-zinc-500 leading-tight notranslate">
                         {it.quantity} × {currencySymbol} {Number(it.price).toFixed(2)}
                         {it.special_instructions && (
                           <span className="italic text-zinc-400 block mt-0.5">Note: "{it.special_instructions}"</span>
                         )}
                       </div>
                     </div>
-                    <span className="font-mono font-black text-zinc-900 text-sm sm:text-base shrink-0 pt-0.5 sm:pt-0">
+                    <span className="font-mono font-black text-zinc-900 text-xs sm:text-sm shrink-0 pt-0.5 sm:pt-0 notranslate">
                       {currencySymbol} {(Number(it.price) * Number(it.quantity)).toFixed(2)}
                     </span>
                   </div>
@@ -603,11 +606,11 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
             </div>
 
             {/* Tax & Total Calculation */}
-            <div className="p-5 bg-zinc-50 rounded-2xl border border-zinc-200/80 space-y-2.5 text-xs">
+            <div className="p-3 sm:p-3.5 bg-zinc-50 rounded-xl border border-zinc-200/80 space-y-1.5 text-xs notranslate">
               <div className="flex items-center justify-between text-zinc-600">
                 <span className="flex items-center gap-1.5">
-                  <span>Items Subtotal</span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-200/80 text-zinc-700">
+                  <span className="font-medium">Items Subtotal</span>
+                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-zinc-200/80 text-zinc-700">
                     {isInclusiveTax ? 'Inclusive of VAT%' : 'Exclusive of VAT%'}
                   </span>
                 </span>
@@ -650,10 +653,10 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                 </div>
               )}
 
-              <div className="pt-3 border-t border-zinc-200 flex items-center justify-between">
+              <div className="pt-2 mt-1 border-t border-zinc-200 flex items-center justify-between">
                 <div>
-                  <span className="text-sm font-black text-zinc-900 block">Total Amount Payable</span>
-                  <span className="text-[11px] text-zinc-500">
+                  <span className="text-xs sm:text-sm font-black text-zinc-900 block leading-tight">Total Amount Payable</span>
+                  <span className="text-[10px] text-zinc-500 leading-tight">
                     {totalTax > 0
                       ? isInclusiveTax
                         ? 'Inclusive of configured VAT / taxes'
@@ -661,7 +664,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                       : 'Standard table settlement'}
                   </span>
                 </div>
-                <span className="text-2xl sm:text-3xl font-black text-zinc-950 font-mono">
+                <span className="text-xl sm:text-2xl font-black text-zinc-950 font-mono">
                   {currencySymbol} {totalAmount.toFixed(2)}
                 </span>
               </div>
@@ -670,15 +673,15 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
             
 
             {/* Bill Actions Section */}
-            <div className="pt-4 border-t border-zinc-200">
+            <div className="pt-2.5 border-t border-zinc-200">
               {!billRequested ? (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {!allItemsServed && (
-                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex items-start gap-2.5">
-                      <Clock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
+                    <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                      <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="leading-tight">
                         <strong className="block font-bold">Dishes in preparation in kitchen</strong>
-                        <span>Final bill can be requested once all ordered dishes are delivered to your table.</span>
+                        <span className="text-[11px] text-amber-800">Final bill can be requested once all ordered dishes are delivered to your table.</span>
                       </div>
                     </div>
                   )}
@@ -690,32 +693,32 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                     size="lg"
                     disabled={!allItemsServed || requestingBill}
                     onClick={handleRequestBillAction}
-                    className={`w-full py-3.5 text-sm font-black shadow-md flex items-center justify-center gap-2 ${
+                    className={`w-full py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 ${
                       !allItemsServed
                         ? 'opacity-50 cursor-not-allowed bg-zinc-400 text-zinc-100'
                         : 'cursor-pointer bg-zinc-950 hover:bg-zinc-800 text-white'
                     }`}
                   >
                     <Receipt className="w-4 h-4 text-amber-400" />
-                    <span>Request Final Bill ({currencySymbol} {totalAmount.toFixed(2)})</span>
+                    <span>Request Final Bill <span className="notranslate font-mono font-bold">({currencySymbol} {totalAmount.toFixed(2)})</span></span>
                   </Button>
 
                   
                 </div>
               ) : (
-                <div id="bill-request-dispatched-card" className="space-y-4 animate-in fade-in duration-200">
-                  <div className="p-4 sm:p-5 bg-emerald-50 border-2 border-emerald-500 rounded-2xl flex items-start gap-3.5 shadow-sm">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                      <CheckCircle2 className="w-6 h-6" />
+                <div id="bill-request-dispatched-card" className="space-y-2.5 animate-in fade-in duration-200">
+                  <div className="p-3 sm:p-3.5 bg-emerald-50 border-2 border-emerald-500 rounded-xl flex items-start gap-3 shadow-xs">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <CheckCircle2 className="w-5 h-5" />
                     </div>
-                    <div className="flex-1 min-w-0 space-y-2">
+                    <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center justify-between gap-2">
-                        <strong className="text-sm font-black text-emerald-950 uppercase tracking-wide">
+                        <strong className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wide">
                           {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
                             ? 'Bill Folio Delivered'
                             : 'Bill Request Dispatched'}
                         </strong>
-                        <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
                           liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
                             ? 'bg-emerald-600 text-white'
                             : 'bg-emerald-200 text-emerald-900 animate-pulse'
@@ -725,13 +728,13 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                             : 'Waiter Pinged'}
                         </span>
                       </div>
-                      <p className="text-xs sm:text-sm text-emerald-900 font-medium leading-relaxed">
+                      <p className="text-xs text-emerald-900 font-medium leading-relaxed">
                         {liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
                           ? `Your bill check folio has been delivered to Table #${liveOrder?.table_number || ''}! You can settle payment directly with your waiter or at the cashier counter.`
                           : billSuccessMessage || `Service staff at the Waiter Station has been notified! A waiter is bringing your bill folio folder to Table #${liveOrder?.table_number || ''}.`}
                       </p>
 
-                      <div className="text-xs text-emerald-800 font-semibold pt-1 border-t border-emerald-200/60 flex items-center gap-1.5">
+                      <div className="text-[11px] text-emerald-800 font-semibold pt-1 border-t border-emerald-200/60 flex items-center gap-1.5">
                         <span className={`w-2 h-2 rounded-full ${
                           liveOrder.folio_delivered || (liveOrder as any).bill_acknowledged
                             ? 'bg-emerald-600'

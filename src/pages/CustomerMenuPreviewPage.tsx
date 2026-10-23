@@ -39,9 +39,18 @@ import {
   Moon,
   X,
   Receipt,
-  FileText
+  FileText,
+  Globe,
+  ChevronDown
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
+import {
+  SUPPORTED_LANGUAGES,
+  getSavedCustomerLanguage,
+  saveCustomerLanguage,
+  applyLanguage,
+  initGoogleTranslate,
+} from '../utils/googleTranslate';
 
 interface CustomerMenuPreviewPageProps {
   onNavigateBack?: () => void;
@@ -254,6 +263,42 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const [activeOrder, setActiveOrder] = useState<TableOrder | null>(null);
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
   const [noOrderToast, setNoOrderToast] = useState(false);
+
+  // Customer View Language Preference State (Headless Google Translate)
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
+    const saved = getSavedCustomerLanguage();
+    if (saved) return saved;
+    return businessProfile?.default_language || (businessProfile as any)?.operations_config?.default_language || 'en';
+  });
+
+  const hasUserCustomLanguage = useRef<boolean>(Boolean(getSavedCustomerLanguage()));
+
+  // Initialize headless Google Translate element script
+  useEffect(() => {
+    initGoogleTranslate();
+  }, []);
+
+  // When businessProfile loads: If customer has NOT manually chosen a language, apply venue default
+  useEffect(() => {
+    if (!hasUserCustomLanguage.current && businessProfile) {
+      const venueDefault = businessProfile.default_language || (businessProfile as any)?.operations_config?.default_language || 'en';
+      setSelectedLanguage(venueDefault);
+      applyLanguage(venueDefault);
+    } else if (hasUserCustomLanguage.current) {
+      const saved = getSavedCustomerLanguage();
+      if (saved) {
+        setSelectedLanguage(saved);
+        applyLanguage(saved);
+      }
+    }
+  }, [businessProfile?.default_language, (businessProfile as any)?.operations_config?.default_language]);
+
+  const handleLanguageChange = (newLang: string) => {
+    hasUserCustomLanguage.current = true;
+    saveCustomerLanguage(newLang);
+    setSelectedLanguage(newLang);
+    applyLanguage(newLang);
+  };
   const formatPaymentMode = (pm?: string) => {
     if (!pm) return 'Cash';
     const upper = pm.toUpperCase();
@@ -270,7 +315,12 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   } | null>(() => {
     try {
       const cached = localStorage.getItem('serveflow_last_settled_payment');
-      return cached ? JSON.parse(cached) : null;
+      if (!cached) return null;
+      const parsed = JSON.parse(cached);
+      if (parsed && (!parsed.amount || Number(parsed.amount) <= 0)) {
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -379,7 +429,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       setActiveOrder(validOrder);
     }
     const nonCancelledItems = (currentActiveOrder?.items || []).filter((i) => i.status !== 'CANCELLED');
-    const isServed = nonCancelledItems.length > 0 && nonCancelledItems.every((i) => i.status === 'SERVED' || Boolean(i.served_at));
+    const isServed = nonCancelledItems.length > 0 && nonCancelledItems.every((i) => i.status === 'SERVED' || i.status === 'COMPLETED' || Boolean(i.served_at));
 
     // If not in read-only mode and not all non-cancelled items are served, block opening
     if (!isReadOnlyMode && !isServed) {
@@ -395,7 +445,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     setIsFinalBillPageOpen(true);
   };
 
-  const handleDoneReturnToMenu = () => {
+  const handleDoneReturnToMenu = (settledOrder?: TableOrder) => {
     setIsFinalBillPageOpen(false);
     setIsTableBillConcluded(true);
     try {
@@ -404,18 +454,74 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     setCartItems([]);
     setIsCartOpen(false);
     setIsTrackerOpen(false);
+    handleOrderSettled(
+      settledOrder?.id || activeOrder?.id,
+      settledOrder?.table_number || tableParams.tableNumber,
+      settledOrder || activeOrder
+    );
   };
 
   // Handle table settlement cleanup and thank-you notification
   const handleOrderSettled = (orderId?: string, tableNum?: string, orderObj?: TableOrder | null) => {
-    const resolvedOrder = orderObj || activeOrder || successOrderData;
-    if (resolvedOrder) {
-      const info = {
-        mode: formatPaymentMode(resolvedOrder.payment_method),
-        amount: resolvedOrder.total_amount ?? resolvedOrder.subtotal ?? 0,
-        currency: resolvedOrder.currency || 'Rs.',
-      };
-      setSettledPaymentInfo(info);
+    // 1. Gather all possible candidate order objects in priority order
+    const candidates = [orderObj, activeOrder, successOrderData].filter(Boolean) as TableOrder[];
+
+    let cachedActiveOrder: TableOrder | null = null;
+    try {
+      const bId = tableParams.businessId || user?.business?.id || 'biz';
+      const tKey = tableParams.tableNumber || tableParams.tableId || 'default';
+      const stored = localStorage.getItem(`serveflow_active_order_${bId}_${tKey}`);
+      if (stored) cachedActiveOrder = JSON.parse(stored);
+    } catch {}
+    if (cachedActiveOrder) {
+      candidates.push(cachedActiveOrder);
+    }
+
+    let resolvedAmount: number | undefined;
+    let resolvedCurrency: string = 'Rs.';
+    let resolvedMode: string = 'Cash';
+
+    for (const cand of candidates) {
+      if (cand.currency && cand.currency.trim()) {
+        resolvedCurrency = cand.currency.trim();
+      }
+      if (cand.payment_method && cand.payment_method.trim()) {
+        resolvedMode = formatPaymentMode(cand.payment_method);
+      }
+
+      const amt = Number(cand.total_amount ?? cand.subtotal);
+      if (!isNaN(amt) && amt > 0) {
+        resolvedAmount = amt;
+        break;
+      }
+
+      // Calculate from items if direct amount was 0 or undefined
+      if (Array.isArray(cand.items) && cand.items.length > 0) {
+        const itemSum = cand.items.reduce((acc, item) => {
+          if (item.status === 'CANCELLED') return acc;
+          return acc + (Number(item.price || 0) * Number(item.quantity || 1));
+        }, 0);
+        if (itemSum > 0) {
+          resolvedAmount = itemSum;
+          break;
+        }
+      }
+    }
+
+    if ((!resolvedAmount || resolvedAmount <= 0) && settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0) {
+      resolvedAmount = Number(settledPaymentInfo.amount);
+      if (settledPaymentInfo.currency) resolvedCurrency = settledPaymentInfo.currency;
+      if (settledPaymentInfo.mode) resolvedMode = settledPaymentInfo.mode;
+    }
+
+    const info: { mode: string; amount?: number; currency: string } = {
+      mode: resolvedMode,
+      currency: resolvedCurrency,
+      ...(resolvedAmount && resolvedAmount > 0 ? { amount: resolvedAmount } : {}),
+    };
+
+    setSettledPaymentInfo(info);
+    if (info.amount && info.amount > 0) {
       try {
         localStorage.setItem('serveflow_last_settled_payment', JSON.stringify(info));
       } catch {}
@@ -764,7 +870,10 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           try {
             localStorage.setItem('serveflow_table_bill_concluded', 'true');
           } catch {}
-          handleOrderSettled(updatedOrder.id, tableParams.tableNumber, updatedOrder);
+          handleOrderSettled(updatedOrder.id, tableParams.tableNumber, {
+            ...(activeOrder || successOrderData || {}),
+            ...updatedOrder,
+          });
         }
       }
     });
@@ -776,6 +885,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           setSessionExpired(true);
           setIsTableBillConcluded(true);
           setIsFinalBillPageOpen(false);
+          handleOrderSettled(activeOrder?.id, tableParams.tableNumber, activeOrder);
         }
       }
     });
@@ -786,7 +896,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     };
   }, [tableParams.businessId, user?.business?.id, activeOrder?.business_id, tableParams.tableId, activeOrder?.id, successOrderData?.id, tableParams.sessionId, tableParams.tableNumber]);
 
-  // Real-time Socket.io listener for Menu Items and Categories
+  // Real-time Socket.io listener for Menu Items, Categories, and Business Profile
   useEffect(() => {
     const targetBizId = tableParams.businessId || user?.business?.id || businessProfile?.id;
     if (!targetBizId) return;
@@ -795,8 +905,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       loadData(targetBizId);
     });
 
+    const unsubBiz = socketService.subscribeToBusinessProfile((biz) => {
+      if (biz && (biz.id === targetBizId || !biz.id)) {
+        setBusinessProfile((prev) => ({ ...(prev || {}), ...biz }));
+      }
+    });
+
     return () => {
       unsubMenu();
+      unsubBiz();
     };
   }, [tableParams.businessId, user?.business?.id, businessProfile?.id]);
 
@@ -1201,10 +1318,12 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                 Thank You for Dining with Us!
               </h2>
               <p className="text-base sm:text-lg font-semibold text-zinc-700 dark:text-zinc-200 max-w-md mx-auto leading-relaxed">
-                {settledPaymentInfo && (settledPaymentInfo.amount !== undefined || settledPaymentInfo.mode) ? (
-                  `Payment received: ${settledPaymentInfo.mode} ${settledPaymentInfo.currency || 'Rs.'} ${Number(settledPaymentInfo.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+                {settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0 ? (
+                  <>Payment received: {settledPaymentInfo.mode || 'Cash'} <span className="notranslate font-mono font-bold">{settledPaymentInfo.currency || 'Rs.'} {Number(settledPaymentInfo.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span></>
+                ) : settledPaymentInfo?.mode ? (
+                  `Payment received via ${settledPaymentInfo.mode}`
                 ) : (
-                  'Payment received'
+                  'Payment received successfully'
                 )}
               </p>
             </div>
@@ -1327,7 +1446,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               >
                 <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
                 <span className="whitespace-nowrap">View Cart</span>
-                <span className="bg-zinc-950/20 text-zinc-950 px-1.5 py-0.2 rounded-full font-mono text-[10px] font-black">
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-white text-zinc-950 rounded-full font-mono text-xs font-black shadow-xs leading-none">
                   {totalCartCount}
                 </span>
               </button>
@@ -1477,16 +1596,41 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                      <h1 id="restaurant-display-name" className="text-lg sm:text-xl lg:text-2xl font-black text-white tracking-tight drop-shadow-md">
+                      <h1 id="restaurant-display-name" className="text-lg sm:text-xl lg:text-2xl font-black text-white tracking-tight drop-shadow-md notranslate">
                         {businessProfile?.name || 'Restaurant & Kitchen'}
                       </h1>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 backdrop-blur-sm">
-                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                          Live Menu
-                        </span>
+                        {/* Modern Language Preference Dropdown */}
+                        <div className="relative inline-flex items-center notranslate">
+                          <button
+                            id="customer-language-picker-btn"
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-0.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-bold bg-white/15 hover:bg-white/25 text-white border border-white/25 backdrop-blur-md transition shadow-xs cursor-pointer active:scale-95 notranslate select-none"
+                            title="Select Menu Language"
+                            aria-label="Select Menu Language"
+                          >
+                            <Globe className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400 shrink-0" />
+                            <span className="font-semibold tracking-tight notranslate">
+                              {SUPPORTED_LANGUAGES.find((l) => l.code === selectedLanguage)?.nativeLabel || 'English'}
+                            </span>
+                            <ChevronDown className="w-3 h-3 text-white/70 shrink-0" />
+                          </button>
+                          <select
+                            id="customer-language-select"
+                            value={selectedLanguage}
+                            onChange={(e) => handleLanguageChange(e.target.value)}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                            aria-label="Choose Language"
+                          >
+                            {SUPPORTED_LANGUAGES.map((lang) => (
+                              <option key={lang.code} value={lang.code} className="bg-zinc-900 text-white py-1">
+                                {lang.nativeLabel} ({lang.label})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                         {tableParams.tableNumber && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-zinc-950 border border-amber-400 shadow-sm backdrop-blur-sm">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-zinc-950 border border-amber-400 shadow-sm backdrop-blur-sm notranslate">
                             Table #{cleanTableNumber(tableParams.tableNumber)}
                           </span>
                         )}
@@ -1558,7 +1702,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       {/* Main Content Area */}
       <div className="w-full max-w-4xl mx-auto px-3.5 sm:px-6 pt-1 sm:pt-1.5 space-y-1.5">
         {/* Search and Dietary Controls */}
-        <div className={`flex flex-col sm:flex-row items-center justify-between gap-1.5 ${theme.searchCardBg} px-2.5 py-1.5 sm:px-3 sm:py-1.5 rounded-xl shadow-xs transition-colors duration-300 w-full max-w-full overflow-hidden`}>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-1.5 w-full max-w-full">
           {/* Search Bar */}
           <div className="relative w-full sm:w-72">
             <Search className="absolute left-3 top-2 w-3.5 h-3.5 text-zinc-400" />
@@ -1574,7 +1718,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                 }
               }}
               placeholder="Search dishes, ingredients, drinks..."
-              className="w-full pl-8 pr-3 py-1 text-xs bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 transition font-medium"
+              className={`w-full pl-8 pr-3 py-1.5 text-xs ${theme.cardBg} ${theme.text} border rounded-lg shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-amber-500 transition font-medium placeholder:text-zinc-400`}
             />
           </div>
 
@@ -1900,7 +2044,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                       <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-black/5 dark:border-white/5">
                         <div className="space-y-2">
                           <div className="flex items-baseline gap-2">
-                            <span className={`font-extrabold font-mono text-lg sm:text-2xl ${theme.priceColor}`}>
+                            <span className={`font-extrabold font-mono text-lg sm:text-2xl ${theme.priceColor} notranslate`}>
                               {item.currency || 'Rs.'} {displayPrice.toLocaleString()}
                             </span>
                             {hasVariants && activeVariant && (
@@ -1936,7 +2080,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                     </div>
                                   )}
                                   <span>{v.name}</span>
-                                      <span className={`font-mono text-[10px] ${isSelected ? 'font-black' : 'opacity-70'}`}>
+                                      <span className={`font-mono text-[10px] notranslate ${isSelected ? 'font-black' : 'opacity-70'}`}>
                                         · {item.currency || 'Rs.'}{Number(v.price).toLocaleString()}
                                       </span>
                                     </button>
@@ -2032,7 +2176,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                           {/* Price and Add button directly beside image */}
                           <div className="pt-1.5 mt-1 flex items-center justify-between gap-2 border-t border-black/5 dark:border-white/5">
                             <div className="min-w-0">
-                              <span className={`font-bold font-mono text-sm sm:text-base ${theme.priceColor}`}>
+                              <span className={`font-bold font-mono text-sm sm:text-base ${theme.priceColor} notranslate`}>
                                 {item.currency || 'Rs.'} {displayPrice.toLocaleString()}
                               </span>
                               {hasVariants && activeVariant && (
@@ -2101,7 +2245,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                     </div>
                                   )}
                                   <span>{v.name}</span>
-                                  <span className={`font-mono text-[10px] ${isSelected ? 'font-black' : 'opacity-70'}`}>
+                                  <span className={`font-mono text-[10px] notranslate ${isSelected ? 'font-black' : 'opacity-70'}`}>
                                     · {item.currency || 'Rs.'}{Number(v.price).toLocaleString()}
                                   </span>
                                 </button>
@@ -2144,7 +2288,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                           <h4 className="font-bold text-base sm:text-lg leading-snug">{item.name}</h4>
                           <div className="hidden sm:inline-block flex-1 border-b border-dotted border-current opacity-30 mx-2 mb-1" />
                           <div className="text-right shrink-0">
-                            <span className={`font-bold font-mono text-base sm:text-lg ${theme.priceColor}`}>
+                            <span className={`font-bold font-mono text-base sm:text-lg ${theme.priceColor} notranslate`}>
                               {item.currency || 'Rs.'} {displayPrice.toLocaleString()}
                             </span>
                             {hasVariants && activeVariant && (
@@ -2191,7 +2335,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                     </div>
                                   )}
                                   <span>{v.name}</span>
-                                    <span className={`font-mono text-[10px] ${isSelected ? 'font-black' : 'opacity-70'}`}>
+                                    <span className={`font-mono text-[10px] notranslate ${isSelected ? 'font-black' : 'opacity-70'}`}>
                                       · {item.currency || 'Rs.'}{Number(v.price).toLocaleString()}
                                     </span>
                                   </button>
@@ -2282,7 +2426,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                             <div className="flex flex-row items-center gap-1.5 mt-0.5 sm:mt-1 flex-nowrap">
                               {/* Price */}
                               <div className="shrink-0 flex flex-col justify-center">
-                                <div className="font-black text-sm sm:text-base text-[#3b2d24] leading-tight">
+                                <div className="font-black text-sm sm:text-base text-[#3b2d24] leading-tight notranslate">
                                   {item.currency || 'Rs.'} {displayPrice.toLocaleString()}
                                 </div>
                                 {hasVariants && (
@@ -2351,7 +2495,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                             <div className={`w-1.5 h-1.5 rounded-full ${isExpanded ? "bg-white" : (v.food_type === "veg" ? "bg-emerald-600" : "bg-rose-600")}`} />
                                           </div>
                                         )}
-                                        <span>{v.name}</span> <span className="opacity-70 font-mono text-[10px] ml-1">• {item.currency || "Rs."} {Number(v.price).toLocaleString()}</span>
+                                        <span>{v.name}</span> <span className="opacity-70 font-mono text-[10px] ml-1 notranslate">• {item.currency || "Rs."} {Number(v.price).toLocaleString()}</span>
                                       </div>
                                       {isExpanded && (
                                         <div className="flex items-center gap-2 sm:gap-2.5 px-1.5 sm:px-2 py-0.5 bg-[#4a3b30] text-white border-l border-[#6b5849] font-black text-sm">
@@ -2391,37 +2535,54 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                           !isReadOnlyMode && isHost && isAvailable && (
                             <div className="flex flex-col gap-1">
                               <div className="flex flex-wrap gap-1">
-                                <div className={`flex items-center rounded-xl overflow-hidden border transition-all cursor-pointer ${
-                                  getItemCartQuantity(item.id) > 0 ? 'bg-[#5c4a3d] border-[#5c4a3d] text-white shadow-2xs' : 'bg-[#faf8f5] border-[#e8e4e1] text-[#3b2d24] hover:bg-[#f3eee8]'
-                                }`}>
-                                   <div className={`px-2 sm:px-2.5 py-1 font-bold text-xs whitespace-nowrap ${getItemCartQuantity(item.id) > 0 ? 'text-white' : 'text-[#3b2d24]'}`}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (getItemCartQuantity(item.id) === 0) handleAddToCartWithDetails(item, 1);
-                                      }}
-                                   >
-                                     {getItemCartQuantity(item.id) > 0 ? 'Added to Cart' : `Add ${item.name}`}
-                                   </div>
-                                   {getItemCartQuantity(item.id) > 0 && (
-                                     <div className="flex items-center gap-2 sm:gap-2.5 px-1.5 sm:px-2 py-0.5 bg-[#4a3b30] text-white border-l border-[#6b5849] font-black text-sm">
-                                       <button 
-                                         type="button"
-                                         className="hover:text-amber-300 text-white transition p-0.5 leading-none cursor-pointer"
-                                         onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.id, getItemCartQuantity(item.id) - 1); }}
+                                {(() => {
+                                  const singleQty = getItemCartQuantity(item.id);
+                                  return (
+                                    <div className="flex items-center rounded-xl overflow-hidden border transition-all cursor-pointer bg-[#5c4a3d] border-[#5c4a3d] text-white shadow-2xs">
+                                       <div 
+                                         className="px-2 sm:px-2.5 py-1 font-bold text-xs whitespace-nowrap truncate max-w-[170px] sm:max-w-[220px] text-white"
+                                         title={singleQty > 0 ? 'Added to Cart' : `Add ${item.name}`}
+                                         onClick={(e) => {
+                                           e.stopPropagation();
+                                           if (singleQty === 0) handleAddToCartWithDetails(item, 1);
+                                         }}
                                        >
-                                         -
-                                       </button>
-                                       <span className="text-xs min-w-[12px] text-center leading-none text-white font-bold">{getItemCartQuantity(item.id)}</span>
-                                       <button 
-                                         type="button"
-                                         className="hover:text-amber-300 text-white transition p-0.5 leading-none cursor-pointer"
-                                         onClick={(e) => { e.stopPropagation(); handleUpdateQuantity(item.id, getItemCartQuantity(item.id) + 1); }}
-                                       >
-                                         +
-                                       </button>
-                                     </div>
-                                   )}
-                                </div>
+                                         {singleQty > 0 ? 'Added to Cart' : `Add ${item.name}`}
+                                       </div>
+                                       <div className="flex items-center gap-2 sm:gap-2.5 px-1.5 sm:px-2 py-0.5 bg-[#4a3b30] text-white border-l border-[#6b5849] font-black text-sm">
+                                         <button 
+                                           type="button"
+                                           aria-label="Decrease quantity"
+                                           className="hover:text-amber-300 text-white transition p-0.5 leading-none cursor-pointer"
+                                           onClick={(e) => { 
+                                             e.stopPropagation(); 
+                                             if (singleQty > 0) {
+                                               handleUpdateQuantity(item.id, singleQty - 1); 
+                                             }
+                                           }}
+                                         >
+                                           -
+                                         </button>
+                                         <span className="text-xs min-w-[12px] text-center leading-none text-white font-bold">{singleQty}</span>
+                                         <button 
+                                           type="button"
+                                           aria-label="Increase quantity"
+                                           className="hover:text-amber-300 text-white transition p-0.5 leading-none cursor-pointer"
+                                           onClick={(e) => { 
+                                             e.stopPropagation(); 
+                                             if (singleQty === 0) {
+                                               handleAddToCartWithDetails(item, 1);
+                                             } else {
+                                               handleUpdateQuantity(item.id, singleQty + 1); 
+                                             }
+                                           }}
+                                         >
+                                           +
+                                         </button>
+                                       </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           )
@@ -2473,7 +2634,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           tableNumber: tableParams.tableNumber,
           businessId: tableParams.businessId,
           isHost: isHost,
-          hostToken: hostToken
+          hostToken: hostToken,
+          sessionId: tableParams.sessionId,
+          existingOrderId: activeOrder?.id,
         }}
         isHost={isHost}
         hostToken={hostToken}
@@ -2496,6 +2659,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       {(successOrderData || (isTrackerOpen && activeOrder)) && (
         <OrderSuccessModal
           isOpen={true}
+          kdsPrintMode={businessProfile?.kds_print_mode || 'DISPLAY_ONLY'}
           onClose={() => {
             setSuccessOrderData(null);
             setIsTrackerOpen(false);

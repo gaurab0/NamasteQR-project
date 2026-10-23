@@ -15,6 +15,7 @@ import {
 } from '../validators/auth.validator';
 import { config } from '../config/env';
 import { UserRole } from '../types';
+import { isOwnerSubject } from '../services/tabAccess';
 
 export class AuthController {
   /**
@@ -111,7 +112,7 @@ export class AuthController {
           phoneE164,
           businessName: business.name,
           businessType: business.business_type,
-          devOtp: otpResult.devOtp,
+          devOtp: config.devOtpMode && !config.isProduction ? otpResult.devOtp : undefined,
         },
       });
     } catch (err) {
@@ -254,7 +255,7 @@ export class AuthController {
         data: {
           phoneE164: resolvedPhoneE164,
           cooldownSeconds: config.otpResendCooldownSeconds,
-          devOtp: otpResult.devOtp,
+          devOtp: config.devOtpMode && !config.isProduction ? otpResult.devOtp : undefined,
         },
       });
     } catch (err) {
@@ -478,7 +479,7 @@ export class AuthController {
         success: true,
         message: 'If an account exists with this email address, you will receive password-reset instructions.',
         data: {
-          devResetLink: config.devOtpMode ? devResetLink : undefined,
+          devResetLink: config.devOtpMode && !config.isProduction ? devResetLink : undefined,
         },
       });
     } catch (err) {
@@ -541,7 +542,7 @@ export class AuthController {
    * GET /api/auth/dev-info (Development only)
    */
   async getDevInfo(req: Request, res: Response) {
-    if (!config.devOtpMode) {
+    if (!config.devOtpMode || config.isProduction) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Not available in production' } });
     }
 
@@ -568,8 +569,28 @@ export class AuthController {
 
   async deleteAuditLogs(req: AuthenticatedRequest, res: Response) {
     try {
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
+      }
+
+      const businessId = req.user.business?.id;
+      if (!businessId) {
+        return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'No business context associated with account' } });
+      }
+
+      const isOwner = isOwnerSubject(req.user);
+      const hasConfig = req.user.allowed_tabs?.includes('configurations');
+      if (!isOwner && !hasConfig) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Permission denied: Only business owners or staff with configurations permission can delete audit logs.',
+          },
+        });
+      }
+
       const { userId, email, filterType, date } = req.body;
-      const businessId = req.body.businessId || req.user?.business?.id;
       const result = await db.deleteAuditLogs(userId, email, businessId, filterType, date);
       return res.status(200).json({ success: true, message: 'Logs deleted', deletedCount: result.deletedCount });
     } catch (error: any) {
@@ -579,22 +600,23 @@ export class AuthController {
   }
 
   async getAuditLogs(req: AuthenticatedRequest, res: Response) {
-    const userId = req.user?.id || (req.query.userId as string | undefined);
-    const email = req.user?.email || (req.query.email as string | undefined);
-    // If the frontend explicitly provided businessId in query, use it. Otherwise fallback to the user's current business_id context
-    const businessId = (req.query.businessId as string | undefined) || req.user?.business?.id;
-
-    if (userId && req.user) {
-      await auditService.logActivity({
-        userId: req.user.id,
-        accountName: req.user.business?.name || req.user.email,
-        businessName: req.user.business?.name,
-        email: req.user.email,
-        status: 'ONLINE',
-        eventType: 'ACTIVE_SESSION',
-        req,
-      });
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication required' } });
     }
+
+    const businessId = req.user.business?.id;
+    const userId = req.user.id;
+    const email = req.user.email;
+
+    await auditService.logActivity({
+      userId: req.user.id,
+      accountName: req.user.business?.name || req.user.email,
+      businessName: req.user.business?.name,
+      email: req.user.email,
+      status: 'ONLINE',
+      eventType: 'ACTIVE_SESSION',
+      req,
+    });
 
     const logs = await db.getAuditLogs(userId, email, businessId);
     return res.status(200).json({

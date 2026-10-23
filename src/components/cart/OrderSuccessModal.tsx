@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { calculateBillTotals } from '../../utils/taxCalculations';
 import { TableOrder, OrderStatus, TableStatus, BusinessTaxConfig, SaleRecord, SaleTaxBreakdown, SalePaymentMethod } from '../../types/rbac';
+import { KdsPrintMode } from '../../types/printer.types';
 import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
 import { 
@@ -41,6 +42,7 @@ interface OrderSuccessModalProps {
   onRequestBillOrPaid?: () => void;
   onClearCart?: () => void;
   onSettled?: (orderId: string, tableNumber?: string, settledOrder?: TableOrder) => void;
+  kdsPrintMode?: KdsPrintMode;
 }
 
 export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
@@ -53,8 +55,54 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   onRequestBillOrPaid,
   onClearCart,
   onSettled,
+  kdsPrintMode,
 }) => {
   const [liveOrder, setLiveOrder] = useState<TableOrder | null>(order);
+  const [liveKdsPrintMode, setLiveKdsPrintMode] = useState<KdsPrintMode>(() => {
+    if (kdsPrintMode) return kdsPrintMode;
+    try {
+      const cachedBiz = localStorage.getItem('serveflow_customer_business_profile');
+      if (cachedBiz) {
+        const parsed = JSON.parse(cachedBiz);
+        if (parsed.kds_print_mode) return parsed.kds_print_mode;
+      }
+    } catch {}
+    return 'DISPLAY_ONLY';
+  });
+
+  useEffect(() => {
+    if (kdsPrintMode) {
+      setLiveKdsPrintMode(kdsPrintMode);
+    }
+  }, [kdsPrintMode]);
+
+  // Load configured business profile dispatch policy in real time if not provided
+  useEffect(() => {
+    const bizId = liveOrder?.business_id || order?.business_id;
+    if (!bizId) return;
+
+    rbacService.getBusinessProfileApi(bizId).then((biz) => {
+      if (biz?.kds_print_mode) {
+        setLiveKdsPrintMode(biz.kds_print_mode as KdsPrintMode);
+      }
+    }).catch(() => {});
+  }, [liveOrder?.business_id, order?.business_id]);
+
+  // Real-time Socket.io listener for dispatch policy updates
+  useEffect(() => {
+    const bizId = liveOrder?.business_id || order?.business_id;
+    if (!bizId) return;
+
+    const unsubBiz = socketService.subscribeToBusinessProfile((biz) => {
+      if (biz && (biz.id === bizId || !biz.id) && biz.kds_print_mode) {
+        setLiveKdsPrintMode(biz.kds_print_mode as KdsPrintMode);
+      }
+    });
+
+    return () => unsubBiz();
+  }, [liveOrder?.business_id, order?.business_id]);
+
+  const isPrintOnly = liveKdsPrintMode === 'PRINT_ONLY';
   const [viewMode, setViewMode] = useState<'tracker' | 'bill' | 'payment'>(() => {
     if (order?.status === 'AWAITING_PAYMENT') return 'payment';
     if (order?.bill_requested) return 'bill';
@@ -131,12 +179,14 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
       if (data.bill_requested) {
         setBillRequested(true);
       }
-      if (data.status === 'AWAITING_PAYMENT') {
-        setViewMode('payment');
-      } else {
-        setViewMode((currMode) => (currMode === 'payment' ? 'tracker' : currMode));
-        if (data.status === 'CANCELLED') {
-          alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
+      if (data.status !== undefined) {
+        if (data.status === 'AWAITING_PAYMENT') {
+          setViewMode('payment');
+        } else {
+          setViewMode((currMode) => (currMode === 'payment' ? 'tracker' : currMode));
+          if (data.status === 'CANCELLED') {
+            alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
+          }
         }
       }
       // For pay-first, wait until the order is COMPLETED (delivered).
@@ -433,34 +483,58 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   };
 
   // Status stage config
-  const steps: { key: OrderStatus; label: string; desc: string; icon: React.ReactNode }[] = [
-    {
-      key: 'RECEIVED',
-      label: 'Received',
-      desc: 'Sent to Kitchen & Bar Queue',
-      icon: <Clock className="w-4 h-4" />,
-    },
-    {
-      key: 'PREPARING',
-      label: 'Preparing',
-      desc: 'Cook is crafting your dishes',
-      icon: <Flame className="w-4 h-4" />,
-    },
-    {
-      key: 'READY',
-      label: 'Prepared',
-      desc: 'Dishes ready for waiter pickup',
-      icon: <ChefHat className="w-4 h-4" />,
-    },
-    {
-      key: 'SERVED',
-      label: 'Delivered',
-      desc: 'Served at your table',
-      icon: <CheckCheck className="w-4 h-4" />,
-    },
-  ];
+  const steps: { key: OrderStatus; label: string; desc: string; icon: React.ReactNode }[] = isPrintOnly
+    ? [
+        {
+          key: 'RECEIVED',
+          label: 'Ordered',
+          desc: 'Paper KOT sent to kitchen',
+          icon: <Clock className="w-4 h-4" />,
+        },
+        {
+          key: 'SERVED',
+          label: 'Delivered',
+          desc: 'Served at your table',
+          icon: <CheckCheck className="w-4 h-4" />,
+        },
+      ]
+    : [
+        {
+          key: 'RECEIVED',
+          label: 'Received',
+          desc: 'Sent to Kitchen & Bar Queue',
+          icon: <Clock className="w-4 h-4" />,
+        },
+        {
+          key: 'PREPARING',
+          label: 'Preparing',
+          desc: 'Cook is crafting your dishes',
+          icon: <Flame className="w-4 h-4" />,
+        },
+        {
+          key: 'READY',
+          label: 'Prepared',
+          desc: 'Dishes ready for waiter pickup',
+          icon: <ChefHat className="w-4 h-4" />,
+        },
+        {
+          key: 'SERVED',
+          label: 'Delivered',
+          desc: 'Served at your table',
+          icon: <CheckCheck className="w-4 h-4" />,
+        },
+      ];
 
   const getStepIndex = (status: OrderStatus) => {
+    if (isPrintOnly) {
+      if (status === 'SERVED' || status === 'COMPLETED') {
+        return 1;
+      }
+      if (status === 'CANCELLED') {
+        return -1;
+      }
+      return 0;
+    }
     switch (status) {
       case 'PENDING':
       case 'AWAITING_PAYMENT':
@@ -484,6 +558,27 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   const currentStepIdx = getStepIndex(currentStatus);
 
   const getStatusBadge = () => {
+    if (isPrintOnly) {
+      if (currentStatus === 'SERVED' || currentStatus === 'COMPLETED') {
+        return {
+          bg: 'bg-emerald-600',
+          text: 'Delivered & Served to Table',
+          sub: 'Enjoy your meal! Let us know if you need anything else.',
+        };
+      }
+      if (currentStatus === 'CANCELLED') {
+        return {
+          bg: 'bg-rose-600',
+          text: 'Order Cancelled',
+          sub: 'This order has been cancelled by staff.',
+        };
+      }
+      return {
+        bg: 'bg-amber-600',
+        text: 'Order Received & Dispatched',
+        sub: `Paper KOT routed to kitchen. Food will be delivered to Table #${liveOrder?.table_number || ''}.`,
+      };
+    }
     switch (currentStatus) {
       case 'PREPARING':
         return {
@@ -600,15 +695,19 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                           isPast
                             ? 'bg-amber-500 text-white'
                             : isCurrent
-                            ? 'bg-zinc-900 text-white ring-3 ring-amber-400/40 scale-105'
+                            ? 'bg-amber-500 text-white ring-3 ring-amber-400/40 scale-105'
                             : 'bg-white text-zinc-400 border-2 border-zinc-200'
                         }`}
                       >
-                        {isPast ? <CheckCircle2 className="w-3.5 h-3.5" /> : step.icon}
+                        {isPast || (isCurrent && (step.key === 'SERVED' || currentStatus === 'COMPLETED')) ? (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        ) : (
+                          step.icon
+                        )}
                       </div>
                       <span 
                         className={`text-[10px] font-bold mt-0.5 leading-tight ${
-                          isCurrent ? 'text-zinc-900 font-extrabold' : isPast ? 'text-amber-800' : 'text-zinc-400'
+                          isCurrent ? 'text-amber-800 font-extrabold' : isPast ? 'text-amber-800' : 'text-zinc-400'
                         }`}
                       >
                         {step.label}
@@ -643,7 +742,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                       currentStatus === 'PREPARING' ? 'bg-amber-500 animate-pulse' :
                       currentStatus === 'SERVED' ? 'bg-emerald-500' : 'bg-emerald-600'
                     }`} />
-                    <span>{currentStatus}</span>
+                    <span>{isPrintOnly && (currentStatus === 'RECEIVED' || currentStatus === 'PREPARING' || currentStatus === 'READY') ? 'ORDERED' : currentStatus}</span>
                   </div>
                   <span className="font-mono text-[10px] text-zinc-400 truncate block leading-tight">
                     Ref: {liveOrder.order_number || liveOrder.id.slice(0, 8)}
@@ -659,7 +758,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                 </h4>
 
                 {/* Granular Readiness Highlights */}
-                {liveOrder.items.some((it) => it.status === 'READY') && (
+                {!isPrintOnly && liveOrder.items.some((it) => it.status === 'READY') && (
                   <div className="mb-2 px-2.5 py-1.5 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2.5">
                     <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
                       <ChefHat className="w-3.5 h-3.5 animate-bounce" />
@@ -706,15 +805,20 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
 
                           {/* Live Preparation Status Pill */}
                           <div className="flex items-center gap-1.5">
-                            {isReady ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-xs animate-pulse">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                {it.station === 'BAR' ? 'Drink Prepared & Ready to Serve!' : 'Prepared & Ready to Serve!'}
-                              </span>
-                            ) : isServed ? (
+                            {isServed ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <CheckCheck className="w-3 h-3 text-emerald-600" />
                                 Served at table
+                              </span>
+                            ) : isPrintOnly ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                                <Clock className="w-3 h-3 text-amber-500" />
+                                Order Placed
+                              </span>
+                            ) : isReady ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-300 shadow-xs animate-pulse">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                {it.station === 'BAR' ? 'Drink Prepared & Ready to Serve!' : 'Prepared & Ready to Serve!'}
                               </span>
                             ) : isPreparing ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
@@ -736,7 +840,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                           )}
                         </div>
 
-                        <span className="font-mono font-bold text-zinc-800 shrink-0">
+                        <span className="font-mono font-bold text-zinc-800 shrink-0 notranslate">
                           {it.currency || liveOrder.currency} {(it.price * it.quantity).toLocaleString()}
                         </span>
                       </div>
@@ -746,7 +850,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               </div>
 
               {/* Total & Quick Bill Callout with Full VAT & Tax Breakdown */}
-              <div className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-amber-50/80 border border-amber-200/90 rounded-xl space-y-1.5">
+              <div className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-amber-50/80 border border-amber-200/90 rounded-xl space-y-1.5 notranslate">
                 <div className="space-y-0.5 text-xs">
                   <div className="flex items-center justify-between text-amber-900/80 font-medium">
                     <span>Items Subtotal</span>
@@ -861,13 +965,13 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           <>
             <div className="px-4 py-3 sm:px-5 sm:py-3.5 bg-zinc-900 text-white flex items-center justify-between border-b border-zinc-800 shrink-0">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-black text-base sm:text-lg text-white">Pay to Confirm Order</h3>
-                  </div>
-                  <p className="text-[11px] text-zinc-400 font-mono mt-0.5 truncate">
-                    Your order will be sent to the kitchen after payment confirmation.
-                  </p>
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <h3 className="font-black text-base sm:text-lg text-white">Pay to Confirm Order</h3>
+                  {liveOrder?.table_number && (
+                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950">
+                      {liveOrder.table_number.toString().trim().toLowerCase().startsWith('table') ? liveOrder.table_number : `Table #${liveOrder.table_number}`}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -876,11 +980,29 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
             </div>
             
             <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 min-h-0 bg-zinc-50">
-               <div className="bg-amber-50 text-amber-900 p-4 rounded-xl border border-amber-200 flex items-center gap-3">
-                 
-                 <div>
-                    <h4 className="font-bold text-sm">Waiting for payment</h4>
-                    <p className="text-xs mt-1 opacity-80">Once confirmed, your order will automatically be sent to the kitchen!</p>
+               <div className="bg-amber-50 text-amber-900 p-4 sm:p-5 rounded-2xl border border-amber-200/90 shadow-2xs">
+                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                   <div className="min-w-0">
+                     <div className="flex items-center gap-2 mb-1">
+                       <span className="relative flex h-2.5 w-2.5 shrink-0">
+                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-600"></span>
+                       </span>
+                       <h4 className="font-extrabold text-sm sm:text-base text-amber-950">Waiting for payment</h4>
+                     </div>
+                     <p className="text-xs text-amber-800/90 leading-relaxed">
+                       Once confirmed, your order will automatically be sent to the kitchen!
+                     </p>
+                   </div>
+
+                   <div className="bg-white border-2 border-amber-400/90 rounded-xl px-3.5 py-2 sm:px-4 sm:py-2.5 flex items-center justify-between sm:flex-col sm:items-end gap-2 sm:gap-0.5 shrink-0 shadow-2xs">
+                     <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-amber-800">
+                       Order Number
+                     </span>
+                     <span className="text-lg sm:text-2xl font-black font-mono text-zinc-950 tracking-tight">
+                       #{liveOrder?.order_number ? liveOrder.order_number.toString().replace(/^#/, '') : (liveOrder?.id ? liveOrder.id.slice(0, 8).toUpperCase() : '')}
+                     </span>
+                   </div>
                  </div>
                </div>
                
@@ -945,8 +1067,13 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                </div>
                
                {/* Bill Summary Reused */}
-               <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-4 text-sm">
-                 <div className="font-bold border-b border-zinc-100 pb-2 mb-2">Order Summary</div>
+               <div className="bg-white rounded-2xl border border-zinc-200 shadow-sm p-4 text-sm notranslate">
+                 <div className="font-bold border-b border-zinc-100 pb-2 mb-2 flex items-center justify-between">
+                   <span>Order Summary</span>
+                   <span className="text-xs font-mono font-bold text-zinc-600 bg-zinc-100 px-2.5 py-0.5 rounded-md border border-zinc-200">
+                     Order #{liveOrder?.order_number || (liveOrder?.id ? liveOrder.id.slice(0, 8).toUpperCase() : '')}
+                   </span>
+                 </div>
                  {liveOrder?.items?.map((item, idx) => (
                     <div key={idx} className="flex justify-between py-1.5 text-zinc-600">
                       <span>{item.quantity}x {item.name}</span>
@@ -1110,7 +1237,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] text-emerald-800 font-medium">
-                        {appliedPromo.description} • Saved {currencySymbol} {promoDiscountAmount.toFixed(2)}
+                        {appliedPromo.description} • Saved <span className="notranslate font-mono font-bold">{currencySymbol} {promoDiscountAmount.toFixed(2)}</span>
                       </p>
                     </div>
                     <button
@@ -1156,11 +1283,11 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-zinc-500">
+                        <div className="text-[11px] text-zinc-500 notranslate">
                           {it.quantity} × {currencySymbol} {Number(it.price).toFixed(2)}
                         </div>
                       </div>
-                      <span className="font-mono font-bold text-zinc-900 text-sm shrink-0 pt-0.5 sm:pt-0">
+                      <span className="font-mono font-bold text-zinc-900 text-sm shrink-0 pt-0.5 sm:pt-0 notranslate">
                         {currencySymbol} {(Number(it.price) * Number(it.quantity)).toFixed(2)}
                       </span>
                     </div>
@@ -1169,7 +1296,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               </div>
 
               {/* Tax & Total Calculation Configured From Tax System */}
-              <div className="px-3 py-2.5 bg-zinc-50 rounded-xl border border-zinc-200/80 space-y-1 text-xs">
+              <div className="px-3 py-2.5 bg-zinc-50 rounded-xl border border-zinc-200/80 space-y-1 text-xs notranslate">
                 <div className="flex items-center justify-between text-zinc-600">
                   <span className="flex items-center gap-1.5">
                     <span>Items Subtotal</span>
@@ -1272,7 +1399,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                     }`}
                   >
                     <Receipt className="w-4 h-4 text-amber-400" />
-                    <span>Request Waiter with Bill ({currencySymbol} {totalAmount.toFixed(2)})</span>
+                    <span>Request Waiter with Bill <span className="notranslate font-mono font-bold">({currencySymbol} {totalAmount.toFixed(2)})</span></span>
                   </Button>
 
                   

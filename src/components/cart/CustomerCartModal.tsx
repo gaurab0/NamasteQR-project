@@ -36,6 +36,7 @@ interface CustomerCartModalProps {
     businessId?: string;
     businessName?: string;
     existingOrderId?: string;
+    sessionId?: string | null;
     isSessionExpired?: boolean;
     sessionExpiredReason?: string | null;
     isHost?: boolean;
@@ -112,6 +113,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
         floor: tableInfo.floor || null,
         building: tableInfo.building || null,
         existing_order_id: tableInfo.existingOrderId,
+        session_id: tableInfo.sessionId || undefined,
         host_token: tableInfo.hostToken || hostTokenProp,
         items: items.map((ci) => {
           const itemCategories = getAllItemCategories(ci.menuItem);
@@ -182,11 +184,15 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 flex items-center gap-1.5 font-medium leading-tight">
-                <span>{tableInfo.businessName || 'Restaurant Table Service'}</span>
+                <span>{tableInfo.businessName && tableInfo.businessName !== 'Restaurant Table Service' ? tableInfo.businessName : 'Restaurant Service'}</span>
                 {tableInfo.tableNumber && (
                   <>
                     <span>•</span>
-                    <span className="text-amber-400 font-bold">Table #{tableInfo.tableNumber}</span>
+                    <span className="text-amber-400 font-bold">
+                      {tableInfo.tableNumber.toString().trim().toLowerCase().startsWith('table')
+                        ? tableInfo.tableNumber
+                        : `Table #${tableInfo.tableNumber}`}
+                    </span>
                   </>
                 )}
               </p>
@@ -300,7 +306,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                                 </span>
                               )}
                             </h5>
-                            <span className="text-[11px] text-zinc-500 font-medium leading-tight block">
+                            <span className="text-[11px] text-zinc-500 font-medium leading-tight block notranslate">
                               {currencySymbol} {unitPrice.toLocaleString()} each
                             </span>
                           </div>
@@ -319,7 +325,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                               <Minus className="w-3 h-3" />
                             </button>
 
-                            <span className="w-6 text-center text-xs font-bold text-zinc-900">
+                            <span className="w-6 text-center text-xs font-bold text-zinc-900 notranslate">
                               {cartItem.quantity}
                             </span>
 
@@ -334,7 +340,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                             </button>
                           </div>
 
-                          <span className="text-xs sm:text-sm font-bold text-zinc-900 font-mono w-18 text-right">
+                          <span className="text-xs sm:text-sm font-bold text-zinc-900 font-mono w-18 text-right notranslate">
                             {currencySymbol} {itemTotal.toLocaleString()}
                           </span>
                         </div>
@@ -415,23 +421,11 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
         {/* Footer with Price Breakdown and Confirm Button */}
         {items.length > 0 && (
           <div className="px-4 py-2.5 sm:px-5 sm:py-3 bg-zinc-50 border-t border-zinc-200 space-y-2">
-            <div className="space-y-0.5 text-xs">
-              <div className="flex items-center justify-between text-zinc-600">
-                <span>Items Subtotal ({totalItemsCount} items)</span>
-                <span className="font-bold text-zinc-900 font-mono">
-                  {currencySymbol} {subtotal.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-[10px] text-zinc-400">
-                <span>Taxes & Service</span>
-                <span>Calculated in live tracker</span>
-              </div>
-              <div className="pt-1.5 border-t border-zinc-200 flex items-center justify-between text-sm font-extrabold text-zinc-900">
-                <span>Total Amount</span>
-                <span className="text-amber-700 font-mono text-base">
-                  {currencySymbol} {totalAmount.toLocaleString()}
-                </span>
-              </div>
+            <div className="flex items-center justify-between text-sm font-extrabold text-zinc-900">
+              <span>Subtotal Amount</span>
+              <span className="text-amber-700 font-mono text-base notranslate">
+                {currencySymbol} {subtotal.toLocaleString()}
+              </span>
             </div>
 
             {/* View-Only Guest Notice */}
@@ -473,32 +467,30 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
               </div>
             )}
 
-            <Button
+            <button
               id="btn-confirm-table-order"
               type="button"
-              variant="primary"
-              size="md"
               onClick={handleConfirmOrder}
               disabled={loading || items.length === 0 || Boolean(tableInfo.isSessionExpired) || !tableInfo.tableNumber || !isHost}
-              className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-extrabold text-xs sm:text-sm shadow-md rounded-xl flex items-center justify-center gap-2"
+              className="w-full py-3.5 px-4 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-extrabold shadow-md rounded-xl flex items-center justify-center gap-2.5 transition-all duration-150 cursor-pointer select-none active:scale-[0.99]"
             >
               {loading ? (
-                <span>{tableInfo.existingOrderId ? 'Updating Bill & Sending to Kitchen...' : 'Placing Your Order...'}</span>
+                <span className="text-sm sm:text-base font-bold">{tableInfo.existingOrderId ? 'Updating Bill & Sending to Kitchen...' : 'Placing Your Order...'}</span>
               ) : !isHost ? (
-                <span>View-Only Mode • Host Can Order</span>
+                <span className="text-sm sm:text-base font-bold">View-Only Mode • Host Can Order</span>
               ) : tableInfo.isSessionExpired ? (
-                <span>Session Ended • Scan Table QR</span>
+                <span className="text-sm sm:text-base font-bold">Session Ended • Scan Table QR</span>
               ) : !tableInfo.tableNumber ? (
-                <span>Scan Table QR to Order</span>
+                <span className="text-sm sm:text-base font-bold">Scan Table QR to Order</span>
               ) : (
-                <>
-                  <ChefHat className="w-5 h-5" />
-                  <span>
-                    Check your order and confirm ({currencySymbol} {totalAmount.toLocaleString()})
+                <div className="flex items-center justify-center gap-2.5 w-full">
+                  <ChefHat className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 text-white" />
+                  <span className="text-sm sm:text-base font-black tracking-tight text-white whitespace-nowrap">
+                    Check your order & confirm
                   </span>
-                </>
+                </div>
               )}
-            </Button>
+            </button>
           </div>
         )}
       </div>

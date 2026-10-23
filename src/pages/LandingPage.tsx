@@ -18,10 +18,6 @@ import {
   HelpCircle, 
   ChevronDown, 
   Mail, 
-  Hotel, 
-  Coffee, 
-  Wine, 
-  Store, 
   Laptop,
   Check,
   Zap,
@@ -218,13 +214,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
     },
   ];
 
-  const venueTypes = [
-    { icon: <ChefHat className="w-5 h-5 text-blue-600" />, label: 'Fine Dining & Bistros' },
-    { icon: <Coffee className="w-5 h-5 text-amber-600" />, label: 'Artisan Cafés & Bakeries' },
-    { icon: <Hotel className="w-5 h-5 text-emerald-600" />, label: 'Hotels & Resort Dining' },
-    { icon: <Wine className="w-5 h-5 text-purple-600" />, label: 'Rooftops, Pubs & Bars' },
-    { icon: <Store className="w-5 h-5 text-rose-600" />, label: 'Food Courts & Multi-Outlet' },
-  ];
 
   const faqs = [
     {
@@ -697,30 +686,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
                 </button>
               ))}
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ======================================================== */}
-      {/* 5. VENUE AUDIENCES                                       */}
-      {/* ======================================================== */}
-      <section className="relative z-10 py-16 bg-white/40 backdrop-blur-xs border-b border-zinc-200/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <span className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
-            Engineered For Modern Hospitality Properties
-          </span>
-          <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-            {venueTypes.map((v, i) => (
-              <div
-                key={i}
-                className="flex flex-col items-center justify-center p-5 rounded-2xl bg-white/90 backdrop-blur-sm border border-zinc-200 text-center hover:border-blue-400 hover:shadow-xs transition-all"
-              >
-                <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-100 mb-2.5">
-                  {v.icon}
-                </div>
-                <span className="text-xs font-bold text-zinc-800">{v.label}</span>
-              </div>
-            ))}
           </div>
         </div>
       </section>

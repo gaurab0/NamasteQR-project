@@ -89,4 +89,7 @@ export const realtimeEmitter = {
   taxConfigUpdated(businessId: string, config: any) {
     emitToBusiness(businessId, 'tax_config:updated', config);
   },
+  businessProfileUpdated(businessId: string, business: any) {
+    emitToBusiness(businessId, 'business:updated', business);
+  },
 };

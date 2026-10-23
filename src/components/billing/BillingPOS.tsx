@@ -100,6 +100,17 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   // Time & search filters
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'records' | 'gl_accounts'>('pos');
   const [selectedOrderToSettle, setSelectedOrderToSettle] = useState<string | undefined>(undefined);
+  const [saleModalMode, setSaleModalMode] = useState<'TABLE' | 'COUNTER' | 'SETTLE_TABLE'>('TABLE');
+
+  const openSaleModal = (mode: 'TABLE' | 'COUNTER' | 'SETTLE_TABLE', orderId?: string) => {
+    if (!canSettleBill) {
+      if (onRequestRoleSignIn) onRequestRoleSignIn();
+      return;
+    }
+    setSaleModalMode(mode);
+    setSelectedOrderToSettle(orderId);
+    setShowNewSaleModal(true);
+  };
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
   const [excelPreviewOpen, setExcelPreviewOpen] = useState<boolean>(false);
   const [excelPreviewSheets, setExcelPreviewSheets] = useState<ExcelSheetData[]>([]);
@@ -264,32 +275,68 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
     const unsubSocket = socketService.subscribeToOrders((updatedOrder: any) => {
       if (!updatedOrder || !updatedOrder.id) return;
-      const parsedUpdatedOrder: TableOrder = {
+      const parsedUpdatedOrder: Partial<TableOrder> = {
         ...updatedOrder,
-        bill_requested: Boolean(updatedOrder.bill_requested),
-        bill_acknowledged: Boolean(updatedOrder.bill_acknowledged),
-        folio_delivered: Boolean(updatedOrder.folio_delivered),
-        folio_delivered_at: updatedOrder.folio_delivered_at ? parseOrderDate(updatedOrder.folio_delivered_at) : null,
-        created_at: parseOrderDate(updatedOrder.created_at),
-        updated_at: parseOrderDate(updatedOrder.updated_at),
-      } as TableOrder;
+        ...(updatedOrder.bill_requested !== undefined ? { bill_requested: Boolean(updatedOrder.bill_requested) } : {}),
+        ...(updatedOrder.bill_acknowledged !== undefined ? { bill_acknowledged: Boolean(updatedOrder.bill_acknowledged) } : {}),
+        ...(updatedOrder.folio_delivered !== undefined ? { folio_delivered: Boolean(updatedOrder.folio_delivered) } : {}),
+        ...(updatedOrder.folio_delivered_at !== undefined ? { folio_delivered_at: updatedOrder.folio_delivered_at ? parseOrderDate(updatedOrder.folio_delivered_at) : null } : {}),
+        ...(updatedOrder.created_at !== undefined ? { created_at: parseOrderDate(updatedOrder.created_at) } : {}),
+        ...(updatedOrder.updated_at !== undefined ? { updated_at: parseOrderDate(updatedOrder.updated_at) } : {}),
+      };
+
+      setPayFirstOrders((prev) => {
+        const idx = prev.findIndex((o) => o.id === updatedOrder.id);
+        const existingOrder = idx >= 0 ? prev[idx] : null;
+        const effectiveStatus = parsedUpdatedOrder.status !== undefined ? parsedUpdatedOrder.status : existingOrder?.status;
+
+        if (effectiveStatus === 'AWAITING_PAYMENT') {
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...prev[idx], ...parsedUpdatedOrder };
+            return next;
+          }
+          // Only add a new pay-first order if it was placed as awaiting payment
+          return [...prev, parsedUpdatedOrder as TableOrder];
+        } else {
+          // If status transitioned away from AWAITING_PAYMENT (e.g. verified/PAID or CANCELLED)
+          if (idx >= 0) {
+            return prev.filter((o) => o.id !== updatedOrder.id);
+          }
+          return prev;
+        }
+      });
 
       setPendingOrders((prev) => {
+        const idx = prev.findIndex((o) => o.id === updatedOrder.id);
+        const existingOrder = idx >= 0 ? prev[idx] : null;
+        const effectiveStatus = parsedUpdatedOrder.status !== undefined ? parsedUpdatedOrder.status : existingOrder?.status;
+
+        // An order that is awaiting payment belongs strictly in payFirstOrders, never pendingOrders
+        if (effectiveStatus === 'AWAITING_PAYMENT') {
+          return prev.filter((o) => o.id !== updatedOrder.id);
+        }
+
+        const isPayFirst = parsedUpdatedOrder.pay_first ?? existingOrder?.pay_first ?? false;
+        const paymentStatus = parsedUpdatedOrder.payment_status ?? existingOrder?.payment_status;
+
         const isClosed =
-          parsedUpdatedOrder.status === 'COMPLETED' ||
-          parsedUpdatedOrder.status === 'CANCELLED' ||
-          Boolean((parsedUpdatedOrder as any).settled) ||
-          (parsedUpdatedOrder.pay_first && parsedUpdatedOrder.payment_status === 'PAID');
+          effectiveStatus === 'COMPLETED' ||
+          effectiveStatus === 'CANCELLED' ||
+          Boolean((parsedUpdatedOrder as any).settled || (existingOrder as any)?.settled) ||
+          (isPayFirst && paymentStatus === 'PAID');
+
         if (isClosed) {
           return prev.filter((o) => o.id !== updatedOrder.id);
         }
+
         let next: TableOrder[];
-        const idx = prev.findIndex((o) => o.id === updatedOrder.id);
         if (idx >= 0) {
           next = [...prev];
-          next[idx] = { ...next[idx], ...parsedUpdatedOrder };
-        } else if (parsedUpdatedOrder.status !== 'AWAITING_PAYMENT') {
-          next = [parsedUpdatedOrder, ...prev];
+          next[idx] = { ...prev[idx], ...parsedUpdatedOrder };
+        } else if (effectiveStatus && !isPayFirst) {
+          // Only add a brand new active table order if it is NOT a pay_first order awaiting payment
+          next = [parsedUpdatedOrder as TableOrder, ...prev];
         } else {
           return prev;
         }
@@ -308,20 +355,6 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           return timeB - timeA;
         });
       });
-
-      if (parsedUpdatedOrder.status === 'AWAITING_PAYMENT') {
-        setPayFirstOrders((prev) => {
-          const idx = prev.findIndex((o) => o.id === updatedOrder.id);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = { ...next[idx], ...parsedUpdatedOrder };
-            return next;
-          }
-          return [...prev, parsedUpdatedOrder];
-        });
-      } else {
-        setPayFirstOrders((prev) => prev.filter((o) => o.id !== updatedOrder.id));
-      }
     });
 
     return () => {
@@ -834,12 +867,35 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   <div key={order.id} className="bg-white p-3 rounded-xl border border-amber-200 flex flex-col gap-3 shadow-xs">
                     <div className="flex justify-between items-start">
                        <div>
-                          <div className="font-bold text-sm text-zinc-900">Table #{order.table_number || ''}</div>
+                          <div className="font-bold text-sm text-zinc-900">
+                            {order.table_number ? (order.table_number.toString().trim().toLowerCase().startsWith('table') ? order.table_number : `Table #${order.table_number}`) : 'Table'}
+                          </div>
                           <div className="text-[11px] text-zinc-500 font-mono">{order.order_number || order.id.slice(0,8).toUpperCase()}</div>
                        </div>
                        <div className="text-right">
                           <div className="font-black text-amber-600 text-sm">{order.currency || 'Rs.'} {pfBill.grandTotal.toFixed(2)}</div>
-                          <div className="text-[10px] uppercase font-bold text-zinc-500">{order.payment_method || 'PENDING'}</div>
+                          <div className="mt-0.5">
+                            {order.payment_method === 'QR_CODE' || order.payment_method === 'UPI_QR' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                <QrCode className="w-2.5 h-2.5" />
+                                QR Code
+                              </span>
+                            ) : order.payment_method === 'CASH' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <DollarSign className="w-2.5 h-2.5" />
+                                Cash
+                              </span>
+                            ) : order.payment_method === 'CARD' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                                <CreditCard className="w-2.5 h-2.5" />
+                                Card
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500 border border-zinc-200">
+                                Selecting...
+                              </span>
+                            )}
+                          </div>
                        </div>
                     </div>
                     
@@ -856,18 +912,18 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                        <button
                          onClick={async () => {
                            if (isViewOnly) { onRequestRoleSignIn?.(); return; }
+                           const cleanTableName = order.table_number ? (order.table_number.toString().trim().toLowerCase().startsWith('table') ? order.table_number : `Table #${order.table_number}`) : 'Table';
                            let method = order.payment_method;
                            if (!method || method === 'PENDING') {
-                             method = prompt(`Confirm payment for Table #${order.table_number}\nEnter payment method (CASH, QR_CODE, CARD):`, 'CASH');
+                             method = prompt(`Confirm payment for ${cleanTableName}\nEnter payment method (CASH, QR_CODE, CARD):`, 'CASH');
                              if (!method) return;
                            } else {
-                             const isConfirmed = window.confirm(`Confirm ${method} payment of ${order.currency || 'Rs.'} ${pfBill.grandTotal.toFixed(2)} for Table #${order.table_number}?`);
+                             const isConfirmed = window.confirm(`Confirm ${method} payment of ${order.currency || 'Rs.'} ${pfBill.grandTotal.toFixed(2)} for ${cleanTableName}?`);
                              if (!isConfirmed) return;
                            }
                            
                            try {
                              await rbacService.confirmTableOrderPaymentApi(order.id, business.id, method.toUpperCase());
-                             // alert('Payment confirmed & sent to kitchen!'); // Removed intrusive success alert, the queue updates automatically
                            } catch(err: any) { 
                              alert(err.message || 'Error processing payment'); 
                            }
@@ -879,7 +935,8 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                        <button
                          onClick={async () => {
                            if (isViewOnly) { onRequestRoleSignIn?.(); return; }
-                           const reason = prompt(`Reject payment for Table #${order.table_number}\nEnter reason for rejection:`, 'Payment Failed');
+                           const cleanTableName = order.table_number ? (order.table_number.toString().trim().toLowerCase().startsWith('table') ? order.table_number : `Table #${order.table_number}`) : 'Table';
+                           const reason = prompt(`Reject payment for ${cleanTableName}\nEnter reason for rejection:`, 'Payment Failed');
                            if (!reason) return;
                            try {
                              await rbacService.rejectTableOrderPaymentApi(order.id, business.id, reason);
@@ -3130,12 +3187,7 @@ const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
   const { dispatchPrint, printers } = usePrinter();
 
   const handlePrint = async () => {
-    const hasBillPrinter = printers.some(p => p.role === 'BILL' && p.enabled);
-    if (hasBillPrinter) {
-      await dispatchPrint('BILL', sale);
-    } else {
-      window.print();
-    }
+    await dispatchPrint('BILL', sale);
   };
 
   return (
@@ -3342,12 +3394,7 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
   const { dispatchPrint, printers } = usePrinter();
 
   const handlePrint = async () => {
-    const hasBillPrinter = printers.some(p => p.role === 'BILL' && p.enabled);
-    if (hasBillPrinter) {
-      await dispatchPrint('BILL', order);
-    } else {
-      window.print();
-    }
+    await dispatchPrint('BILL', order);
   };
 
   const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');

@@ -19,8 +19,14 @@ export const config = {
   otpResendCooldownSeconds: parseInt(process.env.OTP_RESEND_COOLDOWN_SECONDS || '60', 10),
   otpMaxRequestsPerHour: parseInt(process.env.OTP_MAX_REQUESTS_PER_HOUR || '5', 10),
   
-  // Development Mode OTP (only active when explicitly set)
-  devOtpMode: process.env.DEV_OTP_MODE !== undefined ? process.env.DEV_OTP_MODE === 'true' : process.env.NODE_ENV !== 'production',
+  // Development Mode OTP (strictly disabled in production)
+  devOtpMode: process.env.NODE_ENV === 'production'
+    ? false
+    : (process.env.DEV_OTP_MODE !== undefined ? process.env.DEV_OTP_MODE === 'true' : true),
+  allowedOrigins: process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+    : [],
+  appUrl: process.env.APP_URL || '',
 
   // WhatsApp Configuration
   whatsapp: {

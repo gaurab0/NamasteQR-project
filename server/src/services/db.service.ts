@@ -290,6 +290,7 @@ class PostgresDatabaseStore {
           tax_rate: typeof dbBiz.tax_rate === 'number' ? dbBiz.tax_rate : undefined,
           show_menu_images: dbBiz.show_menu_images,
           menu_theme_config: (dbBiz.menu_theme_config as any) || undefined,
+          default_language: (dbBiz as any).default_language || ((dbBiz.operations_config as any)?.default_language) || 'en',
           created_at: dbBiz.created_at,
           updated_at: dbBiz.updated_at,
         };
@@ -316,6 +317,7 @@ class PostgresDatabaseStore {
       tax_rate: extra?.tax_rate,
       date_format_nav: extra?.date_format_nav || 'ENGLISH',
       date_format_billing: extra?.date_format_billing || 'ENGLISH',
+      default_language: (extra as any)?.default_language || 'en',
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -376,6 +378,8 @@ class PostgresDatabaseStore {
           menu_theme_config: (dbBiz.menu_theme_config as any) || undefined,
           date_format_nav: (dbBiz.date_format_nav as any) || undefined,
           date_format_billing: (dbBiz.date_format_billing as any) || undefined,
+          kds_print_mode: (dbBiz as any).kds_print_mode || 'DISPLAY_ONLY',
+          default_language: (dbBiz as any).default_language || ((dbBiz.operations_config as any)?.default_language) || 'en',
           created_at: dbBiz.created_at,
           updated_at: dbBiz.updated_at,
         };
@@ -410,6 +414,8 @@ class PostgresDatabaseStore {
           menu_theme_config: (d.menu_theme_config as any) || undefined,
           date_format_nav: (d.date_format_nav as any) || undefined,
           date_format_billing: (d.date_format_billing as any) || undefined,
+          kds_print_mode: (d as any).kds_print_mode || 'DISPLAY_ONLY',
+          default_language: (d as any).default_language || ((d.operations_config as any)?.default_language) || 'en',
           created_at: d.created_at,
           updated_at: d.updated_at,
         };
@@ -449,6 +455,8 @@ class PostgresDatabaseStore {
     if (updates.menu_theme_config !== undefined) business.menu_theme_config = updates.menu_theme_config;
     if (updates.date_format_nav !== undefined) business.date_format_nav = updates.date_format_nav;
     if (updates.date_format_billing !== undefined) business.date_format_billing = updates.date_format_billing;
+    if (updates.kds_print_mode !== undefined) business.kds_print_mode = updates.kds_print_mode;
+    if (updates.default_language !== undefined) business.default_language = updates.default_language;
     business.updated_at = new Date();
 
     this.businesses.set(id, business);
@@ -468,6 +476,8 @@ class PostgresDatabaseStore {
           ...(updates.menu_theme_config !== undefined ? { menu_theme_config: business.menu_theme_config as any } : {}),
           ...(updates.date_format_nav !== undefined ? { date_format_nav: business.date_format_nav } : {}),
           ...(updates.date_format_billing !== undefined ? { date_format_billing: business.date_format_billing } : {}),
+          ...(updates.kds_print_mode !== undefined ? { kds_print_mode: business.kds_print_mode } : {}),
+          ...(updates.default_language !== undefined ? { default_language: business.default_language } : {}),
           updated_at: business.updated_at,
         },
       });

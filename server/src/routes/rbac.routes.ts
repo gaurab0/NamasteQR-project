@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { authenticate, optionalAuthenticate, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { authenticate, optionalAuthenticate, AuthenticatedRequest, assertBusinessAccess } from '../middleware/auth.middleware';
+import { customerDiningLimiter } from '../middleware/rateLimit.middleware';
 import { rbacService } from '../services/rbac.service';
 import { db } from '../services/db.service';
 import {
@@ -17,24 +18,40 @@ const router = Router();
 
 /**
  * Helper to resolve the targeted business ID from query, headers, body, or authenticated user
+ * Enforces tenant isolation for authenticated staff/users to prevent IDOR vulnerabilities.
  */
-function getTargetBusinessId(req: AuthenticatedRequest): string {
+async function getTargetBusinessId(req: AuthenticatedRequest): Promise<string> {
   const queryBiz = req.query.businessId as string;
+  let targetBiz = '';
   if (queryBiz && typeof queryBiz === 'string' && queryBiz.trim()) {
-    return queryBiz.trim();
+    targetBiz = queryBiz.trim();
+  } else {
+    const headerBiz = req.headers['x-business-id'] as string;
+    if (headerBiz && typeof headerBiz === 'string' && headerBiz.trim()) {
+      targetBiz = headerBiz.trim();
+    } else {
+      const bodyBiz = req.body?.business_id || req.body?.businessId;
+      if (bodyBiz && typeof bodyBiz === 'string' && bodyBiz.trim()) {
+        targetBiz = bodyBiz.trim();
+      } else if (req.user?.business?.id) {
+        targetBiz = req.user.business.id;
+      } else {
+        targetBiz = 'maya-forest-resort';
+      }
+    }
   }
-  const headerBiz = req.headers['x-business-id'] as string;
-  if (headerBiz && typeof headerBiz === 'string' && headerBiz.trim()) {
-    return headerBiz.trim();
+
+  if (req.user) {
+    const isAuthorized = await assertBusinessAccess(req.user, targetBiz);
+    if (!isAuthorized) {
+      const err: any = new Error(`Access denied: You do not have permission to access or modify data for venue '${targetBiz}'.`);
+      err.statusCode = 403;
+      err.code = 'TENANT_ACCESS_DENIED';
+      throw err;
+    }
   }
-  const bodyBiz = req.body?.business_id || req.body?.businessId;
-  if (bodyBiz && typeof bodyBiz === 'string' && bodyBiz.trim()) {
-    return bodyBiz.trim();
-  }
-  if (req.user?.business?.id) {
-    return req.user.business.id;
-  }
-  return 'maya-forest-resort';
+
+  return targetBiz;
 }
 
 /**
@@ -317,7 +334,7 @@ router.post(['/branches', '/branch'], authenticate, async (req: AuthenticatedReq
  */
 router.get('/business-profile', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     let business = await db.findBusinessById(businessId);
     if (!business) {
       business = await db.getDefaultBusiness();
@@ -344,6 +361,8 @@ router.get('/business-profile', optionalAuthenticate, async (req: AuthenticatedR
         phone: business.phone || '',
         show_menu_images: business.show_menu_images !== false,
         menu_theme_config: business.menu_theme_config,
+        kds_print_mode: business.kds_print_mode || 'DISPLAY_ONLY',
+        default_language: (business as any).default_language || 'en',
       }
     });
   } catch (err: any) {
@@ -362,7 +381,7 @@ router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, 
   try {
     const user = req.user!;
     const role = rbacService.normalizeRole(user.role);
-    const targetBusinessId = getTargetBusinessId(req);
+    const targetBusinessId = await getTargetBusinessId(req);
 
     if (!canAccessResource(user, 'business_details', 'write')) {
       return res.status(403).json({
@@ -374,13 +393,29 @@ router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, 
       });
     }
 
-    const { name, business_type, tagline, location, address, kitchen_hours, phone, show_menu_images, showMenuImages, menu_theme_config, date_format_nav, date_format_billing } = req.body;
+    const { name, business_type, tagline, location, address, kitchen_hours, phone, show_menu_images, showMenuImages, menu_theme_config, date_format_nav, date_format_billing, kds_print_mode, kdsPrintMode, default_language, defaultLanguage } = req.body;
     
     if (name !== undefined && (!name || !name.trim())) {
       return res.status(400).json({
         success: false,
         error: { code: 'INVALID_INPUT', message: 'Business name cannot be empty.' }
       });
+    }
+
+    const targetPrintMode = kds_print_mode || kdsPrintMode;
+    const ALLOWED_LANGUAGES = ['en', 'ne', 'zh-CN', 'hi', 'ko', 'ja', 'th', 'tl', 'si', 'ta'];
+    let targetDefaultLanguage = default_language !== undefined ? default_language : defaultLanguage;
+    if (targetDefaultLanguage !== undefined && targetDefaultLanguage !== null) {
+      if (typeof targetDefaultLanguage !== 'string' || !ALLOWED_LANGUAGES.includes(targetDefaultLanguage.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_LANGUAGE',
+            message: `Invalid default_language '${targetDefaultLanguage}'. Supported languages are: ${ALLOWED_LANGUAGES.join(', ')}`
+          }
+        });
+      }
+      targetDefaultLanguage = targetDefaultLanguage.trim();
     }
 
     const updated = await db.updateBusinessProfile(targetBusinessId, {
@@ -395,6 +430,8 @@ router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, 
       menu_theme_config,
       date_format_nav,
       date_format_billing,
+      ...(targetPrintMode !== undefined ? { kds_print_mode: targetPrintMode } : {}),
+      ...(targetDefaultLanguage !== undefined ? { default_language: targetDefaultLanguage } : {}),
     });
 
     if (!updated) {
@@ -403,6 +440,8 @@ router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, 
         error: { code: 'BUSINESS_NOT_FOUND', message: 'Business not found' }
       });
     }
+
+    realtimeEmitter.businessProfileUpdated(targetBusinessId, updated);
 
     return res.json({
       success: true,
@@ -419,14 +458,16 @@ router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, 
         phone: updated.phone,
         show_menu_images: updated.show_menu_images !== false,
         menu_theme_config: updated.menu_theme_config,
+        kds_print_mode: updated.kds_print_mode || 'DISPLAY_ONLY',
+        default_language: updated.default_language || 'en',
       }
     });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'BUSINESS_UPDATE_FAILED', message: err.message }
-    });
-  }
+    } catch (err: any) {
+      return res.status(err.statusCode || (err.message.includes('Permission denied') || err.message.includes('Access denied') ? 403 : 500)).json({
+        success: false,
+        error: { code: err.code || 'BUSINESS_UPDATE_FAILED', message: err.message }
+      });
+    }
 });
 
 // ============================================================================
@@ -435,7 +476,7 @@ router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, 
 
 router.get('/categories', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const userContext = req.user || createGuestContext();
     const categories = await rbacService.getCategories(businessId, userContext);
     return res.json({ success: true, data: categories });
@@ -450,7 +491,7 @@ router.get('/categories', optionalAuthenticate, async (req: AuthenticatedRequest
 router.post('/categories', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const { name } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({
@@ -471,7 +512,7 @@ router.post('/categories', authenticate, async (req: AuthenticatedRequest, res: 
 router.put('/categories/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const { name } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({
@@ -492,7 +533,7 @@ router.put('/categories/:id', authenticate, async (req: AuthenticatedRequest, re
 router.delete('/categories/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     await rbacService.deleteCategory(businessId, req.params.id, user);
     return res.json({ success: true, message: 'Category deleted successfully' });
   } catch (err: any) {
@@ -509,7 +550,7 @@ router.delete('/categories/:id', authenticate, async (req: AuthenticatedRequest,
 
 router.get('/menus', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const userContext = req.user || createGuestContext();
     const items = await rbacService.getMenuItems(businessId, userContext);
     return res.json({ success: true, data: items });
@@ -524,7 +565,7 @@ router.get('/menus', optionalAuthenticate, async (req: AuthenticatedRequest, res
 router.post('/menus', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const {
       name,
       category,
@@ -590,7 +631,7 @@ router.post('/menus', authenticate, async (req: AuthenticatedRequest, res: Respo
 router.put('/menus/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const itemId = req.params.id;
     await rbacService.updateMenuItem(businessId, itemId, req.body, user);
     return res.json({ success: true, message: 'Menu item updated successfully' });
@@ -605,7 +646,7 @@ router.put('/menus/:id', authenticate, async (req: AuthenticatedRequest, res: Re
 router.patch('/menus/:id/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const itemId = req.params.id;
     const { status, is_available } = req.body;
     await rbacService.updateMenuItem(businessId, itemId, { status, is_available }, user);
@@ -621,7 +662,7 @@ router.patch('/menus/:id/status', authenticate, async (req: AuthenticatedRequest
 router.delete('/menus/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const itemId = req.params.id;
     await rbacService.deleteMenuItem(businessId, itemId, user);
     return res.json({ success: true, message: 'Menu item deleted successfully' });
@@ -640,7 +681,7 @@ router.delete('/menus/:id', authenticate, async (req: AuthenticatedRequest, res:
 router.get('/check-ins', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const status = req.query.status as any;
     const records = await rbacService.getCheckIns(businessId, user, status ? { status } : undefined);
     return res.json({ success: true, data: records });
@@ -655,7 +696,7 @@ router.get('/check-ins', authenticate, async (req: AuthenticatedRequest, res: Re
 router.post('/check-ins', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const { guest_name, guest_phone, guest_email, room_or_table_number, total_amount, deposit_paid, notes } = req.body;
 
     if (!guest_name || !room_or_table_number) {
@@ -683,7 +724,7 @@ router.post('/check-ins', authenticate, async (req: AuthenticatedRequest, res: R
 router.put('/check-ins/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const checkInId = req.params.id;
     await rbacService.updateCheckIn(businessId, checkInId, req.body, user);
     return res.json({ success: true, message: 'Check-in record updated successfully' });
@@ -698,7 +739,7 @@ router.put('/check-ins/:id', authenticate, async (req: AuthenticatedRequest, res
 router.delete('/check-ins/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const checkInId = req.params.id;
     await rbacService.deleteCheckIn(businessId, checkInId, user);
     return res.json({ success: true, message: 'Check-in record removed by Manager' });
@@ -717,7 +758,7 @@ router.delete('/check-ins/:id', authenticate, async (req: AuthenticatedRequest, 
 router.get('/staff', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const team = await rbacService.getTeamMembers(businessId, user);
     return res.json({ success: true, data: team });
   } catch (err: any) {
@@ -731,7 +772,7 @@ router.get('/staff', authenticate, async (req: AuthenticatedRequest, res: Respon
 router.post('/staff', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const { email, password, role, allowed_tabs } = req.body;
 
     if (!email || !password || !role) {
@@ -763,7 +804,7 @@ router.post('/staff', authenticate, async (req: AuthenticatedRequest, res: Respo
 router.patch('/staff/:id/role', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const targetUserId = req.params.id;
     const { role, allowed_tabs } = req.body;
 
@@ -791,7 +832,7 @@ router.patch('/staff/:id/role', authenticate, async (req: AuthenticatedRequest, 
 router.delete('/staff/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const targetUserId = req.params.id;
     await rbacService.removeStaffMember(businessId, targetUserId, user);
     return res.json({
@@ -812,7 +853,7 @@ router.delete('/staff/:id', authenticate, async (req: AuthenticatedRequest, res:
 
 router.get('/tables', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const tables = await rbacService.getTables(businessId, req.user);
     return res.json({ success: true, data: tables });
   } catch (err: any) {
@@ -826,7 +867,7 @@ router.get('/tables', optionalAuthenticate, async (req: AuthenticatedRequest, re
 router.post('/tables', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const { table_number, floor, building, capacity, status } = req.body;
 
     if (!table_number || !table_number.trim()) {
@@ -853,7 +894,7 @@ router.post('/tables', authenticate, async (req: AuthenticatedRequest, res: Resp
 
 router.post('/tables/seed-defaults', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const tables = await rbacService.seedDefaultTables(businessId);
     return res.json({ success: true, data: tables, message: 'Default tables initialized for business' });
   } catch (err: any) {
@@ -867,7 +908,7 @@ router.post('/tables/seed-defaults', authenticate, async (req: AuthenticatedRequ
 router.put('/tables/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const tableId = req.params.id;
     await rbacService.updateTable(businessId, tableId, req.body, user);
     return res.json({ success: true, message: 'Table updated successfully' });
@@ -882,7 +923,7 @@ router.put('/tables/:id', authenticate, async (req: AuthenticatedRequest, res: R
 router.patch('/tables/:id/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const tableId = req.params.id;
     const { status } = req.body;
 
@@ -906,7 +947,7 @@ router.patch('/tables/:id/status', authenticate, async (req: AuthenticatedReques
 router.delete('/tables/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const tableId = req.params.id;
     await rbacService.deleteTable(businessId, tableId, user);
     return res.json({ success: true, message: 'Table deleted successfully' });
@@ -922,7 +963,7 @@ router.delete('/tables/:id', authenticate, async (req: AuthenticatedRequest, res
  * Public Scan Check-In: Customer scans QR barcode on table
  * Distinguishes the first scanner as Table Host and subsequent scans as View-Only Guests.
  */
-router.post('/tables/scan-checkin', async (req: Request, res: Response) => {
+router.post('/tables/scan-checkin', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
     const { businessId, tableId, tableNumber, existingHostToken, hostToken } = req.body;
     const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
@@ -947,7 +988,7 @@ router.post('/tables/scan-checkin', async (req: Request, res: Response) => {
 router.post('/tables/:id/reset-session', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const tableId = req.params.id;
 
     const updatedTable = await rbacService.resetTableSession(businessId, tableId, user);
@@ -967,7 +1008,7 @@ router.post('/tables/:id/reset-session', authenticate, async (req: Authenticated
 /**
  * Public/Guest Table Reset: Customer requests bill or pays, setting table back to ACTIVE default
  */
-router.post('/tables/reset-status', async (req: Request, res: Response) => {
+router.post('/tables/reset-status', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
     const { businessId, tableId, tableNumber } = req.body;
     const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
@@ -984,7 +1025,7 @@ router.post('/tables/reset-status', async (req: Request, res: Response) => {
 /**
  * Customer Digital Order Placement (via Cart UI)
  */
-router.post('/orders', async (req: Request, res: Response) => {
+router.post('/orders', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
     const { businessId, table_id, table_number, floor, building, items, currency, customer_name, customer_phone, order_notes, existing_order_id, existingOrderId, host_token, hostToken } = req.body;
 
@@ -1026,7 +1067,7 @@ router.post('/orders', async (req: Request, res: Response) => {
 /**
  * Customer Digital Order Placement alias (/table-orders)
  */
-router.post('/table-orders', async (req: Request, res: Response) => {
+router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
     const { business_id, businessId, table_id, table_number, floor, building, items, currency, customer_name, customer_phone, order_notes, general_notes, existing_order_id, existingOrderId, host_token, hostToken } = req.body;
 
@@ -1068,11 +1109,21 @@ router.post('/table-orders', async (req: Request, res: Response) => {
 /**
  * Get active orders for business/kitchen
  */
-router.get('/orders', async (req: Request, res: Response) => {
+router.get('/orders', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = (req.query.businessId as string) || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const businessId = (req.query.businessId as string) || req.user?.business?.id || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    if (req.user) {
+      const isAuthorized = await assertBusinessAccess(req.user, businessId);
+      if (!isAuthorized) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied to orders for venue '${businessId}'.` }
+        });
+      }
+    }
+
     const tableId = req.query.tableId as string;
-    const orders = await rbacService.getTableOrders(businessId, createSystemContext(), tableId);
+    const orders = await rbacService.getTableOrders(businessId, req.user || createSystemContext(), tableId);
     return res.json({ success: true, data: orders });
   } catch (err: any) {
     return res.status(500).json({
@@ -1085,11 +1136,11 @@ router.get('/orders', async (req: Request, res: Response) => {
 /**
  * Update order status (Kitchen/Bar/Waiter)
  */
-router.put('/orders/:orderId/status', async (req: Request, res: Response) => {
+router.put('/orders/:orderId/status', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderId } = req.params;
-    const { status, businessId } = req.body;
-    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const { status } = req.body;
+    const targetBusinessId = await getTargetBusinessId(req);
 
     if (!status) {
       return res.status(400).json({
@@ -1101,7 +1152,8 @@ router.put('/orders/:orderId/status', async (req: Request, res: Response) => {
     const updatedOrder = await rbacService.updateTableOrderStatus(
       targetBusinessId,
       orderId,
-      status
+      status,
+      req.user
     );
 
     return res.json({
@@ -1110,9 +1162,9 @@ router.put('/orders/:orderId/status', async (req: Request, res: Response) => {
       message: `Order status updated to ${status}`
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(err.statusCode || (err.message.includes('Permission denied') ? 403 : 500)).json({
       success: false,
-      error: { code: 'ORDER_UPDATE_FAILED', message: err.message }
+      error: { code: err.code || 'ORDER_UPDATE_FAILED', message: err.message }
     });
   }
 });
@@ -1120,11 +1172,11 @@ router.put('/orders/:orderId/status', async (req: Request, res: Response) => {
 /**
  * Update individual item status (Kitchen station & Bar station dish/beverage readiness)
  */
-router.put('/orders/:orderId/items/:itemIndex/status', async (req: Request, res: Response) => {
+router.put('/orders/:orderId/items/:itemIndex/status', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderId, itemIndex } = req.params;
-    const { status, businessId } = req.body;
-    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const { status } = req.body;
+    const targetBusinessId = await getTargetBusinessId(req);
 
     if (!status) {
       return res.status(400).json({
@@ -1137,7 +1189,8 @@ router.put('/orders/:orderId/items/:itemIndex/status', async (req: Request, res:
       targetBusinessId,
       orderId,
       { index: parseInt(itemIndex, 10) },
-      status
+      status,
+      req.user
     );
 
     return res.json({
@@ -1146,9 +1199,9 @@ router.put('/orders/:orderId/items/:itemIndex/status', async (req: Request, res:
       message: `Item #${itemIndex} status updated to ${status}`
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(err.statusCode || (err.message.includes('Permission denied') ? 403 : 500)).json({
       success: false,
-      error: { code: 'ITEM_STATUS_UPDATE_FAILED', message: err.message }
+      error: { code: err.code || 'ITEM_STATUS_UPDATE_FAILED', message: err.message }
     });
   }
 });
@@ -1156,11 +1209,11 @@ router.put('/orders/:orderId/items/:itemIndex/status', async (req: Request, res:
 /**
  * Update individual item status by key or id (Kitchen station & Bar station)
  */
-router.patch('/orders/:orderId/items/status', async (req: Request, res: Response) => {
+router.patch('/orders/:orderId/items/status', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderId } = req.params;
-    const { itemIndex, itemKey, itemId, status, businessId } = req.body;
-    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const { itemIndex, itemKey, itemId, status } = req.body;
+    const targetBusinessId = await getTargetBusinessId(req);
 
     if (!status) {
       return res.status(400).json({
@@ -1177,7 +1230,8 @@ router.patch('/orders/:orderId/items/status', async (req: Request, res: Response
         itemKey,
         itemId
       },
-      status
+      status,
+      req.user
     );
 
     return res.json({
@@ -1186,9 +1240,9 @@ router.patch('/orders/:orderId/items/status', async (req: Request, res: Response
       message: `Item status updated to ${status}`
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(err.statusCode || (err.message.includes('Permission denied') ? 403 : 500)).json({
       success: false,
-      error: { code: 'ITEM_STATUS_UPDATE_FAILED', message: err.message }
+      error: { code: err.code || 'ITEM_STATUS_UPDATE_FAILED', message: err.message }
     });
   }
 });
@@ -1243,7 +1297,7 @@ router.delete('/orders/completed', async (req: Request, res: Response) => {
 router.post('/orders/:id/confirm-payment', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const orderId = req.params.id;
     const { payment_method, notes } = req.body;
     
@@ -1264,7 +1318,7 @@ router.post('/orders/:id/confirm-payment', authenticate, async (req: Authenticat
 router.post('/orders/:id/reject-payment', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const orderId = req.params.id;
     const { reason } = req.body;
     
@@ -1281,7 +1335,7 @@ router.post('/orders/:id/reject-payment', authenticate, async (req: Authenticate
   }
 });
 
-router.post('/orders/:id/payment-method', optionalAuthenticate, async (req: Request, res: Response) => {
+router.post('/orders/:id/payment-method', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
     // This can be called unauthenticated by the guest via CustomerMenuPreviewPage/OrderSuccessModal
     const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
@@ -1299,8 +1353,54 @@ router.post('/orders/:id/payment-method', optionalAuthenticate, async (req: Requ
       console.warn('Prisma payment-method update note:', e.message);
     }
 
+    const updated = await prisma.tableOrder.findUnique({
+      where: { id: orderId },
+    });
+
+    if (updated) {
+      const fullOrder = {
+        id: updated.id,
+        business_id: updated.business_id,
+        table_id: updated.table_id || '',
+        table_number: updated.table_number,
+        order_number: updated.order_number || undefined,
+        floor: updated.floor ?? null,
+        building: updated.building ?? null,
+        items: (updated.items as any) || [],
+        subtotal: Number(updated.subtotal) || 0,
+        tax_amount: Number(updated.tax_amount) || 0,
+        total_amount: Number(updated.total_amount) || 0,
+        currency: updated.currency || 'Rs.',
+        customer_name: updated.customer_name || 'Guest',
+        customer_phone: updated.customer_phone || '',
+        order_notes: updated.order_notes || '',
+        status: updated.status,
+        pay_first: Boolean(updated.pay_first),
+        payment_confirmed_at: updated.payment_confirmed_at ? new Date(updated.payment_confirmed_at) : null,
+        payment_confirmed_by: updated.payment_confirmed_by || null,
+        sale_id: updated.sale_id || null,
+        payment_rejected_reason: updated.payment_rejected_reason || null,
+        session_id: updated.session_id || null,
+        bill_requested: Boolean(updated.bill_requested),
+        bill_requested_at: updated.bill_requested_at ? new Date(updated.bill_requested_at) : null,
+        bill_acknowledged: Boolean(updated.bill_acknowledged),
+        folio_delivered: Boolean(updated.folio_delivered),
+        folio_delivered_at: updated.folio_delivered_at ? new Date(updated.folio_delivered_at) : null,
+        payment_method: updated.payment_method || payment_method,
+        payment_status: updated.payment_status || null,
+        promo_code: updated.promo_code || null,
+        promo_discount: Number(updated.promo_discount) || 0,
+        taxes: (updated.taxes as any) || [],
+        ready_at: updated.ready_at ? new Date(updated.ready_at) : null,
+        served_at: updated.served_at ? new Date(updated.served_at) : null,
+        created_at: new Date(updated.created_at),
+        updated_at: new Date(updated.updated_at),
+      };
+      realtimeEmitter.orderUpdated(businessId, fullOrder);
+      return res.json({ success: true, message: 'Payment method updated', order: fullOrder });
+    }
+
     realtimeEmitter.orderUpdated(businessId, { id: orderId, payment_method });
-    
     return res.json({ success: true, message: 'Payment method updated' });
   } catch (err: any) {
     return res.status(400).json({
@@ -1328,7 +1428,7 @@ router.post(['/orders/:id/acknowledge-bill', '/orders/:id/folio-delivered'], opt
   }
 });
 
-router.post('/orders/:id/request-bill', optionalAuthenticate, async (req: Request, res: Response) => {
+router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
     const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
     const orderId = req.params.id;
@@ -1399,7 +1499,7 @@ router.post('/orders/:id/request-bill', optionalAuthenticate, async (req: Reques
  */
 router.get('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const config = await rbacService.getTaxConfig(businessId);
     return res.json({ success: true, data: config });
   } catch (err: any) {
@@ -1416,7 +1516,7 @@ router.get('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest
  */
 router.put('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const config = await rbacService.updateTaxConfig(businessId, req.body, req.user);
     return res.json({
       success: true,
@@ -1441,7 +1541,7 @@ router.put('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest
  */
 router.get('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const accounts = await rbacService.getGLAccounts(businessId);
     return res.json({ success: true, data: accounts });
   } catch (err: any) {
@@ -1458,7 +1558,7 @@ router.get('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedReques
  */
 router.post('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const account = await rbacService.createGLAccount(businessId, req.body, req.user);
     return res.status(201).json({
       success: true,
@@ -1479,7 +1579,7 @@ router.post('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedReque
  */
 router.put('/gl-accounts/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const accountId = req.params.id;
     const updated = await rbacService.updateGLAccount(businessId, accountId, req.body, req.user);
     return res.json({
@@ -1501,7 +1601,7 @@ router.put('/gl-accounts/:id', optionalAuthenticate, async (req: AuthenticatedRe
  */
 router.delete('/gl-accounts/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const accountId = req.params.id;
     await rbacService.deleteGLAccount(businessId, accountId, req.user);
     return res.json({
@@ -1522,7 +1622,7 @@ router.delete('/gl-accounts/:id', optionalAuthenticate, async (req: Authenticate
  */
 router.post('/gl-accounts/reset-default', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const defaults = await rbacService.resetDefaultGLAccounts(businessId, req.user);
     return res.json({
       success: true,
@@ -1543,7 +1643,7 @@ router.post('/gl-accounts/reset-default', optionalAuthenticate, async (req: Auth
  */
 router.get('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const date = req.query.date as string | undefined;
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
@@ -1573,7 +1673,7 @@ router.get('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res
  */
 router.post('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const saleData = req.body;
     const sale = await rbacService.createSale(businessId, saleData, req.user);
 
@@ -1596,7 +1696,7 @@ router.post('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, re
  */
 router.delete('/sales/:saleId', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const { saleId } = req.params;
     await rbacService.deleteSale(businessId, saleId, req.user);
 
@@ -1620,7 +1720,7 @@ router.delete('/sales/:saleId', optionalAuthenticate, async (req: AuthenticatedR
  */
 router.delete('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = getTargetBusinessId(req);
+    const businessId = await getTargetBusinessId(req);
     const date = req.query.date as string | undefined;
     const all = req.query.all === 'true';
 
@@ -1782,7 +1882,7 @@ router.put('/businesses/:businessId/operations/days/:dayId', optionalAuthenticat
  * POST /api/rbac/service-requests
  * Create or submit a guest waiter call or service request
  */
-router.post('/service-requests', optionalAuthenticate, async (req: Request, res: Response) => {
+router.post('/service-requests', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
     const { id, type, business_id, table_id, table_number, order_id, order_number, customer_name, total_amount, currency } = req.body;
     const businessId = business_id || (req.query.businessId as string);
@@ -1850,10 +1950,20 @@ router.post('/service-requests', optionalAuthenticate, async (req: Request, res:
  * GET /api/rbac/service-requests
  * Fetch all pending service requests for a business
  */
-router.get('/service-requests', optionalAuthenticate, async (req: Request, res: Response) => {
+router.get('/service-requests', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = (req.query.businessId as string) || (req.query.business_id as string);
+    const businessId = (req.query.businessId as string) || (req.query.business_id as string) || req.user?.business?.id;
     if (!businessId) return res.status(400).json({ success: false, error: 'businessId required' });
+
+    if (req.user) {
+      const isAuthorized = await assertBusinessAccess(req.user, businessId);
+      if (!isAuthorized) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied to service requests for venue '${businessId}'.` }
+        });
+      }
+    }
 
     const requests = await prisma.serviceRequest.findMany({
       where: {
@@ -1880,7 +1990,7 @@ router.get('/service-requests', optionalAuthenticate, async (req: Request, res: 
  * POST /api/rbac/tables/:tableId/acknowledge-ping
  * Acknowledge / dismiss active waiter ping on a table
  */
-router.post('/tables/:tableId/acknowledge-ping', optionalAuthenticate, async (req: Request, res: Response) => {
+router.post('/tables/:tableId/acknowledge-ping', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
     const { tableId } = req.params;
     const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;

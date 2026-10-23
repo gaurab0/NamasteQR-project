@@ -1,7 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { config } from '../config/env';
 
 export function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
+  // If response headers were already sent, delegate to default Express handler
+  if (res.headersSent) {
+    return next(err);
+  }
+
   // Handle Zod validation errors
   if (err instanceof ZodError) {
     const firstIssue = err.issues[0];
@@ -18,19 +24,45 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
     });
   }
 
-  // Handle known custom business errors
-  const status = err.statusCode || err.status || 400;
-  const code = err.code || 'BAD_REQUEST';
-  const message = err.message || 'An unexpected error occurred';
+  // Handle known custom business errors vs 500 internal errors
+  const rawStatus = err.statusCode || err.status || (err.name === 'UnauthorizedError' ? 401 : 500);
+  const status = typeof rawStatus === 'number' && rawStatus >= 100 && rawStatus < 600 ? rawStatus : 500;
 
-  // Do not expose stack traces or DB internal errors
-  return res.status(status >= 100 && status < 600 ? status : 500).json({
+  const isPrismaOrDbError =
+    err.name?.startsWith('PrismaClient') ||
+    (typeof err.code === 'string' && /^P\d{4}$/.test(err.code)) ||
+    (typeof err.message === 'string' && (
+      err.message.includes('prisma') ||
+      err.message.includes('PostgreSQL') ||
+      err.message.includes('relation') ||
+      err.message.includes('syntax error at or near')
+    ));
+
+  let code = err.code || (status >= 500 ? 'INTERNAL_SERVER_ERROR' : 'BAD_REQUEST');
+  let message = err.message || 'An unexpected error occurred';
+
+  // Production information disclosure protection:
+  // Suppress database internals, raw SQL queries, Prisma traces, and internal 500 details
+  if (config.isProduction) {
+    if (status >= 500 || isPrismaOrDbError) {
+      code = 'INTERNAL_SERVER_ERROR';
+      message = 'An unexpected internal server error occurred. Please contact support if the issue persists.';
+    }
+  } else {
+    // In development mode, log the full error for debugging
+    console.error(`[Error Handler] ${status} ${code}:`, err);
+  }
+
+  // Never leak devOtp in production
+  const includeDevOtp = config.devOtpMode && !config.isProduction && err.devOtp;
+
+  return res.status(status).json({
     success: false,
     error: {
       code,
       message,
       ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
-      ...(err.devOtp ? { devOtp: err.devOtp } : {}),
+      ...(includeDevOtp ? { devOtp: err.devOtp } : {}),
     },
   });
 }

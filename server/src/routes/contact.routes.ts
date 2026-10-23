@@ -1,8 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { emailService } from '../services/email.service';
 import { db } from '../services/db.service';
+import { contactLimiter } from '../middleware/rateLimit.middleware';
 
 const router = Router();
+
+// Apply contact & enquiry rate limiting
+router.use(contactLimiter);
 
 /**
  * POST /api/contact/demo

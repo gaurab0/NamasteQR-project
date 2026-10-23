@@ -7,6 +7,7 @@ import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
 import { determineItemStation } from '../../utils/menuUtils';
 import { usePrinter } from '../../contexts/PrinterContext';
+import { KdsPrintMode } from '../../types/printer.types';
 import {
   BellRing,
   BellOff,
@@ -67,6 +68,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 }) => {
   const { dispatchPrint, kdsPrintMode } = usePrinter();
   const { user } = useAuth();
+  const effectiveKdsPrintMode: KdsPrintMode = (kdsPrintMode || (user?.business?.kds_print_mode as KdsPrintMode) || 'DISPLAY_ONLY');
   const billingFormat: DateFormatMode = (user?.business?.date_format_billing as DateFormatMode) || 'ENGLISH';
   const [activeStation, setActiveStation] = useState<KDSViewMode>(defaultStation);
   const [orders, setOrders] = useState<TableOrder[]>([]);
@@ -90,6 +92,9 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   }, [defaultStation, activeStation]);
 
   const canDeliver = !isViewOnly;
+  const isPosManualOrder = (ord: TableOrder) => {
+    return ord.source === 'POS_MANUAL' || Boolean((ord as any).pos_sale_id);
+  };
 
 
 
@@ -297,7 +302,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         } else {
           next = [formattedOrder, ...prev];
           // KOT printing for new orders
-          if (kdsPrintMode !== 'DISPLAY_ONLY') {
+          if (effectiveKdsPrintMode !== 'DISPLAY_ONLY') {
             const createdAtTime = formattedOrder.created_at ? new Date(formattedOrder.created_at).getTime() : 0;
             if (Date.now() - createdAtTime < 15000) {
               dispatchPrint('KOT', formattedOrder);
@@ -331,7 +336,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       unsubOrders();
       unsubRequests();
     };
-  }, [businessId, kdsPrintMode]);
+  }, [businessId, effectiveKdsPrintMode]);
 
   // Acknowledge a pending bill request / waiter ping (Folio Delivered)
   const handleAcknowledgeBillRequest = async (requestId: string, orderId?: string) => {
@@ -657,7 +662,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
   // Filter orders according to station view
   const stationOrders = useMemo(() => {
-    if (kdsPrintMode === 'PRINT_ONLY' && (activeStation === 'KITCHEN' || activeStation === 'BAR')) return [];
     const filteredList = orders.map((order) => {
       // For Kitchen station: filter items to food items (station !== 'BAR')
       // For Bar station: filter items to beverages (station === 'BAR')
@@ -665,9 +669,9 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       // In all stations, CANCELLED items must never appear as active dishes to prepare or serve!
       const filteredItems = order.items.filter((item) => {
         if (item.status === 'CANCELLED') return false;
-        const itemStation = item.station || determineItemStation(item);
+        const itemStation = (item.station || determineItemStation(item) || '').toUpperCase();
         if (activeStation === 'KITCHEN') {
-          return itemStation === 'KITCHEN';
+          return itemStation !== 'BAR';
         }
         if (activeStation === 'BAR') {
           return itemStation === 'BAR';
@@ -703,6 +707,9 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
           return order.status === 'READY' || order.status === 'PREPARING' || order.status === 'RECEIVED';
         }
         if (statusFilter === 'READY') {
+          if (effectiveKdsPrintMode === 'PRINT_ONLY' || isPosManualOrder(order)) {
+            return order.status !== 'SERVED' && order.status !== 'COMPLETED';
+          }
           return order.status === 'READY' || order.items.some((it) => it.status === 'READY');
         }
         if (statusFilter === 'SERVED') {
@@ -756,7 +763,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     }
 
     return filteredList;
-  }, [orders, activeStation, statusFilter, searchFilter]);
+  }, [orders, activeStation, statusFilter, searchFilter, effectiveKdsPrintMode]);
 
   // Active Table Calls ("Call Waiter") for Waiter Station Queue
   const pendingTableCalls = useMemo(() => {
@@ -920,17 +927,19 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   const stationCounts = useMemo(() => {
     const kitchenActive = orders.filter((o) => 
       o.status !== 'CANCELLED' && o.status !== 'COMPLETED' &&
-      o.items.some((it) => it.status !== 'CANCELLED' && (it.station || determineItemStation(it)) === 'KITCHEN') &&
+      o.items.some((it) => it.status !== 'CANCELLED' && ((it.station || determineItemStation(it) || '').toUpperCase() !== 'BAR')) &&
       (o.status === 'RECEIVED' || o.status === 'PREPARING')
     ).length;
 
     const barActive = orders.filter((o) => 
       o.status !== 'CANCELLED' && o.status !== 'COMPLETED' &&
-      o.items.some((it) => it.status !== 'CANCELLED' && (it.station || determineItemStation(it)) === 'BAR') &&
+      o.items.some((it) => it.status !== 'CANCELLED' && ((it.station || determineItemStation(it) || '').toUpperCase() === 'BAR')) &&
       (o.status === 'RECEIVED' || o.status === 'PREPARING')
     ).length;
 
-    let waiterReady = orders.filter((o) => o.status === 'READY');
+    let waiterReady = effectiveKdsPrintMode === 'PRINT_ONLY'
+      ? orders.filter((o) => o.status !== 'CANCELLED' && o.status !== 'SERVED' && o.status !== 'COMPLETED')
+      : orders.filter((o) => o.status !== 'CANCELLED' && (o.status === 'READY' || (isPosManualOrder(o) && o.status !== 'SERVED' && o.status !== 'COMPLETED')));
     
     // Filter by table assignment if user is a waiter
     if (activeStation === 'WAITER' && currentStaffId) {
@@ -946,7 +955,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     const pendingBillRequests = unifiedBillRequests.length;
 
     return { kitchenActive, barActive, waiterReady: waiterReady.length, pendingBillRequests, pendingTableCalls: pendingTableCalls.length };
-  }, [orders, unifiedBillRequests, pendingTableCalls, activeStation, currentStaffId, tables]);
+  }, [orders, unifiedBillRequests, pendingTableCalls, activeStation, currentStaffId, tables, effectiveKdsPrintMode]);
 
   // Audio alert chime whenever new bill or payment settlement requests arrive
   const prevWaiterReadyCountRef = useRef<number>(0);
@@ -981,7 +990,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   // they appear grouped together in the Batch Prep Queue at the bottom so the cook can prepare them together.
   // Once an item in Queue 1 begins preparation or is ready/served, it is excluded.
   const batchPrepRepeatedGroups = useMemo(() => {
-    if (kdsPrintMode === 'PRINT_ONLY') return [];
     // Only relevant for Kitchen and Bar prep stations
     if (activeStation !== 'KITCHEN' && activeStation !== 'BAR') {
       return [];
@@ -1694,25 +1702,33 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                     </div>
 
                     <div className="text-[11px] font-extrabold uppercase">
-                      {order.status === 'RECEIVED' && (
-                        <span className="text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 rounded-md">
-                          Received
+                      {effectiveKdsPrintMode === 'PRINT_ONLY' && order.status !== 'SERVED' && order.status !== 'COMPLETED' ? (
+                        <span className="text-amber-200 bg-amber-900/90 border border-amber-600 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold animate-pulse">
+                          <Printer className="w-3 h-3 text-amber-400" /> KOT Printed • Pending Delivery
                         </span>
-                      )}
-                      {order.status === 'PREPARING' && (
-                        <span className="text-amber-200 bg-amber-900/90 border border-amber-700 px-2 py-0.5 rounded-md flex items-center gap-1">
-                          <Flame className="w-3 h-3 text-amber-400 animate-pulse" /> Preparing
-                        </span>
-                      )}
-                      {order.status === 'READY' && (
-                        <span className="text-blue-200 bg-blue-900/90 border border-blue-600 px-2 py-0.5 rounded-md flex items-center gap-1">
-                          <Bell className="w-3 h-3 text-blue-400 animate-bounce" /> Prepared!
-                        </span>
-                      )}
-                      {order.status === 'SERVED' && (
-                        <span className="text-emerald-300 bg-emerald-950/90 border border-emerald-800 px-2 py-0.5 rounded-md flex items-center gap-1">
-                          <CheckCheck className="w-3 h-3 text-emerald-400" /> Served
-                        </span>
+                      ) : (
+                        <>
+                          {order.status === 'RECEIVED' && (
+                            <span className="text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 rounded-md">
+                              Received
+                            </span>
+                          )}
+                          {order.status === 'PREPARING' && (
+                            <span className="text-amber-200 bg-amber-900/90 border border-amber-700 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <Flame className="w-3 h-3 text-amber-400 animate-pulse" /> Preparing
+                            </span>
+                          )}
+                          {order.status === 'READY' && (
+                            <span className="text-blue-200 bg-blue-900/90 border border-blue-600 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <Bell className="w-3 h-3 text-blue-400 animate-bounce" /> Prepared!
+                            </span>
+                          )}
+                          {(order.status === 'SERVED' || order.status === 'COMPLETED') && (
+                            <span className="text-emerald-300 bg-emerald-950/90 border border-emerald-800 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <CheckCheck className="w-3 h-3 text-emerald-400" /> Served
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -1894,7 +1910,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                             </>
                           )}
 
-                          {activeStation === 'WAITER' && isItemReady && !isItemServed && (
+                          {activeStation === 'WAITER' && (isItemReady || effectiveKdsPrintMode === 'PRINT_ONLY') && !isItemServed && (
                             <button
                               type="button"
                               id={`btn-item-serve-${order.id}-${idx}`}
@@ -1904,7 +1920,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                               title="Mark this item delivered to table"
                             >
                               <CheckCheck className="w-3 h-3" />
-                              <span>Serve</span>
+                              <span>{effectiveKdsPrintMode === 'PRINT_ONLY' ? 'Deliver' : 'Serve'}</span>
                             </button>
                           )}
                         </div>
@@ -1982,7 +1998,9 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                 {/* For Waiter View */}
                 {activeStation === 'WAITER' && (
                   <div className="space-y-2">
-                    {order.status === 'READY' || order.items.every((it) => it.status === 'READY' || it.status === 'SERVED') ? (
+                    {(effectiveKdsPrintMode === 'PRINT_ONLY' && order.status !== 'SERVED' && order.status !== 'COMPLETED') ||
+                    order.status === 'READY' ||
+                    order.items.every((it) => it.status === 'READY' || it.status === 'SERVED') ? (
                       <Button
                         id={`btn-waiter-deliver-${order.id}`}
                         variant="primary"
@@ -1992,9 +2010,13 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         leftIcon={<CheckCheck className="w-4 h-4" />}
                         className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-3 shadow-md cursor-pointer"
                       >
-                        {isProcessing ? 'Updating...' : `Deliver All to Table #${order.table_number}`}
+                        {isProcessing
+                          ? 'Updating...'
+                          : effectiveKdsPrintMode === 'PRINT_ONLY'
+                          ? `Mark Delivered to Table #${order.table_number}`
+                          : `Deliver All to Table #${order.table_number}`}
                       </Button>
-                    ) : order.status === 'SERVED' ? (
+                    ) : order.status === 'SERVED' || order.status === 'COMPLETED' ? (
                       <div
                         className={`w-full p-2.5 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 ${
                           isFullScreenMode
@@ -2284,7 +2306,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                   )}
                   {stationCounts.waiterReady > 0 && (
                     <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-zinc-950/60 font-black animate-pulse">
-                      {stationCounts.waiterReady}
+                      {stationCounts.waiterReady} {effectiveKdsPrintMode === 'PRINT_ONLY' ? 'To Deliver' : 'Ready'}
                     </span>
                   )}
                 </button>
@@ -2616,7 +2638,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                 <div>
                   <div className="text-sm font-black">Waiter & Service Station</div>
                   <div className={`text-xs ${activeStation === 'WAITER' ? 'text-blue-100' : 'text-zinc-500'}`}>
-                    Prepared Dishes & Delivery
+                    {effectiveKdsPrintMode === 'PRINT_ONLY' ? 'Table Orders & Delivery' : 'Prepared Dishes & Delivery'}
                   </div>
                 </div>
               </div>
@@ -2636,7 +2658,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                       activeStation === 'WAITER' ? 'bg-white text-blue-900' : 'bg-blue-600 text-white'
                     }`}
                   >
-                    {stationCounts.waiterReady} Ready!
+                    {stationCounts.waiterReady} {effectiveKdsPrintMode === 'PRINT_ONLY' ? 'To Deliver' : 'Ready!'}
                   </span>
                 )}
                 {/* Small Full Screen Button for Waiter & Service Station */}

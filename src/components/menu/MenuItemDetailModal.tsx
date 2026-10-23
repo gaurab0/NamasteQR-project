@@ -204,7 +204,7 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
               </div>
             </div>
             <div className="text-right shrink-0">
-              <span id="modal-item-price" className="text-2xl font-black text-amber-600 font-mono">
+              <span id="modal-item-price" className="text-2xl font-black text-amber-600 font-mono notranslate">
                 {currency} {activeUnitPrice.toLocaleString()}
               </span>
               {selectedVariant && (
@@ -263,7 +263,7 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
                           </span>
                         )}
                       </div>
-                      <div className={`text-xs font-mono font-black mt-0.5 ${isSelected ? 'text-zinc-950' : 'text-amber-700'}`}>
+                      <div className={`text-xs font-mono font-black mt-0.5 notranslate ${isSelected ? 'text-zinc-950' : 'text-amber-700'}`}>
                         {currency} {Number(v.price).toLocaleString()}
                       </div>
                     </button>
@@ -380,7 +380,7 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
           ) : (
             <div className="w-full flex items-center justify-between gap-2">
               <span className="text-xs text-stone-500 font-medium">
-                Dish: <strong className="text-stone-800">{item.name}</strong> {selectedVariant ? `[${selectedVariant.name}]` : ''} ({currency} {activeUnitPrice})
+                Dish: <strong className="text-stone-800">{item.name}</strong> {selectedVariant ? `[${selectedVariant.name}]` : ''} <span className="notranslate font-mono font-semibold">({currency} {activeUnitPrice})</span>
                 {isReadOnly && <span className="ml-1.5 text-[10px] font-bold uppercase text-zinc-500">• View Only</span>}
               </span>
               <button

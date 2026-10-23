@@ -74,9 +74,11 @@ import {
   FileText,
   X,
   Printer,
+  Languages,
 } from 'lucide-react';
 
 import { PrinterConfiguration } from './PrinterConfiguration';
+import { SUPPORTED_LANGUAGES } from '../../utils/googleTranslate';
 
 export type ConfigurationDomain =
   | 'menu'
@@ -243,6 +245,9 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   const [billingDateFormat, setBillingDateFormat] = useState<DateFormatMode>(() => {
     return (businessProfile?.date_format_billing as DateFormatMode) || (business?.date_format_billing as DateFormatMode) || 'ENGLISH';
   });
+  const [defaultLanguage, setDefaultLanguage] = useState<string>(() => {
+    return businessProfile?.default_language || (businessProfile as any)?.operations_config?.default_language || business?.default_language || (business as any)?.operations_config?.default_language || 'en';
+  });
   const [dateSaving, setDateSaving] = useState(false);
   const [dateSaveSuccess, setDateSaveSuccess] = useState<string | null>(null);
 
@@ -260,30 +265,38 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
       if (biz.date_format_billing) {
         setBillingDateFormat(biz.date_format_billing as DateFormatMode);
       }
+      if (biz.default_language) {
+        setDefaultLanguage(biz.default_language);
+      } else if ((biz as any)?.operations_config?.default_language) {
+        setDefaultLanguage((biz as any).operations_config.default_language);
+      }
     }
   }, [business, user?.business]);
 
-  const handleSaveDateLocalization = async (newNavFormat?: DateFormatMode, newBillingFormat?: DateFormatMode) => {
+  const handleSaveDateLocalization = async (newNavFormat?: DateFormatMode, newBillingFormat?: DateFormatMode, newLang?: string) => {
     const navVal = newNavFormat || navDateFormat;
     const billingVal = newBillingFormat || billingDateFormat;
+    const langVal = newLang || defaultLanguage;
     try {
       setDateSaving(true);
       await rbacService.updateBusinessProfileApi({
         date_format_nav: navVal,
         date_format_billing: billingVal,
+        default_language: langVal,
       }, businessId);
 
       const freshBiz = {
         ...businessProfile,
         date_format_nav: navVal,
         date_format_billing: billingVal,
+        default_language: langVal,
       };
       setBusinessProfile(freshBiz);
       updateBusiness(freshBiz);
-      setDateSaveSuccess('Date & time localization settings saved successfully!');
+      setDateSaveSuccess('Operations & localization settings saved successfully!');
       setTimeout(() => setDateSaveSuccess(null), 3500);
     } catch (err: any) {
-      alert(`Failed to save date localization: ${err.message}`);
+      alert(`Failed to save localization settings: ${err.message}`);
     } finally {
       setDateSaving(false);
     }
@@ -291,12 +304,17 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
 
   const handleNavFormatChange = (val: DateFormatMode) => {
     setNavDateFormat(val);
-    handleSaveDateLocalization(val, billingDateFormat);
+    handleSaveDateLocalization(val, billingDateFormat, defaultLanguage);
   };
 
   const handleBillingFormatChange = (val: DateFormatMode) => {
     setBillingDateFormat(val);
-    handleSaveDateLocalization(navDateFormat, val);
+    handleSaveDateLocalization(navDateFormat, val, defaultLanguage);
+  };
+
+  const handleDefaultLanguageChange = (val: string) => {
+    setDefaultLanguage(val);
+    handleSaveDateLocalization(navDateFormat, billingDateFormat, val);
   };
 
   // ==========================================
@@ -1609,6 +1627,60 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                       </span>
                       <div className="font-mono text-xs text-zinc-800 bg-zinc-50 px-3 py-2 rounded-lg border border-zinc-200">
                         {renderFormattedDate(new Date(), billingDateFormat)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Default Customer Menu Language */}
+                  <div className="rounded-2xl border border-zinc-200/90 bg-zinc-50/50 p-5 sm:p-6 space-y-4 flex flex-col justify-between lg:col-span-2">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Languages className="w-4 h-4 text-amber-600" />
+                          <h4 className="text-sm font-bold text-zinc-900">Default Customer Menu Language</h4>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
+                          QR Menu Language
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 leading-relaxed">
+                        Select the primary language displayed to first-time diners scanning table QR codes. Guests can dynamically change their language on the live menu at any time.
+                      </p>
+
+                      <div className="space-y-2 pt-2">
+                        <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider">
+                          Select Default Language
+                        </label>
+                        <select
+                          value={defaultLanguage}
+                          onChange={(e) => handleDefaultLanguageChange(e.target.value)}
+                          className="w-full px-3.5 py-2.5 bg-white border border-zinc-300 rounded-xl text-xs sm:text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs"
+                        >
+                          {SUPPORTED_LANGUAGES.map((lang) => (
+                            <option key={lang.code} value={lang.code}>
+                              {lang.nativeLabel} ({lang.label}) {lang.code === 'en' ? '— Standard Default' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Live Preview for Default Language */}
+                    <div className="bg-white rounded-xl p-3 border border-zinc-200/80 space-y-1.5 mt-2">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                        Customer View Header Badge Preview
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-zinc-900 text-white border border-white/20 shadow-xs">
+                          <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          <span>{SUPPORTED_LANGUAGES.find((l) => l.code === defaultLanguage)?.nativeLabel || 'English'}</span>
+                          <span className="text-[10px] text-zinc-400 font-normal">
+                            ({SUPPORTED_LANGUAGES.find((l) => l.code === defaultLanguage)?.label || 'English'})
+                          </span>
+                        </div>
+                        <span className="text-xs text-zinc-500">
+                          Default language code: <code className="font-mono font-bold text-zinc-800">{defaultLanguage}</code>
+                        </span>
                       </div>
                     </div>
                   </div>
