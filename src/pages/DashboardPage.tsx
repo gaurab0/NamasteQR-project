@@ -517,7 +517,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             />
           )}
 
-          {activeTab === 'operations' && canAccessTab(subject, 'operations') && <OperationsManagementTab />}
+          {activeTab === 'operations' && canAccessTab(subject, 'operations') && (
+            <OperationsManagementTab
+              business={currentBusinessObj}
+              user={user}
+              activeRole={staffSession?.role || user.role}
+              isViewOnly={isViewOnly}
+              onNavigate={onNavigate}
+            />
+          )}
 
           {/* KDS & Live Orders Tab */}
           {activeTab === 'kds' && canAccessTab(subject, 'kds') && (

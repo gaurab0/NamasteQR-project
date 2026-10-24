@@ -1870,4 +1870,56 @@ This refactor establishes two clearly separated operational workflows while leav
 
 ---
 
-*Last updated: 2026-10-22 by Antigravity (Manual POS Sales Refactor, Post-Settlement Kitchen Dispatch & Always-Available Delivery Action)*
+## 37. UI Relocation: Sales Records, GL Accounts & Database Pruning to Business Operation Tab
+
+### Overview
+Relocated the **Sales Records & Excel Export**, **GL Links & Accounts**, and **Automatic Daily Database Pruning (Purge Past Orders Now)** sections from the `BillingPOS.tsx` (Finance & POS) tab to the `OperationsManagementTab.tsx` (Business Operation) tab. All functional logic, data flows, APIs, and modals remain completely intact with zero backend breaking changes.
+
+### Key Modifications
+
+#### 1. Extracted Reusable Components
+- **`src/components/billing/ReceiptSlipModal.tsx`**:
+  - Extracted receipt preview modal, PAN/VAT formatting helper (`formatPanVatDisplay`), title formatting (`formatDocumentTitleWithPrefix`), and invoice prefix helper.
+  - Used in both POS register and sales audit records without duplication.
+- **`src/components/operations/SalesRecordsAudit.tsx`**:
+  - Encapsulated the complete Sales Records & Financial Audit Register:
+    - Time and earnings filter bar (Day, Week, Month, All, Custom date picker).
+    - Metrics grid (Gross earnings, net F&B, taxes/SC, AOV).
+    - Payment methods breakdown strip (Cash, Card, Fonepay/QR, Online, Room Charge, Credit).
+    - Interactive sales register table with search and payment method filter.
+    - Export to formatted Excel (`.xlsx`) (Filtered & All).
+    - Interactive Excel spreadsheet preview & editor (`ExcelSheetPreviewModal`).
+    - Audit deletion controls (Delete day's history, wipe all records confirmation).
+    - Single-record view receipt slip (`ReceiptSlipModal`) and delete confirmation.
+
+#### 2. Business Operation Tab (`OperationsManagementTab.tsx`)
+- Added top sub-navigation switcher:
+  1. **Trading Hours & Shift Cycle** (`Clock` icon): Operational status (open/close/reopen day, starting float), automated scheduler timings, manual date override, and historical operational logs.
+  2. **Sales Records & Excel Export** (`FileSpreadsheet` icon): Full sales audit register with real-time record count badge.
+  3. **GL Links & Accounts** (`BookOpen` icon): Full GL accounts table and ERP mapping register (`GLAccountsTable`) with account count badge.
+- Added **Automatic Daily Database Pruning Banner**:
+  - Displays `24h Retention for Orders • 30 Days for Sales History` with the **"Purge Past Orders Now"** button.
+  - Connected to `rbacService.cleanupDailyOrdersApi(activeBizId)`.
+
+#### 3. Finance & POS Tab Cleanup (`BillingPOS.tsx`)
+- Removed the top subtabs bar, Excel preview CTA buttons, and the database pruning banner.
+- Focused the Finance & POS view cleanly on live cashier operations:
+  - Pay-first orders verification queue.
+  - Active dine-in table tabs board (with guest folio check print and table settlement).
+  - New POS Sale & Create Counter POS Sale modals.
+  - Today's counter register metrics and recently settled bills list.
+  - The "Open Sales Records & Excel Export" CTA now seamlessly navigates to the Business Operation tab via `onNavigate('operations')`.
+
+#### 4. Dashboard Integration (`DashboardPage.tsx`)
+- Updated `OperationsManagementTab` invocation to receive `business`, `user`, `activeRole`, `isViewOnly`, and `onNavigate` props.
+
+### Verification
+- `npm run lint` (`tsc --noEmit`): **0 errors**.
+- `npm run build`: **0 errors**.
+- Test suites:
+  - `server/test/auth.test.ts`: **6/6 PASSED**.
+  - `server/test/pos_manual_sales_workflow.test.ts`: **4/4 PASSED**.
+
+---
+
+*Last updated: 2026-10-24 by Antigravity (UI Relocation: Sales Records, GL Accounts & Database Pruning to Business Operation Tab)*
