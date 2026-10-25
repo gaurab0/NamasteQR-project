@@ -65,7 +65,7 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
         </div>
 
         {/* Mobile View: Compact single-line name with badge */}
-        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[55px]">
+        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[68px]">
           <span className="font-bold text-[11px] text-zinc-900 truncate leading-tight">
             {currentBranch?.name || 'Venue'}
           </span>
@@ -116,7 +116,13 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-[calc(100vw-1.5rem)] sm:w-80 max-w-[340px] rounded-2xl bg-white border border-zinc-200/90 shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-100">
+        <>
+          {/* Mobile backdrop to cleanly dismiss on outside tap */}
+          <div 
+            className="fixed inset-0 bg-black/20 backdrop-blur-2xs z-40 sm:hidden" 
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="fixed sm:absolute inset-x-3 sm:inset-x-auto top-16 sm:top-auto sm:right-0 mt-2 w-auto sm:w-80 max-w-sm sm:max-w-[340px] rounded-2xl bg-white border border-zinc-200/90 shadow-2xl z-50 p-2 animate-in fade-in zoom-in-95 duration-100">
           <div className="px-3 py-2 border-b border-zinc-100 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Building2 className="w-3.5 h-3.5 text-zinc-500" />
@@ -241,6 +247,7 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
             </div>
           )}
         </div>
+        </>
       )}
     </div>
   );
