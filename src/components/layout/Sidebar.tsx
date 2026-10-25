@@ -151,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside
       className={`relative z-30 flex flex-col bg-white border-r border-zinc-200 transition-all duration-300 select-none ${
-        isCollapsed ? 'w-20' : 'w-64'
+        isCollapsed ? 'w-20' : 'w-full md:w-64'
       } h-full md:h-screen shrink-0 shadow-sm ${className}`}
     >
       {/* Top Header: Logo + Collapse Button */}
@@ -298,6 +298,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
+                id="btn-switch-role-sidebar"
                 onClick={onSwitchRole}
                 className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-600 hover:bg-zinc-100 transition cursor-pointer"
                 title="Switch Staff Role"
@@ -306,6 +307,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
               <button
                 type="button"
+                id="btn-sidebar-logout"
                 onClick={logout}
                 className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                 title="Sign Out"

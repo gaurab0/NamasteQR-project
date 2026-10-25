@@ -20,10 +20,10 @@ export const DateTimeDisplay: React.FC<DateTimeDisplayProps> = ({ mode = 'ENGLIS
 
   return (
     <div 
-      className="flex items-center gap-1.5 sm:gap-2.5 bg-zinc-100/90 hover:bg-zinc-100 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl border border-zinc-200/70 shadow-2xs transition-colors shrink min-w-0 select-none"
+      className="flex items-center gap-1.5 sm:gap-2.5 bg-zinc-100/90 hover:bg-zinc-100 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl border border-zinc-200/70 shadow-2xs transition-colors shrink-0 select-none"
       title={`${englishFull} | ${nepaliFull}`}
     >
-      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600 shrink-0 hidden xs:block" />
+      <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-600 shrink-0" />
       
       {/* 12-hour time and date container: stacked cleanly on mobile, side-by-side on sm+ */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0">

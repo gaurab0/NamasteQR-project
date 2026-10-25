@@ -389,7 +389,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 setIsAddBranchModalOpen(true);
               }}
               onNavigate={onNavigate}
-              className="w-full h-full max-h-[100dvh]"
+              className="w-full h-full max-h-[100dvh] border-r-0"
             />
           </div>
         </div>
@@ -398,8 +398,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       {/* Main Workspace (Right Area) */}
       <div className="flex-1 flex flex-col h-screen min-w-0 overflow-hidden">
         {/* Top Workspace Header Bar matching RestroX layout */}
-        <header className="h-16 px-2.5 sm:px-6 bg-white border-b border-zinc-200/90 flex items-center justify-between shrink-0 shadow-2xs z-20 gap-2">
-          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
+        <header className="h-16 px-2 sm:px-6 bg-white border-b border-zinc-200/90 flex items-center justify-between shrink-0 shadow-2xs z-20 gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Mobile hamburger menu toggle */}
             <button
               type="button"
@@ -410,7 +410,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               <Menu className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center min-w-0">
+            <div className="flex items-center shrink-0">
               <DateTimeDisplay mode={user?.business?.date_format_nav || 'ENGLISH'} />
             </div>
           </div>

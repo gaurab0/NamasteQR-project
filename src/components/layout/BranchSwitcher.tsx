@@ -65,7 +65,7 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
         </div>
 
         {/* Mobile View: Compact single-line name with badge */}
-        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[85px] xs:max-w-[110px]">
+        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[85px]">
           <span className="font-bold text-xs text-zinc-900 truncate leading-tight">
             {currentBranch?.name || 'Venue'}
           </span>
