@@ -459,7 +459,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               title="Switch Staff Designation / Account"
             >
               <UserCheck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-              <span className="max-w-[65px] sm:max-w-none truncate">{currentUserName}</span>
+              <span className="max-w-[130px] sm:max-w-none truncate">{currentUserName}</span>
             </button>
           </div>
         </header>

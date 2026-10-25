@@ -49,32 +49,32 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
         id="btn-branch-switcher"
         type="button"
         onClick={() => hasFranchiseAccess && setIsOpen(!isOpen)}
-        className={`flex items-center gap-1.5 sm:gap-2.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-medium bg-white/95 border shadow-2xs transition-all group shrink-0 ${hasFranchiseAccess ? 'hover:bg-zinc-50 border-zinc-200/90 hover:border-amber-300 cursor-pointer' : 'border-transparent cursor-default'}`}
+        className={`flex items-center gap-1 sm:gap-2.5 px-1.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-medium bg-white/95 border shadow-2xs transition-all group shrink-0 ${hasFranchiseAccess ? 'hover:bg-zinc-50 border-zinc-200/90 hover:border-amber-300 cursor-pointer' : 'border-transparent cursor-default'}`}
         aria-label="Franchise & Branch Switcher"
       >
-        <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${
+        <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-md sm:rounded-lg flex items-center justify-center shrink-0 border ${
           isFlagship 
             ? 'bg-amber-50 border-amber-200 text-amber-600' 
             : 'bg-indigo-50 border-indigo-200 text-indigo-600'
         }`}>
           {isFlagship ? (
-            <Crown className="w-3.5 h-3.5" />
+            <Crown className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           ) : (
-            <Store className="w-3.5 h-3.5" />
+            <Store className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
           )}
         </div>
 
         {/* Mobile View: Compact single-line name with badge */}
-        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[85px]">
-          <span className="font-bold text-xs text-zinc-900 truncate leading-tight">
+        <div className="flex sm:hidden items-center gap-1 min-w-0 max-w-[55px]">
+          <span className="font-bold text-[11px] text-zinc-900 truncate leading-tight">
             {currentBranch?.name || 'Venue'}
           </span>
           {isFlagship ? (
-            <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
+            <span className="text-[8px] font-extrabold px-1 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 shrink-0">
               HQ
             </span>
           ) : (
-            <span className="text-[9px] font-extrabold px-1 py-0.2 rounded bg-indigo-100 text-indigo-900 border border-indigo-300 shrink-0">
+            <span className="text-[8px] font-extrabold px-1 py-0.2 rounded bg-indigo-100 text-indigo-900 border border-indigo-300 shrink-0">
               {currentBranch?.branch_code || 'Branch'}
             </span>
           )}
@@ -111,7 +111,7 @@ export const BranchSwitcher: React.FC<BranchSwitcherProps> = ({ onOpenAddBranch,
         </div>
 
         {hasFranchiseAccess && (
-          <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform shrink-0 ml-0.5 sm:ml-1 ${isOpen ? 'rotate-180 text-zinc-700' : ''}`} />
+          <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-zinc-400 transition-transform shrink-0 ml-0.5 sm:ml-1 ${isOpen ? 'rotate-180 text-zinc-700' : ''}`} />
         )}
       </button>
 
