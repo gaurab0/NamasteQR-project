@@ -370,7 +370,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity" 
             onClick={() => setIsMobileMenuOpen(false)}
           />
-          <div className="relative w-64 max-w-[80vw] bg-white h-full shadow-2xl flex flex-col z-10">
+          <div className="relative w-72 max-w-[85vw] bg-white h-[100dvh] shadow-2xl flex flex-col z-10 overflow-hidden">
             <Sidebar
               activeTab={activeTab}
               onSelectTab={(tab) => {
@@ -389,6 +389,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 setIsAddBranchModalOpen(true);
               }}
               onNavigate={onNavigate}
+              className="w-full h-full max-h-[100dvh]"
             />
           </div>
         </div>
@@ -409,7 +410,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               <Menu className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center min-w-0 shrink-0">
+            <div className="flex items-center min-w-0">
               <DateTimeDisplay mode={user?.business?.date_format_nav || 'ENGLISH'} />
             </div>
           </div>
@@ -454,11 +455,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               type="button"
               id="btn-switch-user-header"
               onClick={() => setIsRoleModalOpen(true)}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition cursor-pointer shadow-2xs"
+              className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition cursor-pointer shadow-2xs shrink-0"
               title="Switch Staff Designation / Account"
             >
-              <UserCheck className="w-3.5 h-3.5 text-amber-700" />
-              <span>{currentUserName}</span>
+              <UserCheck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span className="max-w-[65px] sm:max-w-none truncate">{currentUserName}</span>
             </button>
           </div>
         </header>
@@ -524,7 +525,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               activeRole={staffSession?.role || user.role}
               isViewOnly={isViewOnly}
               onNavigate={onNavigate}
-            />
+              />
           )}
 
           {/* KDS & Live Orders Tab */}
@@ -558,7 +559,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               isViewOnly={isViewOnly}
               onRequestRoleSignIn={() => setIsRoleModalOpen(true)}
               onNavigate={onNavigate}
-            />
+              />
           )}
 
           {/* Check-Ins & Tables Tab */}
@@ -593,7 +594,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               isViewOnly={isViewOnly}
               onRequestRoleSignIn={() => setIsRoleModalOpen(true)}
               onNavigate={onNavigate}
-            />
+              />
           )}
 
           {/* Settings & Configurations Tab */}
@@ -605,7 +606,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               isViewOnly={isViewOnly}
               onRequestRoleSignIn={() => setIsRoleModalOpen(true)}
               onNavigate={onNavigate}
-            />
+              />
           )}
 
           {/* Business Details & Profile Tab */}

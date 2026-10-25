@@ -50,6 +50,7 @@ interface SidebarProps {
   onSwitchRole: () => void;
   onOpenAddBranch?: () => void;
   onNavigate: (route: string) => void;
+  className?: string;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -61,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSwitchRole,
   onOpenAddBranch,
   onNavigate,
+  className = '',
 }) => {
   const { user, logout, activeBusiness } = useAuth();
   const [unreadNotifications, setUnreadNotifications] = useState(1);
@@ -81,8 +83,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       visible: canAccessTab(subject, 'overview'),
     },
     {
+      id: 'account' as DashboardTab,
+      label: 'Business Details',
+      icon: Store,
+      badge: null,
+      visible: canAccessTab(subject, 'account'),
+    },
+    {
       id: 'operations' as DashboardTab,
-      label: 'Business Operation',
+      label: 'Business Operations',
       icon: ClipboardList,
       badge: null,
       visible: canAccessTab(subject, 'operations'),
@@ -137,23 +146,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: null,
       visible: canAccessTab(subject, 'configurations'),
     },
-    {
-      id: 'account' as DashboardTab,
-      label: 'Business Details',
-      icon: Store,
-      badge: null,
-      visible: canAccessTab(subject, 'account'),
-    },
   ];
 
   return (
     <aside
       className={`relative z-30 flex flex-col bg-white border-r border-zinc-200 transition-all duration-300 select-none ${
         isCollapsed ? 'w-20' : 'w-64'
-      } h-screen shrink-0 shadow-sm`}
+      } h-full md:h-screen shrink-0 shadow-sm ${className}`}
     >
       {/* Top Header: Logo + Collapse Button */}
-      <div className="flex items-center justify-between px-4 h-16 border-b border-zinc-100">
+      <div className="flex items-center justify-between px-4 h-16 border-b border-zinc-100 shrink-0">
         {!isCollapsed ? (
           <div className="flex items-center gap-2.5 overflow-hidden cursor-pointer" onClick={() => onSelectTab('overview')}>
             <img
@@ -192,7 +194,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Business Profile Selector Card */}
       {!isCollapsed ? (
-        <div className="p-3 mx-3 mt-3 rounded-2xl bg-zinc-50 border border-zinc-200/80">
+        <div className="p-3 mx-3 mt-3 rounded-2xl bg-zinc-50 border border-zinc-200/80 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 text-amber-800 flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs">
               {businessName.slice(0, 2).toUpperCase()}
@@ -217,7 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
       ) : (
-        <div className="py-3 flex justify-center">
+        <div className="py-3 flex justify-center shrink-0">
           <div 
             className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 text-amber-800 flex items-center justify-center font-bold text-sm cursor-pointer shadow-2xs"
             title={`${businessName} (Verified)`}
@@ -228,7 +230,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       {/* Navigation Links */}
-      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-1 scrollbar-none">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-1 scrollbar-none">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -276,7 +278,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       {/* Bottom User Card */}
-      <div className="p-3 border-t border-zinc-200/80 bg-zinc-50/70">
+      <div className="p-3 border-t border-zinc-200/80 bg-zinc-50/70 shrink-0 mt-auto pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         {!isCollapsed ? (
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">

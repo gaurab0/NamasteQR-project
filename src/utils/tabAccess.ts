@@ -24,6 +24,7 @@ const TAB_SET: ReadonlySet<string> = new Set<string>(TAB_PERMISSION_IDS);
  */
 export const SIDEBAR_TAB_ORDER = [
   'overview',
+  'account',
   'operations',
   'kds',
   'waiter',
@@ -32,7 +33,6 @@ export const SIDEBAR_TAB_ORDER = [
   'billing',
   'team',
   'configurations',
-  'account',
 ] as const;
 
 export type SidebarTabId = (typeof SIDEBAR_TAB_ORDER)[number];
