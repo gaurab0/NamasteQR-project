@@ -112,6 +112,12 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
           {/* Invoice Meta */}
           <div className="space-y-1 text-[11px]">
             <div className="flex justify-between">
+              <span className="text-zinc-500">Order No:</span>
+              <span className="font-bold text-zinc-900">
+                {sale.order_number || (sale.order_id ? (sale.order_id.replace(/^order-(pos-)?/, '').slice(0, 8).toUpperCase()) : (sale.id ? String(sale.id).slice(0, 8).toUpperCase() : 'ORD'))}
+              </span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-zinc-500">{taxConfig?.invoice_prefix ? taxConfig.invoice_prefix + ' Invoice:' : 'Invoice No.:'}</span>
               <span className="font-bold text-zinc-900">{sale.invoice_number}</span>
             </div>

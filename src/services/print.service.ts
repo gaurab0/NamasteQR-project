@@ -329,6 +329,7 @@ class PrintService {
           <div class="header">
             <h2>TAX INVOICE / RECEIPT</h2>
             <h1>Order #${orderNumber}</h1>
+            ${data.invoice_number ? `<div>Invoice: ${data.invoice_number}</div>` : ''}
             <div>Table: ${tableNo}</div>
             <div>Time: ${time} | Server: ${serverName}</div>
           </div>

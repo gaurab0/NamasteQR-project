@@ -280,6 +280,9 @@ export class EscPosEncoder {
       : new Date(data.created_at || Date.now()).toLocaleString();
 
     encoder.row(`Order #: ${orderNo}`, `Table: ${tableNo}`, cols);
+    if (data.invoice_number) {
+      encoder.row(`Invoice #: ${data.invoice_number}`, '', cols);
+    }
     encoder.row(`Date: ${dateStr.slice(0, 20)}`, `Staff: ${serverName}`, cols);
 
     if (data.customer_name) {
