@@ -265,6 +265,43 @@ class PostgresDatabaseStore {
     });
   }
 
+  async deleteBranch(branchId: string): Promise<boolean> {
+    const branch = await this.findBusinessById(branchId);
+    if (!branch) return false;
+    if (!branch.parent_business_id) {
+      throw new Error('Primary HQ business cannot be deleted.');
+    }
+
+    // 1. Remove from memory cache
+    this.businesses.delete(branchId);
+    for (const [id, user] of this.users.entries()) {
+      if (user.business_id === branchId) {
+        this.users.delete(id);
+      }
+    }
+
+    // 2. Remove from Prisma persistent database
+    try {
+      await prisma.menuItem.deleteMany({ where: { business_id: branchId } });
+      await prisma.menuCategory.deleteMany({ where: { business_id: branchId } });
+      await prisma.restaurantTable.deleteMany({ where: { business_id: branchId } });
+      await prisma.tableOrder.deleteMany({ where: { business_id: branchId } });
+      await prisma.sale.deleteMany({ where: { business_id: branchId } });
+      await prisma.gLAccount.deleteMany({ where: { business_id: branchId } });
+      await prisma.serviceRequest.deleteMany({ where: { business_id: branchId } });
+      await prisma.counter.deleteMany({ where: { business_id: branchId } });
+      await prisma.taxConfig.deleteMany({ where: { business_id: branchId } });
+      await prisma.operationalDay.deleteMany({ where: { business_id: branchId } });
+      await prisma.checkIn.deleteMany({ where: { business_id: branchId } });
+      await prisma.user.deleteMany({ where: { business_id: branchId } });
+      await prisma.business.delete({ where: { id: branchId } });
+    } catch (err: any) {
+      console.warn('Prisma branch deletion cascade notice:', err.message);
+    }
+
+    return true;
+  }
+
   async ensureBusiness(id: string, name?: string, type?: BusinessType, extra?: Partial<Business>): Promise<Business> {
     if (this.businesses.has(id)) {
       return this.businesses.get(id)!;

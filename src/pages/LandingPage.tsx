@@ -94,8 +94,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
     },
     {
       step: '02',
-      title: 'Guests Scan & Order Together',
-      shortDesc: 'No app download. Diners view rich photos, dietary tags, and collaborate on a shared cart.',
+      title: 'Guests Scan & Order Instantly',
+      shortDesc: 'No app download required. Diners view rich photos, customize preferences, and place orders directly in seconds.',
       badge: 'Step 2: Dining',
       preview: {
         headline: 'Interactive Mobile Digital Menu',
@@ -103,9 +103,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
         content: (
           <div className="space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-zinc-200">
-              <span className="text-xs font-bold text-zinc-500 uppercase">Shared Table Cart</span>
+              <span className="text-xs font-bold text-zinc-500 uppercase">Live Table Order</span>
               <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
-                2 Diners Connected
+                Table #04 • Active
               </span>
             </div>
             <div className="space-y-2">
@@ -565,11 +565,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
             {/* Feature 3 */}
             <div className="space-y-2">
               <div className="w-12 h-12 rounded-2xl bg-emerald-100/70 text-emerald-700 flex items-center justify-center shadow-2xs">
-                <Users className="w-6 h-6" />
+                <Zap className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold text-zinc-900">Multi-Guest Shared Cart</h3>
+              <h3 className="text-lg font-bold text-zinc-900">Seamless Table-Side Ordering</h3>
               <p className="text-sm text-zinc-600 leading-relaxed">
-                Friends dining together at Table 6 can all add items simultaneously from their own phones into one unified table ticket.
+                Guests browse rich menus, customize dishes with special kitchen instructions, and send orders directly from their table in seconds—shortening wait times and accelerating turnover.
               </p>
             </div>
           </div>

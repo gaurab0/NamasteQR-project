@@ -3,6 +3,7 @@ import { authenticate, optionalAuthenticate, AuthenticatedRequest, assertBusines
 import { customerDiningLimiter } from '../middleware/rateLimit.middleware';
 import { rbacService } from '../services/rbac.service';
 import { db } from '../services/db.service';
+import { auditService } from '../services/audit.service';
 import {
   createGuestContext,
   createSystemContext,
@@ -320,6 +321,89 @@ router.post(['/branches', '/branch'], authenticate, async (req: AuthenticatedReq
     return res.status(500).json({
       success: false,
       error: { code: 'BRANCH_CREATION_FAILED', message: err.message }
+    });
+  }
+});
+
+/**
+ * DELETE /api/rbac/branches & /api/rbac/branch
+ * Permanently deletes a franchise branch
+ */
+router.delete(['/branches/:branchId(*)', '/branch/:branchId(*)', '/branches', '/branch'], authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Authentication required' }
+      });
+    }
+
+    const isOwnerOrAdmin = isOwnerSubject(user);
+    if (!isOwnerOrAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Only Business Owners and Admins can delete franchise branches.' }
+      });
+    }
+
+    const branchId = req.params.branchId || (req.query.branchId as string) || (req.body?.branchId as string);
+    if (!branchId || typeof branchId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Branch ID is required for deletion.' }
+      });
+    }
+
+    const branch = await db.findBusinessById(branchId);
+    if (!branch) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'BRANCH_NOT_FOUND', message: 'Franchise branch not found.' }
+      });
+    }
+
+    if (!branch.parent_business_id) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'CANNOT_DELETE_HQ', message: 'Primary HQ business location cannot be deleted.' }
+      });
+    }
+
+    // Verify ownership
+    const parentBusinessId = user.business?.id || 'maya-forest-resort';
+    if (branch.owner_uid && branch.owner_uid !== user.id && branch.parent_business_id !== parentBusinessId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You do not have permission to delete this franchise branch.' }
+      });
+    }
+
+    const deleted = await db.deleteBranch(branchId);
+    if (!deleted) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'BRANCH_DELETION_FAILED', message: 'Unable to delete branch.' }
+      });
+    }
+
+    auditService.log({
+      userId: user.id,
+      email: user.email,
+      businessId: branch.parent_business_id || parentBusinessId,
+      eventType: 'FRANCHISE_BRANCH_DELETED',
+      status: `BRANCH_${branchId}_DELETED_BY_${user.email}`,
+    });
+
+    return res.json({
+      success: true,
+      data: { id: branchId },
+      message: `Franchise branch '${branch.name}' has been permanently deleted.`
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: { code: 'BRANCH_DELETION_FAILED', message: err.message }
     });
   }
 });

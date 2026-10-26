@@ -128,14 +128,14 @@ export const CustomerMenuPhoneMockup: React.FC<CustomerMenuPhoneMockupProps> = (
 
                 <div className="relative z-10 px-3 py-2 flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-amber-700 flex flex-col items-center justify-center text-white font-black shadow-md border border-white/20 shrink-0">
-                    <span className="text-sm font-black leading-none">7S</span>
-                    <span className="text-[6px] tracking-widest uppercase opacity-90">BISTRO</span>
+                    <span className="text-xs font-black leading-none">NR</span>
+                    <span className="text-[6px] tracking-widest uppercase opacity-90">RESTO</span>
                   </div>
 
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <h4 className="text-xs font-black text-white truncate drop-shadow-sm">
-                        7 Spices Bistro & Bar
+                        Namaste Resto & Bar
                       </h4>
                       <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[8px] font-bold bg-white/15 text-white border border-white/25 backdrop-blur-md shadow-xs select-none">
                         <Globe className="w-2.5 h-2.5 text-amber-400 shrink-0" />
@@ -392,13 +392,13 @@ export const CustomerMenuPhoneMockup: React.FC<CustomerMenuPhoneMockupProps> = (
                       Table #4 • In Service
                     </div>
                     <div className="text-[10px] text-zinc-400 flex items-center gap-1">
-                      <Users className="w-2.5 h-2.5 text-blue-400" /> 3 Guests Connected
+                      <Clock className="w-2.5 h-2.5 text-blue-400" /> Active Table Order
                     </div>
                   </div>
                 </div>
 
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-400/40">
-                  Shared Ticket
+                  Live Ticket
                 </span>
               </div>
 
@@ -467,7 +467,7 @@ export const CustomerMenuPhoneMockup: React.FC<CustomerMenuPhoneMockupProps> = (
 
                 <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-center text-[11px] font-bold flex items-center justify-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>All devices synced via WebSockets</span>
+                  <span>Live order status updated via WebSockets</span>
                 </div>
               </div>
 

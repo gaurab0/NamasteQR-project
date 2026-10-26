@@ -947,6 +947,18 @@ export class ClientRBACService {
     return { branch: data.data, cloneStats: data.cloneStats };
   }
 
+  public async deleteBranchApi(branchId: string): Promise<{ success: boolean; message: string }> {
+    const params = new URLSearchParams({ branchId });
+    const res = await fetch(`/api/business/branches?${params.toString()}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders(),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Failed to delete franchise branch');
+    return data;
+  }
+
   public async confirmTableOrderPaymentApi(orderId: string, businessId: string, paymentMethod: string, notes?: string): Promise<any> {
     const res = await fetch(`/api/rbac/orders/${orderId}/confirm-payment`, {
       method: 'POST',
