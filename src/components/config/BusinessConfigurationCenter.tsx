@@ -105,6 +105,24 @@ interface ConfigurationNavOption {
 
 const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   {
+    id: 'business_profile',
+    label: 'Business Details & Hours',
+    shortLabel: 'Profile',
+    description: 'Registered trade name, tagline, dining area, and kitchen hours.',
+    icon: <Building2 className="w-4 h-4" />,
+    badge: 'Core Details',
+    badgeColor: 'bg-zinc-100 text-zinc-800 border-zinc-200',
+  },
+  {
+    id: 'date_localization',
+    label: 'Operations & Localization',
+    shortLabel: 'Localization',
+    description: 'Configure Nepali and English date & time formats for the app and billing.',
+    icon: <Globe className="w-4 h-4" />,
+    badge: 'Localization',
+    badgeColor: 'bg-orange-100 text-orange-800 border-orange-200',
+  },
+  {
     id: 'menu',
     label: 'Menu & Dish Catalog',
     shortLabel: 'Menu',
@@ -150,24 +168,6 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
     badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
   },
   {
-    id: 'business_profile',
-    label: 'Business Details & Hours',
-    shortLabel: 'Profile',
-    description: 'Registered trade name, tagline, dining area, and kitchen hours.',
-    icon: <Building2 className="w-4 h-4" />,
-    badge: 'Core Details',
-    badgeColor: 'bg-zinc-100 text-zinc-800 border-zinc-200',
-  },
-  {
-    id: 'franchise',
-    label: 'Franchise & Multi-Branch',
-    shortLabel: 'Branches',
-    description: 'Manage multiple restaurant outlets and branch codes.',
-    icon: <Store className="w-4 h-4" />,
-    badge: 'Multi-Unit',
-    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-  },
-  {
     id: 'team',
     label: 'Staff Roles & Security PINs',
     shortLabel: 'Staff Roles',
@@ -175,6 +175,15 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
     icon: <Users className="w-4 h-4" />,
     badge: 'Security',
     badgeColor: 'bg-cyan-100 text-cyan-800 border-cyan-200',
+  },
+  {
+    id: 'hardware',
+    label: 'Hardware & Printers',
+    shortLabel: 'Hardware',
+    description: 'Configure receipt printers, KOT routing, and KDS mode.',
+    icon: <Printer className="w-4 h-4" />,
+    badge: 'Devices',
+    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   },
   {
     id: 'audit',
@@ -186,22 +195,13 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
     badgeColor: 'bg-slate-100 text-slate-800 border-slate-200',
   },
   {
-    id: 'date_localization',
-    label: 'Operations & Localization',
-    shortLabel: 'Localization',
-    description: 'Configure Nepali and English date & time formats for the app and billing.',
-    icon: <Globe className="w-4 h-4" />,
-    badge: 'Localization',
-    badgeColor: 'bg-orange-100 text-orange-800 border-orange-200',
-  },
-  {
-    id: 'hardware',
-    label: 'Hardware & Printers',
-    shortLabel: 'Hardware',
-    description: 'Configure receipt printers, KOT routing, and KDS mode.',
-    icon: <Printer className="w-4 h-4" />,
-    badge: 'Devices',
-    badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    id: 'franchise',
+    label: 'Franchise & Multi-Branch',
+    shortLabel: 'Branches',
+    description: 'Manage multiple restaurant outlets and branch codes.',
+    icon: <Store className="w-4 h-4" />,
+    badge: 'Multi-Unit',
+    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
   },
 ];
 
@@ -222,7 +222,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   isViewOnly = false,
   onRequestRoleSignIn,
   onNavigate,
-  initialDomain = 'menu',
+  initialDomain = 'business_profile',
 }) => {
   const { updateBusiness } = useAuth();
   const [activeDomain, setActiveDomain] = useState<ConfigurationDomain>(initialDomain);
