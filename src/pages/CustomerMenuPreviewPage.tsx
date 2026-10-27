@@ -298,6 +298,8 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     saveCustomerLanguage(newLang);
     setSelectedLanguage(newLang);
     applyLanguage(newLang);
+    // Reload ensures Google Translate initializes and translates 100% of DOM nodes cleanly
+    window.location.reload();
   };
   const formatPaymentMode = (pm?: string) => {
     if (!pm) return 'Cash';

@@ -70,6 +70,25 @@
         z-index: -9999 !important;
       }
     </style>
+    <script>
+      // Prevent React crash when Google Translate wraps DOM text nodes in <font>
+      if (typeof window !== 'undefined') {
+        var _origInsertBefore = Node.prototype.insertBefore;
+        Node.prototype.insertBefore = function (newNode, refNode) {
+          if (refNode && refNode.parentNode !== this) {
+            return this.appendChild(newNode);
+          }
+          return _origInsertBefore.call(this, newNode, refNode);
+        };
+        var _origRemoveChild = Node.prototype.removeChild;
+        Node.prototype.removeChild = function (child) {
+          if (child && child.parentNode !== this) {
+            return child;
+          }
+          return _origRemoveChild.call(this, child);
+        };
+      }
+    </script>
   </head>
   <body>
     <div id="google_translate_element" style="position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-9999"></div>

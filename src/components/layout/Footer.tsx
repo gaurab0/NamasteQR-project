@@ -218,24 +218,24 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onBookDemo }) => {
               <div className="flex items-center gap-3 p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800">
                 <MessageSquare className="w-4 h-4 text-emerald-400 shrink-0" />
                 <div>
-                  <span className="text-zinc-500 block text-[11px]">Customer Concierge Hotline</span>
-                  <span className="font-mono text-white">+1 (555) 019-2834</span>
+                  <span className="text-zinc-500 block text-[11px]">Customer care</span>
+                  <a href="tel:+9779742540787" className="font-mono text-white hover:text-amber-400 transition-colors">+977 9742540787</a>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800">
                 <Phone className="w-4 h-4 text-blue-400 shrink-0" />
                 <div>
-                  <span className="text-zinc-500 block text-[11px]">Toll-Free Enterprise Support</span>
-                  <span className="font-mono text-white">+1 (800) 555-SERV</span>
+                  <span className="text-zinc-500 block text-[11px]">Sales department</span>
+                  <a href="tel:+9779851072344" className="font-mono text-white hover:text-amber-400 transition-colors">+977 9851072344</a>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 p-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800">
                 <MapPin className="w-4 h-4 text-rose-400 shrink-0" />
                 <div>
-                  <span className="text-zinc-500 block text-[11px]">Global Headquarters</span>
-                  <span className="text-zinc-300">100 Hospitality Way, Suite 400, San Francisco, CA 94105</span>
+                  <span className="text-zinc-500 block text-[11px]">Headquarters</span>
+                  <span className="text-zinc-300">Sitapaila, Kathmandu, Nepal</span>
                 </div>
               </div>
             </div>

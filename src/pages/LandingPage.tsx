@@ -221,8 +221,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
       a: 'Never. Customers simply open their standard phone camera (iOS or Android) and scan the QR code at their table. The full dynamic menu opens instantly in mobile Safari or Chrome with zero downloads and zero app store friction.',
     },
     {
-      q: 'Can multiple people at the same table order together?',
-      a: 'Yes! NamasteQR features real-time collaborative table sessions. All guests dining at Table 4 can view the menu simultaneously, add their favorite dishes to the shared table cart, and submit orders together or in rounds.',
+      q: 'How does table-side QR ordering work for guests?',
+      a: 'Guests simply scan the unique QR code on their table to browse the visual digital menu, view food photos, customize dietary preferences, and place orders directly. Every order is routed immediately to the kitchen display (KDS) tagged with the exact table number.',
     },
     {
       q: 'Do I need expensive or proprietary POS hardware?',
