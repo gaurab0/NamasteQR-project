@@ -1590,13 +1590,17 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [activeDropdownIndex, setActiveDropdownIndex] = useState<number | null>(null);
   const [searchHighlightIndex, setSearchHighlightIndex] = useState<number>(0);
   const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const mobileDropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const highlightedItemRef = useRef<HTMLDivElement | null>(null);
+  const mobileHighlightedItemRef = useRef<HTMLDivElement | null>(null);
   const itemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const mobileItemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Auto-scroll highlighted menu item into view
   useEffect(() => {
-    if (highlightedItemRef.current) {
-      highlightedItemRef.current.scrollIntoView({
+    const el = highlightedItemRef.current || mobileHighlightedItemRef.current;
+    if (el) {
+      el.scrollIntoView({
         block: 'nearest',
         inline: 'nearest',
       });
@@ -1606,10 +1610,10 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   // Click outside to dismiss autocomplete dropdown (pointerdown works cleanly across mouse and touch devices)
   useEffect(() => {
     const handleOutsideClick = (e: PointerEvent | MouseEvent) => {
-      if (
-        dropdownContainerRef.current &&
-        !dropdownContainerRef.current.contains(e.target as Node)
-      ) {
+      const target = e.target as Node;
+      const inDesktop = dropdownContainerRef.current && dropdownContainerRef.current.contains(target);
+      const inMobile = mobileDropdownContainerRef.current && mobileDropdownContainerRef.current.contains(target);
+      if (!inDesktop && !inMobile) {
         setActiveDropdownIndex(null);
       }
     };
@@ -1696,9 +1700,12 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     setActiveDropdownIndex(null);
     setSearchHighlightIndex(0);
 
-    // Auto-focus next empty item input smoothly
+    // Auto-focus next empty item input smoothly on either mobile or desktop
     setTimeout(() => {
-      const nextInput = itemInputRefs.current[rowIdx + 1];
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+      const nextInput = isMobile
+        ? mobileItemInputRefs.current[rowIdx + 1]
+        : itemInputRefs.current[rowIdx + 1];
       if (nextInput) {
         nextInput.focus();
       }
@@ -1765,6 +1772,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
   const handleAddItem = () => {
     const newId = `item-${Date.now()}`;
+    const nextIdx = items.length;
     setItems((prev) => [
       ...prev,
       {
@@ -1780,16 +1788,130 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     ]);
     setActiveDropdownIndex(null);
     setSearchHighlightIndex(0);
+
+    setTimeout(() => {
+      const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+      const el = isMobile ? mobileItemInputRefs.current[nextIdx] : itemInputRefs.current[nextIdx];
+      if (el) el.focus();
+    }, 60);
   };
 
   const handleRemoveItem = (index: number) => {
-    if (items.length <= 1) return;
+    if (items.length <= 1) {
+      const newId = `item-${Date.now()}-0`;
+      setItems([
+        {
+          id: newId,
+          item_id: newId,
+          name: '',
+          quantity: 1,
+          price: 0,
+          unit_price: 0,
+          subtotal: 0,
+          total_price: 0,
+        },
+      ]);
+      setActiveDropdownIndex(null);
+      return;
+    }
     setItems((prev) => prev.filter((_, i) => i !== index));
     if (activeDropdownIndex === index) {
       setActiveDropdownIndex(null);
     } else if (activeDropdownIndex !== null && activeDropdownIndex > index) {
       setActiveDropdownIndex(activeDropdownIndex - 1);
     }
+  };
+
+  const renderMenuDropdown = (idx: number, isMobile = false) => {
+    if (activeDropdownIndex !== idx || !(items[idx]?.name || '').trim().length) return null;
+
+    return (
+      <div
+        className={`absolute left-0 top-full mt-1.5 w-full ${
+          isMobile ? 'min-w-[280px] max-w-full' : 'min-w-[260px] sm:min-w-[320px] max-w-sm'
+        } max-h-56 overflow-y-auto bg-white rounded-xl border border-zinc-200/90 shadow-xl z-50 divide-y divide-zinc-100 animate-in fade-in zoom-in-95 duration-100`}
+      >
+        {filteredMenuMatches.length === 0 ? (
+          <div className="p-3 text-center text-xs text-zinc-500">
+            <p className="font-medium text-zinc-700">No menu dishes found</p>
+            <p className="text-[11px] text-zinc-400 mt-0.5">
+              Press Enter to keep "{(items[idx]?.name || '').trim()}" as custom item
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="px-2.5 py-1 bg-zinc-50 flex items-center justify-between text-[10px] font-semibold text-zinc-500 tracking-wider border-b border-zinc-100 sticky top-0 z-10">
+              <span className="flex items-center gap-1">
+                <Utensils className="w-3 h-3 text-amber-600" />
+                Menu Matches
+              </span>
+              <span className="text-zinc-400 font-normal">
+                {filteredMenuMatches.length} {filteredMenuMatches.length === 1 ? 'item' : 'items'}
+              </span>
+            </div>
+            {filteredMenuMatches.map((cand, candIdx) => {
+              const isHighlighted = searchHighlightIndex === candIdx;
+              return (
+                <div
+                  key={cand.id}
+                  ref={isHighlighted ? (isMobile ? mobileHighlightedItemRef : highlightedItemRef) : undefined}
+                  role="button"
+                  tabIndex={0}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleSelectMenuItem(idx, cand);
+                  }}
+                  onClick={() => handleSelectMenuItem(idx, cand)}
+                  onMouseEnter={() => setSearchHighlightIndex(candIdx)}
+                  className={`px-3 py-2 flex items-center justify-between gap-2.5 cursor-pointer transition-colors ${
+                    isHighlighted
+                      ? 'bg-amber-50 text-amber-950 font-medium'
+                      : 'hover:bg-zinc-50 text-zinc-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                        cand.food_type === 'veg'
+                          ? 'bg-emerald-500 ring-2 ring-emerald-100'
+                          : cand.food_type === 'non-veg'
+                          ? 'bg-rose-500 ring-2 ring-rose-100'
+                          : 'bg-zinc-300'
+                      }`}
+                      title={
+                        cand.food_type === 'veg'
+                          ? 'Vegetarian'
+                          : cand.food_type === 'non-veg'
+                          ? 'Non-Vegetarian'
+                          : 'Dish'
+                      }
+                    />
+                    <div className="truncate">
+                      <div className="text-xs leading-snug truncate font-medium text-zinc-900">
+                        {cand.name}
+                      </div>
+                      {cand.category && (
+                        <div className="text-[10px] text-zinc-400 font-normal truncate">
+                          {cand.category}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="font-bold text-xs text-amber-700">
+                      {currency} {cand.price.toFixed(2)}
+                    </span>
+                    {!cand.is_available && (
+                      <div className="text-[9px] text-rose-500 font-medium">Out of stock</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    );
   };
 
   // Calculations (Supports both Exclusive of VAT% and Inclusive of VAT% modes; Discounts are deducted from Grand Total without combining with VAT)
@@ -2116,7 +2238,160 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </button>
           </div>
 
-          <div className="border border-zinc-200 rounded-xl overflow-visible">
+          {/* Mobile Ordered Items List (sm:hidden) */}
+          <div className="sm:hidden space-y-2.5">
+            {items.map((item, idx) => (
+              <div
+                key={item.id}
+                className={`p-3 rounded-xl border transition-all ${
+                  activeDropdownIndex === idx
+                    ? 'border-amber-400 ring-2 ring-amber-100 bg-white relative z-40'
+                    : 'border-zinc-200 bg-zinc-50/70 hover:bg-zinc-50'
+                }`}
+              >
+                {/* Row 1: Item Name Search + Delete */}
+                <div className="flex items-center gap-2">
+                  <div
+                    ref={activeDropdownIndex === idx ? mobileDropdownContainerRef : undefined}
+                    className="relative flex-1"
+                  >
+                    <input
+                      ref={(el) => {
+                        mobileItemInputRefs.current[idx] = el;
+                      }}
+                      type="text"
+                      value={item.name}
+                      onChange={(e) => {
+                        handleItemChange(idx, 'name', e.target.value);
+                        setActiveDropdownIndex(idx);
+                        setSearchHighlightIndex(0);
+                      }}
+                      onFocus={() => {
+                        if ((item.name || '').trim().length > 0) {
+                          setActiveDropdownIndex(idx);
+                          setSearchHighlightIndex(0);
+                        }
+                      }}
+                      onKeyDown={(e) => handleInputKeyDown(e, idx)}
+                      placeholder="Type dish name (e.g. Chicken...)"
+                      className="w-full px-3 py-2 rounded-lg border border-zinc-200 font-medium text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white shadow-2xs"
+                    />
+
+                    {renderMenuDropdown(idx, true)}
+                  </div>
+
+                  {(items.length > 1 || (item.name && item.name.trim() !== '') || (Number(item.price) || 0) > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveItem(idx)}
+                      className="p-2 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors shrink-0 cursor-pointer"
+                      title="Remove item"
+                      aria-label="Remove item"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Row 2: Qty Stepper, Price, Subtotal */}
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-zinc-200/60">
+                  {/* Quantity Stepper */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      Qty
+                    </span>
+                    <div className="inline-flex items-center justify-center border border-zinc-200 rounded-lg bg-white shadow-2xs overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleItemChange(
+                            idx,
+                            'quantity',
+                            Math.max(1, (Number(item.quantity) || 1) - 1)
+                          )
+                        }
+                        disabled={(Number(item.quantity) || 1) <= 1}
+                        className="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
+                        title="Decrease quantity"
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        value={item.quantity}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            handleItemChange(idx, 'quantity', '' as any);
+                          } else {
+                            const val = parseInt(raw, 10);
+                            handleItemChange(idx, 'quantity', isNaN(val) ? 1 : val);
+                          }
+                        }}
+                        onBlur={() => {
+                          const val = parseInt(String(item.quantity), 10);
+                          handleItemChange(idx, 'quantity', isNaN(val) || val < 1 ? 1 : val);
+                        }}
+                        className="w-9 py-1 text-center font-bold text-xs bg-white text-zinc-900 border-x border-zinc-200 focus:outline-none focus:ring-1 focus:ring-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleItemChange(idx, 'quantity', (Number(item.quantity) || 1) + 1)
+                        }
+                        className="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 active:scale-95 transition-all cursor-pointer select-none touch-manipulation"
+                        title="Increase quantity"
+                        aria-label="Increase quantity"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Price */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                      Price
+                    </span>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-zinc-400 pointer-events-none">
+                        {currency}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        inputMode="decimal"
+                        value={item.unit_price ?? item.price ?? 0}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) =>
+                          handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
+                        }
+                        className="w-20 pl-6 pr-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Subtotal */}
+                  <div className="text-right pl-1 min-w-[70px]">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block leading-none mb-0.5">
+                      Total
+                    </span>
+                    <span className="font-bold text-xs text-zinc-900">
+                      {currency} {(item.total_price || 0).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Ordered Items Table (hidden sm:block) */}
+          <div className="hidden sm:block border border-zinc-200 rounded-xl overflow-visible">
             <table className="w-full text-xs text-left">
               <thead className="bg-zinc-100 text-zinc-600 font-bold uppercase text-[10px]">
                 <tr>
@@ -2158,88 +2433,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 font-medium text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                         />
 
-                        {/* Floating Autocomplete Dropdown Pop-up */}
-                        {activeDropdownIndex === idx && (item.name || '').trim().length > 0 && (
-                          <div className="absolute left-0 top-full mt-1 w-full min-w-[260px] sm:min-w-[320px] max-w-sm max-h-56 overflow-y-auto bg-white rounded-xl border border-zinc-200/90 shadow-xl z-50 divide-y divide-zinc-100 animate-in fade-in zoom-in-95 duration-100">
-                            {filteredMenuMatches.length === 0 ? (
-                              <div className="p-3 text-center text-xs text-zinc-500">
-                                <p className="font-medium text-zinc-700">No menu dishes found</p>
-                                <p className="text-[11px] text-zinc-400 mt-0.5">Press Enter to keep "{(item.name || '').trim()}" as custom item</p>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="px-2.5 py-1 bg-zinc-50 flex items-center justify-between text-[10px] font-semibold text-zinc-500 tracking-wider border-b border-zinc-100 sticky top-0 z-10">
-                                  <span className="flex items-center gap-1">
-                                    <Utensils className="w-3 h-3 text-amber-600" />
-                                    Menu Matches
-                                  </span>
-                                  <span className="text-zinc-400 font-normal">
-                                    {filteredMenuMatches.length} {filteredMenuMatches.length === 1 ? 'item' : 'items'}
-                                  </span>
-                                </div>
-                                {filteredMenuMatches.map((cand, candIdx) => {
-                                  const isHighlighted = searchHighlightIndex === candIdx;
-                                  return (
-                                    <div
-                                      key={cand.id}
-                                      ref={isHighlighted ? highlightedItemRef : undefined}
-                                      role="button"
-                                      tabIndex={0}
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        handleSelectMenuItem(idx, cand);
-                                      }}
-                                      onClick={() => handleSelectMenuItem(idx, cand)}
-                                      onMouseEnter={() => setSearchHighlightIndex(candIdx)}
-                                      className={`px-3 py-2 flex items-center justify-between gap-2.5 cursor-pointer transition-colors ${
-                                        isHighlighted
-                                          ? 'bg-amber-50 text-amber-950 font-medium'
-                                          : 'hover:bg-zinc-50 text-zinc-800'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <span
-                                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                                            cand.food_type === 'veg'
-                                              ? 'bg-emerald-500 ring-2 ring-emerald-100'
-                                              : cand.food_type === 'non-veg'
-                                              ? 'bg-rose-500 ring-2 ring-rose-100'
-                                              : 'bg-zinc-300'
-                                          }`}
-                                          title={
-                                            cand.food_type === 'veg'
-                                              ? 'Vegetarian'
-                                              : cand.food_type === 'non-veg'
-                                              ? 'Non-Vegetarian'
-                                              : 'Dish'
-                                          }
-                                        />
-                                        <div className="truncate">
-                                          <div className="text-xs leading-snug truncate font-medium text-zinc-900">
-                                            {cand.name}
-                                          </div>
-                                          {cand.category && (
-                                            <div className="text-[10px] text-zinc-400 font-normal truncate">
-                                              {cand.category}
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                      <div className="text-right shrink-0">
-                                        <span className="font-bold text-xs text-amber-700">
-                                          {currency} {cand.price.toFixed(2)}
-                                        </span>
-                                        {!cand.is_available && (
-                                          <div className="text-[9px] text-rose-500 font-medium">Out of stock</div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </>
-                            )}
-                          </div>
-                        )}
+                        {renderMenuDropdown(idx, false)}
                       </div>
                     </td>
 
@@ -2314,11 +2508,13 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       {(item.total_price || 0).toFixed(2)}
                     </td>
                     <td className="p-2 text-center">
-                      {items.length > 1 && (
+                      {(items.length > 1 || (item.name && item.name.trim() !== '') || (Number(item.price) || 0) > 0) && (
                         <button
                           type="button"
                           onClick={() => handleRemoveItem(idx)}
-                          className="text-zinc-400 hover:text-rose-600 p-1 cursor-pointer"
+                          className="text-zinc-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                          title="Remove item"
+                          aria-label="Remove item"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
