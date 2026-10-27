@@ -4,6 +4,7 @@ import { Button } from '../ui/Button';
 import { useAuth } from '../../context/AuthContext';
 import { UserCheck, LogOut, ArrowRight, User, CheckCircle2, Calendar } from 'lucide-react';
 import { StaffRoleLoginModal } from '../team/StaffRoleLoginModal';
+import { UserProfileModal } from '../profile/UserProfileModal';
 import { rbacService } from '../../services/rbac.service';
 import { StaffAccountSession } from '../../types/rbac';
 
@@ -16,6 +17,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBookDemo }) => {
   const { user, isAuthenticated, logout } = useAuth();
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [staffSession, setStaffSession] = useState<StaffAccountSession | null>(() => rbacService.getCurrentStaffSession());
 
   useEffect(() => {
@@ -57,14 +59,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
           {isAuthenticated && user ? (
             <div className="flex items-center gap-2.5">
               {/* User Name & Verified status in place of Franchise box */}
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs select-none">
-                  <User className="w-3.5 h-3.5 text-amber-700" />
-                  <span>{currentUserName}</span>
+              <div className="hidden sm:flex items-center gap-2">
+                <span 
+                  onClick={() => setIsProfileModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs select-none cursor-pointer hover:bg-amber-200 transition"
+                  title="User Profile"
+                >
+                  <User className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span className="max-w-[120px] truncate">{currentUserName}</span>
                 </span>
 
                 <span 
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs select-none"
+                  className="hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs select-none"
                   title="Verified Business Account"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -75,12 +81,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
               <button
                 type="button"
                 id="btn-switch-user-navbar"
-                onClick={() => setIsRoleModalOpen(true)}
+                onClick={() => setIsProfileModalOpen(true)}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow-2xs transition-colors cursor-pointer"
-                title="Switch User / Staff Role"
+                title="User Profile"
               >
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>Switch User</span>
+                <User className="w-3.5 h-3.5" />
+                <span>Profile</span>
               </button>
 
               <Button
@@ -92,6 +98,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
               >
                 <span className="hidden sm:inline">Sign Out</span>
               </Button>
+
+              <UserProfileModal
+                isOpen={isProfileModalOpen}
+                onClose={() => setIsProfileModalOpen(false)}
+              />
 
               <StaffRoleLoginModal
                 isOpen={isRoleModalOpen}

@@ -30,10 +30,10 @@ import { GLAccountsTable } from '../billing/GLAccountsTable';
 import { ExcelSheetPreviewModal } from '../billing/ExcelSheetPreviewModal';
 import { FranchiseBranchList } from '../franchise/FranchiseBranchList';
 import { AddBranchModal } from '../franchise/AddBranchModal';
-import { TeamStaffManagement } from '../team/TeamStaffManagement';
 import { buildSalesWorkbookData, ExcelSheetData } from '../../utils/excelExport';
 
 import {
+  ArrowLeft,
   UtensilsCrossed,
   Paintbrush,
   QrCode,
@@ -88,7 +88,6 @@ export type ConfigurationDomain =
   | 'gl_accounts'
   | 'business_profile'
   | 'franchise'
-  | 'team'
   | 'audit'
   | 'hardware'
   | 'date_localization';
@@ -106,8 +105,8 @@ interface ConfigurationNavOption {
 const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   {
     id: 'business_profile',
-    label: 'Business Details & Hours',
-    shortLabel: 'Profile',
+    label: 'Business Details',
+    shortLabel: 'Business Details',
     description: 'Registered trade name, tagline, dining area, and kitchen hours.',
     icon: <Building2 className="w-4 h-4" />,
     badge: 'Core Details',
@@ -115,8 +114,8 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   },
   {
     id: 'date_localization',
-    label: 'Operations & Localization',
-    shortLabel: 'Localization',
+    label: 'Business Operations',
+    shortLabel: 'Business Operations',
     description: 'Configure Nepali and English date & time formats for the app and billing.',
     icon: <Globe className="w-4 h-4" />,
     badge: 'Localization',
@@ -124,7 +123,7 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   },
   {
     id: 'menu',
-    label: 'Menu & Dish Catalog',
+    label: 'Menu',
     shortLabel: 'Menu',
     description: 'Add dishes, pricing, variants, categories, and availability.',
     icon: <UtensilsCrossed className="w-4 h-4" />,
@@ -142,8 +141,8 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   },
   {
     id: 'tables',
-    label: 'Dining Tables & QR Codes',
-    shortLabel: 'Tables',
+    label: 'Table & Space',
+    shortLabel: 'Table & Space',
     description: 'Add tables, assign floors, capacity, and generate QR cards.',
     icon: <QrCode className="w-4 h-4" />,
     badge: 'Floor Plan',
@@ -151,8 +150,8 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   },
   {
     id: 'taxes',
-    label: 'Taxes, Currency & Invoicing',
-    shortLabel: 'Taxes',
+    label: 'Finance & POS',
+    shortLabel: 'Finance & POS',
     description: 'Configure VAT %, Service Charge, PAN, currency, promo vouchers.',
     icon: <Sliders className="w-4 h-4" />,
     badge: 'Financial',
@@ -166,15 +165,6 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
     icon: <BookOpen className="w-4 h-4" />,
     badge: 'ERP Sync',
     badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
-  },
-  {
-    id: 'team',
-    label: 'Staff Roles & Security PINs',
-    shortLabel: 'Staff Roles',
-    description: 'Staff member role permissions, access control, and PINs.',
-    icon: <Users className="w-4 h-4" />,
-    badge: 'Security',
-    badgeColor: 'bg-cyan-100 text-cyan-800 border-cyan-200',
   },
   {
     id: 'hardware',
@@ -197,7 +187,7 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   {
     id: 'franchise',
     label: 'Franchise & Multi-Branch',
-    shortLabel: 'Branches',
+    shortLabel: 'Franchise',
     description: 'Manage multiple restaurant outlets and branch codes.',
     icon: <Store className="w-4 h-4" />,
     badge: 'Multi-Unit',
@@ -227,6 +217,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   const { updateBusiness } = useAuth();
   const [activeDomain, setActiveDomain] = useState<ConfigurationDomain>(initialDomain);
   const [domainSearchFilter, setDomainSearchFilter] = useState('');
+  const [showMobileDetail, setShowMobileDetail] = useState(false);
 
   const businessId = business?.id || user?.business?.id || 'default-biz';
   const [businessProfile, setBusinessProfile] = useState<Business>(business as Business);
@@ -668,7 +659,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
       {/* Main Configuration Grid: Navigation Sidebar + Configuration Content Area */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Navigation Sidebar (3 Cols on Large) */}
-        <div className="lg:col-span-4 xl:col-span-3 space-y-3 bg-white rounded-3xl p-4 sm:p-5 border border-zinc-200/90 shadow-xs">
+        <div className={`space-y-3 bg-white rounded-3xl p-4 sm:p-5 border border-zinc-200/90 shadow-xs lg:col-span-4 xl:col-span-3 ${showMobileDetail ? 'hidden lg:block' : 'block'}`}>
           {/* Quick Search across Configuration Domains */}
           <div className="relative">
             <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -694,7 +685,11 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                   key={opt.id}
                   id={`nav-config-${opt.id}`}
                   type="button"
-                  onClick={() => setActiveDomain(opt.id)}
+                  onClick={() => {
+                    setActiveDomain(opt.id);
+                    setShowMobileDetail(true);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
                   className={`w-full text-left p-3 rounded-2xl transition-all cursor-pointer flex items-center justify-between gap-3 border ${
                     isActive
                       ? 'bg-amber-50/80 border-amber-300 text-amber-950 font-bold shadow-xs ring-1 ring-amber-400/40'
@@ -721,15 +716,18 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                     </div>
                   </div>
 
-                  {opt.badge && (
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 hidden sm:inline-block ${
-                        opt.badgeColor || 'bg-zinc-100 text-zinc-700'
-                      }`}
-                    >
-                      {opt.badge}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {opt.badge && (
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 hidden sm:inline-block ${
+                          opt.badgeColor || 'bg-zinc-100 text-zinc-700'
+                        }`}
+                      >
+                        {opt.badge}
+                      </span>
+                    )}
+                    <ChevronRight className="w-4 h-4 text-zinc-400 lg:hidden shrink-0" />
+                  </div>
                 </button>
               );
             })}
@@ -737,10 +735,67 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
         </div>
 
         {/* Configuration Detail Body (8-9 Cols on Large) */}
-        <div className="lg:col-span-8 xl:col-span-9 space-y-6">
-          {/* Domain Active Header Bar */}
-          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-zinc-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className={`space-y-6 lg:col-span-8 xl:col-span-9 ${showMobileDetail ? 'block' : 'hidden lg:block'}`}>
+          {/* Mobile Back Navigation & Horizontal Section Switcher */}
+          <div className="lg:hidden space-y-2.5">
+            <div className="flex items-center justify-between gap-3 p-3 bg-white rounded-2xl border border-zinc-200/90 shadow-2xs">
+              <button
+                type="button"
+                id="btn-mobile-back-to-sections"
+                onClick={() => setShowMobileDetail(false)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-800 hover:text-amber-800 bg-zinc-100 hover:bg-zinc-200 active:scale-95 px-3 py-2 rounded-xl transition-all cursor-pointer shadow-2xs"
+              >
+                <ArrowLeft className="w-4 h-4 text-zinc-700" />
+                <span>All Settings</span>
+              </button>
+
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Section:</span>
+                <span className="text-xs font-bold text-amber-900 bg-amber-100/80 border border-amber-300 px-2.5 py-1 rounded-lg truncate max-w-[150px]">
+                  {activeOptionMeta.shortLabel || activeOptionMeta.label}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Horizontal Drawer Strip: tap beside tabs to switch sections directly */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {CONFIG_NAV_OPTIONS.map((opt) => {
+                const isCurrent = opt.id === activeDomain;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveDomain(opt.id);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs ${
+                      isCurrent
+                        ? 'bg-amber-500 text-zinc-950 font-black shadow-xs'
+                        : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
+                    }`}
+                  >
+                    <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">{opt.icon}</span>
+                    <span className="truncate max-w-[130px]">{opt.shortLabel || opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Domain Active Header Bar (Desktop Only) */}
+          <div className="hidden lg:flex bg-white rounded-3xl p-5 sm:p-6 border border-zinc-200 shadow-xs flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
+              <button
+                type="button"
+                onClick={() => setShowMobileDetail(false)}
+                className="lg:hidden w-10 h-10 rounded-2xl bg-zinc-100 hover:bg-zinc-200 text-zinc-700 flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition shadow-2xs"
+                title="Back to all configuration sections"
+                aria-label="Back to all configuration sections"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+
               <div className="w-12 h-12 rounded-2xl bg-amber-500 text-zinc-950 flex items-center justify-center font-black shadow-xs shrink-0">
                 {activeOptionMeta.icon}
               </div>
@@ -831,6 +886,33 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
             <div className="space-y-5 animate-in fade-in duration-200">
               {/* Filter controls */}
               <div className="bg-white rounded-2xl p-4 sm:p-5 border border-zinc-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                {canCreateMenu && (
+                  <div className="flex items-center gap-2 w-full sm:w-auto order-last sm:order-first">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsCategoryManagerOpen(true)}
+                      className="text-xs font-bold cursor-pointer"
+                    >
+                      Manage Categories
+                    </Button>
+                    <Button
+                      id="btn-config-add-dish"
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      onClick={() => {
+                        setMenuItemToEdit(null);
+                        setIsMenuItemFormOpen(true);
+                      }}
+                      leftIcon={<Plus className="w-4 h-4" />}
+                      className="text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-xs"
+                    >
+                      + Add Dish
+                    </Button>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[240px]">
                   <div className="relative flex-1 min-w-[200px]">
                     <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1361,20 +1443,6 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
           {activeDomain === 'franchise' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               <FranchiseBranchList onOpenAddBranch={() => setIsAddBranchModalOpen(true)} />
-            </div>
-          )}
-
-          {/* ========================================================== */}
-          {/* SECTION 8: STAFF ROLES & ACCESS CONTROL                    */}
-          {/* ========================================================== */}
-          {activeDomain === 'team' && (
-            <div className="space-y-4 animate-in fade-in duration-200">
-              <TeamStaffManagement
-                businessId={businessId}
-                currentUserRole={activeRole as AppRole}
-                isViewOnly={isViewOnly}
-                onRequestRoleSignIn={onRequestRoleSignIn}
-              />
             </div>
           )}
 

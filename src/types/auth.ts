@@ -83,6 +83,8 @@ export interface Business {
   current_operational_day?: OperationalDayRecord;
   kds_print_mode?: KdsPrintMode;
   default_language?: string;
+  created_at?: string | Date;
+  updated_at?: string | Date;
 }
 
 export interface UserPhone {
@@ -96,6 +98,7 @@ export interface User {
   id: string;
   name?: string;
   email: string;
+  created_at?: string | Date;
   role: UserRole;
   status: UserStatus;
   /** Tabs this account may open. Owners always have all 11 (see working.md section 19). */

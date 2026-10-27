@@ -133,6 +133,8 @@ export interface AuditLog {
 export interface AuthSessionUser {
   id: string;
   email: string;
+  name?: string;
+  created_at?: Date | string;
   role: UserRole;
   status: UserStatus;
   /** Effective tabs (always populated by the auth middleware). */

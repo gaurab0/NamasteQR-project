@@ -40,10 +40,11 @@ import {
   AlertCircle,
   ChevronDown,
   UserCheck,
+  User,
   LogOut
 } from 'lucide-react';
 import { canAccessTab, getFirstPermittedTab, isBusinessOwner } from '../utils/tabAccess';
-import { BranchSwitcher } from '../components/layout/BranchSwitcher';
+import { UserProfileModal } from '../components/profile/UserProfileModal';
 import { AddBranchModal } from '../components/franchise/AddBranchModal';
 import { FranchiseBranchList } from '../components/franchise/FranchiseBranchList';
 import { BusinessConfigurationCenter } from '../components/config/BusinessConfigurationCenter';
@@ -159,6 +160,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     // Role Authentication / View-Only State
   const [staffSession, setStaffSession] = useState<StaffAccountSession | null>(() => rbacService.getCurrentStaffSession());
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const currentUserName = staffSession?.name || user?.name || user?.email?.split('@')[0] || 'User';
 
   const subject = staffSession ?? user;
@@ -357,7 +359,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             } catch {}
           }}
           staffSession={staffSession}
-          onSwitchRole={() => setIsRoleModalOpen(true)}
+          onSwitchRole={() => setIsProfileModalOpen(true)}
+          onOpenProfile={() => setIsProfileModalOpen(true)}
           onOpenAddBranch={() => setIsAddBranchModalOpen(true)}
           onNavigate={onNavigate}
         />
@@ -382,7 +385,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               staffSession={staffSession}
               onSwitchRole={() => {
                 setIsMobileMenuOpen(false);
-                setIsRoleModalOpen(true);
+                setIsProfileModalOpen(true);
+              }}
+              onOpenProfile={() => {
+                setIsMobileMenuOpen(false);
+                setIsProfileModalOpen(true);
               }}
               onOpenAddBranch={() => {
                 setIsMobileMenuOpen(false);
@@ -447,18 +454,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               <ChevronDown className="w-3 h-3 text-zinc-400 absolute right-2 pointer-events-none" />
             </div>
 
-            {/* Branch Switcher / Analytics */}
-            <BranchSwitcher onOpenAddBranch={() => setIsAddBranchModalOpen(true)} />
-
-            {/* Switch User Button */}
+            {/* User Profile Button */}
             <button
               type="button"
               id="btn-switch-user-header"
-              onClick={() => setIsRoleModalOpen(true)}
+              onClick={() => setIsProfileModalOpen(true)}
               className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition cursor-pointer shadow-2xs shrink-0"
-              title="Switch Staff Designation / Account"
+              title="User Profile"
             >
-              <UserCheck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <User className="w-3.5 h-3.5 text-amber-700 shrink-0" />
               <span className="max-w-[130px] sm:max-w-none truncate">{currentUserName}</span>
             </button>
           </div>
@@ -920,6 +924,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           )}
         </main>
       </div>
+
+      {/* User Profile & Display Name Modal */}
+      <UserProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+      />
 
       {/* Staff Role Sign-In Modal */}
       <StaffRoleLoginModal

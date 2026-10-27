@@ -6,6 +6,7 @@ import { signupSchema, loginSchema, verifyOtpSchema, resetPasswordSchema } from 
 import { generateToken } from '../src/middleware/auth.middleware';
 import jwt from 'jsonwebtoken';
 import { config } from '../src/config/env';
+import { authController } from '../src/controllers/auth.controller';
 
 // Standalone automated test runner that can run via `npm test`
 async function runTests() {
@@ -157,6 +158,206 @@ async function runTests() {
     await db.markPasswordResetTokenUsed(activeRecord.id);
     const reused = await emailService.verifyPasswordResetToken(user.id, token);
     if (reused) throw new Error('Used reset token should not be accepted again');
+  });
+
+  console.log('\n👤 Testing 5: User Profile & Display Name');
+
+  await test('db.updateUserName updates and persists display name', async () => {
+    const biz = await db.createBusiness('Profile Test Restro', 'RESTAURANT');
+    const user = await db.createUser({
+      business_id: biz.id,
+      email: `profile-test-${Date.now()}@example.com`,
+      password_hash: await bcrypt.hash('SecurePassword123!', 10),
+      role: 'RESTAURANT_OWNER',
+    });
+
+    const updated = await db.updateUserName(user.id, 'Chef Gordon');
+    if (!updated) throw new Error('updateUserName returned null');
+    if (updated.name !== 'Chef Gordon') throw new Error(`Expected name 'Chef Gordon', got '${updated.name}'`);
+
+    const fetched = await db.findUserById(user.id);
+    if (!fetched || fetched.name !== 'Chef Gordon') throw new Error(`Fetched user did not have updated name`);
+  });
+
+  await test('authController.updateProfile validates input and updates name', async () => {
+    const biz = await db.createBusiness('Controller Test Restro', 'RESTAURANT');
+    const user = await db.createUser({
+      business_id: biz.id,
+      email: `controller-test-${Date.now()}@example.com`,
+      password_hash: await bcrypt.hash('SecurePassword123!', 10),
+      role: 'RESTAURANT_OWNER',
+    });
+
+    // 1. Unauthorized if req.user missing
+    let unauthStatusCode = 0;
+    const mockRes1: any = {
+      status: (code: number) => {
+        unauthStatusCode = code;
+        return { json: (data: any) => data };
+      },
+    };
+    await authController.updateProfile({ body: { name: 'New Name' } } as any, mockRes1, (() => {}) as any);
+    if (unauthStatusCode !== 401) throw new Error(`Expected 401 for missing user, got ${unauthStatusCode}`);
+
+    // 2. Invalid name (empty or whitespace)
+    let badNameCode = 0;
+    let badNameError = '';
+    const mockRes2: any = {
+      status: (code: number) => {
+        badNameCode = code;
+        return {
+          json: (data: any) => {
+            badNameError = data?.error?.code;
+            return data;
+          },
+        };
+      },
+    };
+    const authReq: any = {
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        business: { id: biz.id, name: biz.name },
+      },
+      body: { name: '   ' },
+    };
+    await authController.updateProfile(authReq, mockRes2, (() => {}) as any);
+    if (badNameCode !== 400 || badNameError !== 'INVALID_NAME') {
+      throw new Error(`Expected 400 INVALID_NAME for empty name, got ${badNameCode} ${badNameError}`);
+    }
+
+    // 3. Valid name update
+    let successCode = 0;
+    let responseData: any = null;
+    const mockRes3: any = {
+      status: (code: number) => {
+        successCode = code;
+        return {
+          json: (data: any) => {
+            responseData = data;
+            return data;
+          },
+        };
+      },
+    };
+    authReq.body = { name: 'Master Chef Ram' };
+    await authController.updateProfile(authReq, mockRes3, (() => {}) as any);
+    if (successCode !== 200 || responseData?.data?.user?.name !== 'Master Chef Ram') {
+      throw new Error(`Expected 200 with name 'Master Chef Ram', got ${successCode} ${JSON.stringify(responseData)}`);
+    }
+
+    // 4. Over 80 characters rejected
+    let tooLongCode = 0;
+    const mockRes4: any = {
+      status: (code: number) => {
+        tooLongCode = code;
+        return { json: (data: any) => data };
+      },
+    };
+    authReq.body = { name: 'A'.repeat(81) };
+    await authController.updateProfile(authReq, mockRes4, (() => {}) as any);
+    if (tooLongCode !== 400) {
+      throw new Error(`Expected 400 for 81-character name, got ${tooLongCode}`);
+    }
+
+    // 5. Non-string types rejected
+    let nonStringCode = 0;
+    const mockRes5: any = {
+      status: (code: number) => {
+        nonStringCode = code;
+        return { json: (data: any) => data };
+      },
+    };
+    authReq.body = { name: 12345 };
+    await authController.updateProfile(authReq, mockRes5, (() => {}) as any);
+    if (nonStringCode !== 400) {
+      throw new Error(`Expected 400 for non-string name, got ${nonStringCode}`);
+    }
+
+    // 6. Unicode / multi-byte Nepali name & emojis accepted
+    let unicodeCode = 0;
+    let unicodeData: any = null;
+    const mockRes6: any = {
+      status: (code: number) => {
+        unicodeCode = code;
+        return {
+          json: (data: any) => {
+            unicodeData = data;
+            return data;
+          },
+        };
+      },
+    };
+    authReq.body = { name: 'शेफ राजाराम (Chef Ram) 👨‍🍳' };
+    await authController.updateProfile(authReq, mockRes6, (() => {}) as any);
+    if (unicodeCode !== 200 || unicodeData?.data?.user?.name !== 'शेफ राजाराम (Chef Ram) 👨‍🍳') {
+      throw new Error(`Expected 200 with unicode name, got ${unicodeCode} ${JSON.stringify(unicodeData)}`);
+    }
+
+    // 7. Unknown user returns 404
+    let notFoundCode = 0;
+    const mockRes7: any = {
+      status: (code: number) => {
+        notFoundCode = code;
+        return { json: (data: any) => data };
+      },
+    };
+    const unknownReq: any = {
+      user: { id: 'non-existent-user-uuid', email: 'ghost@example.com' },
+      body: { name: 'Ghost' },
+    };
+    await authController.updateProfile(unknownReq, mockRes7, (() => {}) as any);
+    if (notFoundCode !== 404) {
+      throw new Error(`Expected 404 for non-existent user, got ${notFoundCode}`);
+    }
+  });
+
+  await test('authController.getMe returns user name and created_at', async () => {
+    const biz = await db.createBusiness('GetMe Test Restro', 'RESTAURANT');
+    const user = await db.createUser({
+      business_id: biz.id,
+      email: `getme-test-${Date.now()}@example.com`,
+      password_hash: await bcrypt.hash('SecurePassword123!', 10),
+      role: 'RESTAURANT_OWNER',
+      name: 'Chef Auguste',
+    });
+
+    let meStatusCode = 0;
+    let meData: any = null;
+    const mockRes: any = {
+      status: (code: number) => {
+        meStatusCode = code;
+        return {
+          json: (data: any) => {
+            meData = data;
+            return data;
+          },
+        };
+      },
+    };
+
+    const req: any = {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        created_at: user.created_at,
+        role: user.role,
+        status: user.status,
+        business: { id: biz.id, name: biz.name },
+      },
+    };
+
+    await authController.getMe(req, mockRes);
+    if (meStatusCode !== 200) throw new Error(`Expected 200 from getMe, got ${meStatusCode}`);
+    if (meData?.data?.user?.name !== 'Chef Auguste') {
+      throw new Error(`Expected name 'Chef Auguste', got '${meData?.data?.user?.name}'`);
+    }
+    if (!meData?.data?.user?.created_at) {
+      throw new Error(`Expected created_at to be present in getMe response`);
+    }
   });
 
   console.log(`\n========================================`);

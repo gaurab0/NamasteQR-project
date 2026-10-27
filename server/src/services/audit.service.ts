@@ -14,13 +14,13 @@ export class AuditService {
     businessId?: string | null;
   }): Promise<void> {
     try {
-      const rawIp = data.req?.headers['x-forwarded-for'] || data.req?.socket?.remoteAddress || '127.0.0.1';
+      const rawIp = data.req?.headers?.['x-forwarded-for'] || data.req?.socket?.remoteAddress || '127.0.0.1';
       let ipStr = Array.isArray(rawIp) ? rawIp[0] : rawIp?.toString() || '127.0.0.1';
       if (ipStr.includes(',')) {
         ipStr = ipStr.split(',')[0].trim();
       }
       const ipAddress = ipStr.replace('::ffff:', '').trim().slice(0, 45);
-      const rawUserAgent = data.req?.headers['user-agent'] || 'NamasteQR Web Client';
+      const rawUserAgent = data.req?.headers?.['user-agent'] || 'NamasteQR Web Client';
       const userAgent = (Array.isArray(rawUserAgent) ? rawUserAgent[0] : rawUserAgent.toString()).slice(0, 255);
 
       await db.upsertAccountAuditLog({

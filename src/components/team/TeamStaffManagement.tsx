@@ -13,6 +13,7 @@ import {
   Lock,
   Sliders,
   ShieldCheck,
+  UserCheck,
   X
 } from 'lucide-react';
 import { Button } from '../ui/Button';
@@ -343,7 +344,20 @@ export const TeamStaffManagement: React.FC<TeamStaffManagementProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+          {onRequestRoleSignIn && (
+            <Button
+              id="btn-team-switch-role"
+              variant="outline"
+              size="sm"
+              onClick={onRequestRoleSignIn}
+              leftIcon={<UserCheck className="w-3.5 h-3.5 text-amber-600" />}
+              className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold shadow-2xs"
+            >
+              Switch Staff Role
+            </Button>
+          )}
+
           <Button
             variant="outline"
             size="sm"

@@ -158,6 +158,8 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
           req.user = {
             id: user.id,
             email: user.email,
+            name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+            created_at: user.created_at,
             role: user.role,
             status: user.status,
             allowed_tabs: await db.ensureAllowedTabsPersisted(user),
@@ -235,6 +237,8 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
         req.user = {
           id: user.id,
           email: user.email,
+          name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+          created_at: user.created_at,
           role,
           status: 'ACTIVE',
           allowed_tabs: await db.ensureAllowedTabsPersisted(user),
@@ -314,6 +318,8 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
           req.user = {
             id: user.id,
             email: user.email,
+            name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+            created_at: user.created_at,
             role: user.role,
             status: user.status,
             allowed_tabs: await db.ensureAllowedTabsPersisted(user),
@@ -385,6 +391,8 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
         req.user = {
           id: user.id,
           email: user.email,
+          name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+          created_at: user.created_at,
           role: user.role || (targetRole as UserRole) || 'RESTAURANT_OWNER', // DB role wins over client headers
           status: 'ACTIVE',
           allowed_tabs: await db.ensureAllowedTabsPersisted(user),

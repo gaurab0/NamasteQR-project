@@ -28,6 +28,7 @@ router.get('/dev-info', (req, res) => authController.getDevInfo(req, res));
 
 // Session restoration & termination routes
 router.get('/me', optionalAuthenticate, (req, res) => authController.getMe(req as any, res));
+router.put('/profile', authenticate, (req, res, next) => authController.updateProfile(req as any, res, next));
 router.post('/logout', optionalAuthenticate, (req, res) => authController.logout(req as any, res));
 
 // Audit log management (Strictly authenticated and isolated per tenant)

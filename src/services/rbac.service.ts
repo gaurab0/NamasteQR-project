@@ -307,6 +307,10 @@ export class ClientRBACService {
     return data.data || [];
   }
 
+  public async getMenuItems(businessId?: string): Promise<MenuItem[]> {
+    return this.getMenusApi(businessId);
+  }
+
   public async createMenuItemApi(item: Partial<MenuItem>, businessId?: string): Promise<MenuItem> {
     const url = businessId ? `/api/menus?businessId=${encodeURIComponent(businessId)}` : '/api/menus';
     const res = await fetch(url, {

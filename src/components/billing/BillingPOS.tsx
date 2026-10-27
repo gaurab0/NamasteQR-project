@@ -1,7 +1,7 @@
 import { CreditAccountSelectionModal } from './CreditAccountSelectionModal';
 import { calculateBillTotals } from '../../utils/taxCalculations';
 import { renderFormattedDate } from '../../utils/dateFormatter';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 import { usePrinter } from '../../contexts/PrinterContext';
 import {
@@ -12,6 +12,7 @@ import {
   Trash2,
   Settings,
   Plus,
+  Minus,
   Printer,
   CheckCircle2,
   AlertTriangle,
@@ -64,7 +65,9 @@ import {
   SaleType,
   RestaurantTable,
   TableOrder,
-  GLAccountLink
+  GLAccountLink,
+  MenuItem,
+  FoodType
 } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import {
@@ -100,6 +103,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const [pendingOrders, setPendingOrders] = useState<TableOrder[]>([]);
   const [payFirstOrders, setPayFirstOrders] = useState<TableOrder[]>([]);
   const [glAccounts, setGlAccounts] = useState<GLAccountLink[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
 
   // Time & search filters
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'records' | 'gl_accounts'>('pos');
@@ -249,18 +253,20 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const loadBillingData = async () => {
     try {
       setLoading(true);
-      const [configData, salesData, tablesData, glData, ordersData] = await Promise.all([
+      const [configData, salesData, tablesData, glData, ordersData, menuData] = await Promise.all([
         rbacService.getTaxConfigApi(business.id).catch(() => null),
         rbacService.getSalesApi({}, business.id).catch(() => []),
         rbacService.getTablesApi(business.id).catch(() => []),
         rbacService.getGLAccountsApi(business.id).catch(() => []),
         rbacService.getTableOrdersApi(undefined, business.id).catch(() => []),
+        rbacService.getMenusApi(business.id).catch(() => []),
       ]);
 
       if (configData) setTaxConfig(configData);
       setSales(salesData || []);
       setTables(tablesData || []);
       setGlAccounts(glData || []);
+      if (menuData) setMenuItems(menuData || []);
       if (ordersData && Array.isArray(ordersData)) {
         processIncomingOrders(ordersData);
       }
@@ -863,21 +869,6 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                 <p className="text-xs font-semibold text-zinc-600">
                   No pending table bills right now.
                 </p>
-                <p className="text-[11px] text-zinc-400 mt-1">
-                  All guest tables have been settled or no active orders are awaiting checkout.
-                </p>
-                <button
-                  id="btn-quick-new-pos"
-                  type="button"
-                  onClick={() => {
-                    setSelectedOrderToSettle(undefined);
-                    setShowNewSaleModal(true);
-                  }}
-                  className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Create Counter POS Sale
-                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1131,6 +1122,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           tables={tables}
           pendingOrders={pendingOrders}
           taxConfig={taxConfig}
+          menuItems={menuItems}
           user={user}
           initialOrderId={selectedOrderToSettle}
           onClose={() => {
@@ -1385,6 +1377,7 @@ interface NewSaleModalProps {
   tables: RestaurantTable[];
   pendingOrders: TableOrder[];
   taxConfig: BusinessTaxConfig | null;
+  menuItems?: MenuItem[];
   user?: any;
   initialOrderId?: string;
   onClose: () => void;
@@ -1392,11 +1385,24 @@ interface NewSaleModalProps {
   onGlAccountCreated: (acc: any) => void;
 }
 
+interface MenuCandidate {
+  id: string;
+  menu_item_id: string;
+  name: string;
+  variant_id?: string;
+  variant_name?: string;
+  price: number;
+  category?: string;
+  food_type?: FoodType;
+  is_available?: boolean;
+}
+
 const NewSaleModal: React.FC<NewSaleModalProps> = ({
   business,
   tables,
   pendingOrders,
   taxConfig,
+  menuItems: propMenuItems,
   user,
   initialOrderId,
   onClose,
@@ -1431,12 +1437,12 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     {
       id: 'item-1',
       item_id: 'item-1',
-      name: 'Signature Chef Special',
+      name: '',
       quantity: 1,
-      price: 350,
-      unit_price: 350,
-      subtotal: 350,
-      total_price: 350,
+      price: 0,
+      unit_price: 0,
+      subtotal: 0,
+      total_price: 0,
     },
   ]);
 
@@ -1527,14 +1533,226 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     }
   }, [initialOrderId]);
 
+  // Menu items autocomplete state & loading
+  const [availableMenuItems, setAvailableMenuItems] = useState<MenuItem[]>(propMenuItems || []);
+
+  useEffect(() => {
+    if (propMenuItems && propMenuItems.length > 0) {
+      setAvailableMenuItems(propMenuItems);
+    } else if (business.id) {
+      const fetcher = rbacService.getMenuItems
+        ? rbacService.getMenuItems.bind(rbacService)
+        : rbacService.getMenusApi.bind(rbacService);
+      fetcher(business.id)
+        .then((data) => {
+          if (data && Array.isArray(data)) {
+            setAvailableMenuItems(data);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to load menu items:', err);
+        });
+    }
+  }, [propMenuItems, business.id]);
+
+  const menuCandidates = useMemo<MenuCandidate[]>(() => {
+    const list: MenuCandidate[] = [];
+    (availableMenuItems || []).forEach((item) => {
+      if (item.has_variants && Array.isArray(item.variants) && item.variants.length > 0) {
+        item.variants.forEach((v) => {
+          list.push({
+            id: `${item.id}_${v.id}`,
+            menu_item_id: item.id,
+            name: `${item.name} (${v.name})`,
+            variant_id: v.id,
+            variant_name: v.name,
+            price: Number(v.price) || Number(item.price) || 0,
+            category: item.category,
+            food_type: (v.food_type || item.food_type || 'none') as FoodType,
+            is_available: v.is_available !== false && item.is_available !== false && item.status !== 'out_of_stock' && item.status !== 'unavailable',
+          });
+        });
+      } else {
+        list.push({
+          id: item.id,
+          menu_item_id: item.id,
+          name: item.name,
+          price: Number(item.price) || 0,
+          category: item.category,
+          food_type: (item.food_type || 'none') as FoodType,
+          is_available: item.is_available !== false && item.status !== 'out_of_stock' && item.status !== 'unavailable',
+        });
+      }
+    });
+    return list;
+  }, [availableMenuItems]);
+
+  const [activeDropdownIndex, setActiveDropdownIndex] = useState<number | null>(null);
+  const [searchHighlightIndex, setSearchHighlightIndex] = useState<number>(0);
+  const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const highlightedItemRef = useRef<HTMLDivElement | null>(null);
+  const itemInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Auto-scroll highlighted menu item into view
+  useEffect(() => {
+    if (highlightedItemRef.current) {
+      highlightedItemRef.current.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest',
+      });
+    }
+  }, [searchHighlightIndex]);
+
+  // Click outside to dismiss autocomplete dropdown (pointerdown works cleanly across mouse and touch devices)
+  useEffect(() => {
+    const handleOutsideClick = (e: PointerEvent | MouseEvent) => {
+      if (
+        dropdownContainerRef.current &&
+        !dropdownContainerRef.current.contains(e.target as Node)
+      ) {
+        setActiveDropdownIndex(null);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsideClick);
+    return () => document.removeEventListener('pointerdown', handleOutsideClick);
+  }, []);
+
+  const filteredMenuMatches = useMemo(() => {
+    if (activeDropdownIndex === null || !items[activeDropdownIndex]) return [];
+    const rawQuery = (items[activeDropdownIndex].name || '').trim().toLowerCase();
+
+    // Keep closed when nothing is typed yet
+    if (!rawQuery) {
+      return [];
+    }
+
+    const tokens = rawQuery.split(/\s+/).filter(Boolean);
+
+    const matches = menuCandidates.filter((c) => {
+      const cName = c.name.toLowerCase();
+      const cCat = (c.category || '').toLowerCase();
+      return tokens.every((token) => cName.includes(token) || cCat.includes(token));
+    });
+
+    matches.sort((a, b) => {
+      const aLower = a.name.toLowerCase();
+      const bLower = b.name.toLowerCase();
+      if (aLower === rawQuery && bLower !== rawQuery) return -1;
+      if (bLower === rawQuery && aLower !== rawQuery) return 1;
+      const aStarts = aLower.startsWith(rawQuery);
+      const bStarts = bLower.startsWith(rawQuery);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      if (a.is_available && !b.is_available) return -1;
+      if (!a.is_available && b.is_available) return 1;
+      return aLower.localeCompare(bLower);
+    });
+
+    return matches.slice(0, 15);
+  }, [activeDropdownIndex, items, menuCandidates]);
+
+  const handleSelectMenuItem = (rowIdx: number, candidate: MenuCandidate) => {
+    setItems((prev) => {
+      const copy = [...prev];
+      const current: Partial<SaleItem> = copy[rowIdx] || {};
+      const qty = Math.max(1, Number(current.quantity) || 1);
+      const unitPrice = Number(candidate.price) || 0;
+      copy[rowIdx] = {
+        ...current,
+        id: current.id || `item-${Date.now()}-${rowIdx}`,
+        item_id: candidate.menu_item_id || candidate.id,
+        menu_item_id: candidate.menu_item_id,
+        name: candidate.name,
+        price: unitPrice,
+        unit_price: unitPrice,
+        quantity: qty,
+        subtotal: qty * unitPrice,
+        total_price: qty * unitPrice,
+        category: candidate.category || current.category,
+        food_type: candidate.food_type,
+        variant_id: candidate.variant_id,
+        variant_name: candidate.variant_name,
+      } as any;
+
+      // Automatically add another empty item space if this is the last row or no empty row exists at the end
+      const lastRow = copy[copy.length - 1];
+      if (!lastRow || (lastRow.name && lastRow.name.trim() !== '')) {
+        const newId = `item-${Date.now()}-${copy.length}`;
+        copy.push({
+          id: newId,
+          item_id: newId,
+          name: '',
+          quantity: 1,
+          price: 0,
+          unit_price: 0,
+          subtotal: 0,
+          total_price: 0,
+        });
+      }
+
+      return copy;
+    });
+
+    setActiveDropdownIndex(null);
+    setSearchHighlightIndex(0);
+
+    // Auto-focus next empty item input smoothly
+    setTimeout(() => {
+      const nextInput = itemInputRefs.current[rowIdx + 1];
+      if (nextInput) {
+        nextInput.focus();
+      }
+    }, 60);
+  };
+
+  const handleInputKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    rowIdx: number
+  ) => {
+    const hasQuery = (items[rowIdx]?.name || '').trim().length > 0;
+    if (activeDropdownIndex !== rowIdx || !hasQuery) {
+      if (e.key === 'ArrowDown' && hasQuery) {
+        setActiveDropdownIndex(rowIdx);
+        setSearchHighlightIndex(0);
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      if (filteredMenuMatches.length > 0) {
+        e.preventDefault();
+        setSearchHighlightIndex((prev) => (prev + 1) % filteredMenuMatches.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      if (filteredMenuMatches.length > 0) {
+        e.preventDefault();
+        setSearchHighlightIndex((prev) =>
+          prev <= 0 ? filteredMenuMatches.length - 1 : prev - 1
+        );
+      }
+    } else if (e.key === 'Enter') {
+      if (filteredMenuMatches.length > 0 && filteredMenuMatches[searchHighlightIndex]) {
+        e.preventDefault();
+        handleSelectMenuItem(rowIdx, filteredMenuMatches[searchHighlightIndex]);
+      } else {
+        setActiveDropdownIndex(null);
+      }
+    } else if (e.key === 'Escape') {
+      setActiveDropdownIndex(null);
+    }
+  };
+
   // Line item manipulation
   const handleItemChange = (index: number, field: keyof SaleItem, val: any) => {
     setItems((prev) => {
       const copy = [...prev];
       const target = { ...copy[index], [field]: val };
       if (field === 'quantity' || field === 'unit_price' || field === 'price') {
-        const qty = Number(target.quantity) || 1;
+        const qty = field === 'quantity' && val === '' ? 1 : Math.max(1, Number(target.quantity) || 1);
         const price = Number(target.unit_price ?? target.price) || 0;
+        if (field !== 'quantity' || val !== '') {
+          target.quantity = qty;
+        }
         target.price = price;
         target.unit_price = price;
         target.subtotal = qty * price;
@@ -1552,19 +1770,26 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       {
         id: newId,
         item_id: newId,
-        name: 'Dish Item',
+        name: '',
         quantity: 1,
-        price: 200,
-        unit_price: 200,
-        subtotal: 200,
-        total_price: 200,
+        price: 0,
+        unit_price: 0,
+        subtotal: 0,
+        total_price: 0,
       },
     ]);
+    setActiveDropdownIndex(null);
+    setSearchHighlightIndex(0);
   };
 
   const handleRemoveItem = (index: number) => {
     if (items.length <= 1) return;
     setItems((prev) => prev.filter((_, i) => i !== index));
+    if (activeDropdownIndex === index) {
+      setActiveDropdownIndex(null);
+    } else if (activeDropdownIndex !== null && activeDropdownIndex > index) {
+      setActiveDropdownIndex(activeDropdownIndex - 1);
+    }
   };
 
   // Calculations (Supports both Exclusive of VAT% and Inclusive of VAT% modes; Discounts are deducted from Grand Total without combining with VAT)
@@ -1736,8 +1961,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5 border border-zinc-200 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-3xl w-full p-3.5 sm:p-6 shadow-2xl space-y-4 sm:space-y-5 border border-zinc-200 max-h-[95vh] sm:max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
           <div className="flex items-center gap-2.5">
@@ -1795,15 +2020,15 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           </div>
         )}
 
-        {/* Basic Info: Sale Type, Table, Customer */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
+        {/* Basic Info: Sale Type, Table, Customer, Orders */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
+          <div className={saleType !== 'DINE_IN' ? 'col-span-1' : ''}>
             <label className="text-xs font-bold text-zinc-700 block mb-1">Sale Type</label>
             <select
               id="select-sale-type"
               value={saleType}
               onChange={(e) => setSaleType(e.target.value as SaleType)}
-              className="w-full px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 bg-white"
+              className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 bg-white"
             >
               <option value="DINE_IN">Dine-In Restaurant</option>
               <option value="TAKEAWAY">Takeaway / Counter</option>
@@ -1821,7 +2046,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 id="select-sale-table"
                 value={selectedTableId}
                 onChange={(e) => setSelectedTableId(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 bg-white"
+                className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500 bg-white"
               >
                 <option value="">Select Table #</option>
                 {tables.map((tbl) => (
@@ -1833,7 +2058,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </div>
           )}
 
-          <div>
+          <div className={saleType !== 'DINE_IN' ? 'col-span-1' : 'col-span-2 sm:col-span-1'}>
             <label className="text-xs font-bold text-zinc-700 block mb-1">
               Customer Name
             </label>
@@ -1843,33 +2068,35 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
               placeholder="Guest name"
-              className="w-full px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+              className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
             />
           </div>
-            <div>
-              <label className="text-xs font-bold text-zinc-700 block mb-1">
-                Start Order # (Opt)
-              </label>
-              <input
-                type="text"
-                value={customOrderNumber}
-                onChange={(e) => setCustomOrderNumber(e.target.value)}
-                placeholder="e.g. ORD-01"
-                className="w-full px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-zinc-700 block mb-1">
-                Start Invoice # (Opt)
-              </label>
-              <input
-                type="text"
-                value={customInvoiceNumber}
-                onChange={(e) => setCustomInvoiceNumber(e.target.value)}
-                placeholder="e.g. INV-100"
-                className="w-full px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
+
+          <div>
+            <label className="text-xs font-bold text-zinc-700 block mb-1">
+              Start Order # (Opt)
+            </label>
+            <input
+              type="text"
+              value={customOrderNumber}
+              onChange={(e) => setCustomOrderNumber(e.target.value)}
+              placeholder="e.g. ORD-01"
+              className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-zinc-700 block mb-1">
+              Start Invoice # (Opt)
+            </label>
+            <input
+              type="text"
+              value={customInvoiceNumber}
+              onChange={(e) => setCustomInvoiceNumber(e.target.value)}
+              placeholder="e.g. INV-100"
+              className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
         </div>
 
         {/* Line Items Table */}
@@ -1889,49 +2116,198 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </button>
           </div>
 
-          <div className="border border-zinc-200 rounded-xl overflow-hidden">
+          <div className="border border-zinc-200 rounded-xl overflow-visible">
             <table className="w-full text-xs text-left">
               <thead className="bg-zinc-100 text-zinc-600 font-bold uppercase text-[10px]">
                 <tr>
-                  <th className="py-2 px-3">Item Description</th>
-                  <th className="py-2 px-3 w-20 text-center">Qty</th>
-                  <th className="py-2 px-3 w-28 text-right">Price ({currency})</th>
-                  <th className="py-2 px-3 w-28 text-right">Total ({currency})</th>
-                  <th className="py-2 px-3 w-10 text-center"></th>
+                  <th className="py-2 px-2.5 sm:px-3 rounded-tl-xl min-w-[130px]">Item Description</th>
+                  <th className="py-2 px-1 sm:px-2 w-24 sm:w-28 text-center">Qty</th>
+                  <th className="py-2 px-1.5 sm:px-2 w-20 sm:w-24 text-right">Price ({currency})</th>
+                  <th className="py-2 px-1.5 sm:px-2 w-20 sm:w-24 text-right">Total ({currency})</th>
+                  <th className="py-2 px-1 w-8 sm:w-10 text-center rounded-tr-xl"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {items.map((item, idx) => (
-                  <tr key={item.id}>
-                    <td className="p-2">
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => handleItemChange(idx, 'name', e.target.value)}
-                        placeholder="Dish name"
-                        className="w-full px-2 py-1 rounded border border-zinc-200 font-medium text-xs focus:ring-1 focus:ring-amber-500"
-                      />
+                  <tr
+                    key={item.id}
+                    className={activeDropdownIndex === idx ? 'relative z-40' : 'relative z-1'}
+                  >
+                    <td className={`p-2 relative ${activeDropdownIndex === idx ? 'z-40' : 'z-1'}`}>
+                      <div
+                        ref={activeDropdownIndex === idx ? dropdownContainerRef : undefined}
+                        className={`relative ${activeDropdownIndex === idx ? 'z-40' : 'z-1'}`}
+                      >
+                        <input
+                          ref={(el) => { itemInputRefs.current[idx] = el; }}
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => {
+                            handleItemChange(idx, 'name', e.target.value);
+                            setActiveDropdownIndex(idx);
+                            setSearchHighlightIndex(0);
+                          }}
+                          onFocus={() => {
+                            if ((item.name || '').trim().length > 0) {
+                              setActiveDropdownIndex(idx);
+                              setSearchHighlightIndex(0);
+                            }
+                          }}
+                          onKeyDown={(e) => handleInputKeyDown(e, idx)}
+                          placeholder="Type dish name (e.g. Chicken...)"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-200 font-medium text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
+                        />
+
+                        {/* Floating Autocomplete Dropdown Pop-up */}
+                        {activeDropdownIndex === idx && (item.name || '').trim().length > 0 && (
+                          <div className="absolute left-0 top-full mt-1 w-full min-w-[260px] sm:min-w-[320px] max-w-sm max-h-56 overflow-y-auto bg-white rounded-xl border border-zinc-200/90 shadow-xl z-50 divide-y divide-zinc-100 animate-in fade-in zoom-in-95 duration-100">
+                            {filteredMenuMatches.length === 0 ? (
+                              <div className="p-3 text-center text-xs text-zinc-500">
+                                <p className="font-medium text-zinc-700">No menu dishes found</p>
+                                <p className="text-[11px] text-zinc-400 mt-0.5">Press Enter to keep "{(item.name || '').trim()}" as custom item</p>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="px-2.5 py-1 bg-zinc-50 flex items-center justify-between text-[10px] font-semibold text-zinc-500 tracking-wider border-b border-zinc-100 sticky top-0 z-10">
+                                  <span className="flex items-center gap-1">
+                                    <Utensils className="w-3 h-3 text-amber-600" />
+                                    Menu Matches
+                                  </span>
+                                  <span className="text-zinc-400 font-normal">
+                                    {filteredMenuMatches.length} {filteredMenuMatches.length === 1 ? 'item' : 'items'}
+                                  </span>
+                                </div>
+                                {filteredMenuMatches.map((cand, candIdx) => {
+                                  const isHighlighted = searchHighlightIndex === candIdx;
+                                  return (
+                                    <div
+                                      key={cand.id}
+                                      ref={isHighlighted ? highlightedItemRef : undefined}
+                                      role="button"
+                                      tabIndex={0}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        handleSelectMenuItem(idx, cand);
+                                      }}
+                                      onClick={() => handleSelectMenuItem(idx, cand)}
+                                      onMouseEnter={() => setSearchHighlightIndex(candIdx)}
+                                      className={`px-3 py-2 flex items-center justify-between gap-2.5 cursor-pointer transition-colors ${
+                                        isHighlighted
+                                          ? 'bg-amber-50 text-amber-950 font-medium'
+                                          : 'hover:bg-zinc-50 text-zinc-800'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span
+                                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                                            cand.food_type === 'veg'
+                                              ? 'bg-emerald-500 ring-2 ring-emerald-100'
+                                              : cand.food_type === 'non-veg'
+                                              ? 'bg-rose-500 ring-2 ring-rose-100'
+                                              : 'bg-zinc-300'
+                                          }`}
+                                          title={
+                                            cand.food_type === 'veg'
+                                              ? 'Vegetarian'
+                                              : cand.food_type === 'non-veg'
+                                              ? 'Non-Vegetarian'
+                                              : 'Dish'
+                                          }
+                                        />
+                                        <div className="truncate">
+                                          <div className="text-xs leading-snug truncate font-medium text-zinc-900">
+                                            {cand.name}
+                                          </div>
+                                          {cand.category && (
+                                            <div className="text-[10px] text-zinc-400 font-normal truncate">
+                                              {cand.category}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="text-right shrink-0">
+                                        <span className="font-bold text-xs text-amber-700">
+                                          {currency} {cand.price.toFixed(2)}
+                                        </span>
+                                        {!cand.is_available && (
+                                          <div className="text-[9px] text-rose-500 font-medium">Out of stock</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
+
                     <td className="p-2 text-center">
-                      <input
-                        type="number"
-                        min="1"
-                        value={item.quantity}
-                        onChange={(e) =>
-                          handleItemChange(idx, 'quantity', parseInt(e.target.value, 10) || 1)
-                        }
-                        className="w-16 px-2 py-1 rounded border border-zinc-200 text-center font-bold text-xs focus:ring-1 focus:ring-amber-500"
-                      />
+                      <div className="inline-flex items-center justify-center border border-zinc-200 rounded-lg bg-zinc-50 shadow-2xs overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleItemChange(
+                              idx,
+                              'quantity',
+                              Math.max(1, (Number(item.quantity) || 1) - 1)
+                            )
+                          }
+                          disabled={(Number(item.quantity) || 1) <= 1}
+                          className="w-7 h-7 sm:w-7 sm:h-7 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
+                          title="Decrease quantity"
+                          aria-label="Decrease quantity"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          inputMode="numeric"
+                          value={item.quantity}
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (raw === '') {
+                              handleItemChange(idx, 'quantity', '' as any);
+                            } else {
+                              const val = parseInt(raw, 10);
+                              handleItemChange(idx, 'quantity', isNaN(val) ? 1 : val);
+                            }
+                          }}
+                          onBlur={() => {
+                            const val = parseInt(String(item.quantity), 10);
+                            handleItemChange(idx, 'quantity', isNaN(val) || val < 1 ? 1 : val);
+                          }}
+                          className="w-10 sm:w-11 py-1 text-center font-bold text-xs bg-white text-zinc-900 border-x border-zinc-200 focus:outline-none focus:ring-1 focus:ring-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none select-all"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleItemChange(idx, 'quantity', (Number(item.quantity) || 1) + 1)
+                          }
+                          className="w-7 h-7 sm:w-7 sm:h-7 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 active:scale-95 transition-all cursor-pointer select-none touch-manipulation"
+                          title="Increase quantity"
+                          aria-label="Increase quantity"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </td>
+
                     <td className="p-2 text-right">
                       <input
                         type="number"
                         min="0"
-                        value={item.unit_price}
+                        step="any"
+                        inputMode="decimal"
+                        value={item.unit_price ?? item.price ?? 0}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) =>
                           handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
                         }
-                        className="w-24 px-2 py-1 rounded border border-zinc-200 text-right font-bold text-xs focus:ring-1 focus:ring-amber-500"
+                        className="w-20 sm:w-24 px-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                       />
                     </td>
                     <td className="p-2 text-right font-bold text-zinc-900">

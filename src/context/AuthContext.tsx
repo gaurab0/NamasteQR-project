@@ -42,6 +42,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   updateBusiness: (updated: Partial<Business>) => void;
+  updateProfile: (data: { name: string }) => Promise<{ success: boolean; user?: User; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -333,6 +334,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
+  const updateProfile = async (data: { name: string }): Promise<{ success: boolean; user?: User; error?: string }> => {
+    try {
+      const res = await authApi.updateProfile(data);
+      if (res.success && res.data?.user) {
+        const updatedUser: User = {
+          ...(user || {}),
+          ...res.data.user,
+        };
+        setUser(updatedUser);
+        localStorage.setItem('serveflow_cached_user', JSON.stringify(updatedUser));
+
+        // Sync staff session name if active so UI updates immediately
+        const currentStaff = rbacService.getCurrentStaffSession();
+        if (currentStaff) {
+          rbacService.setCurrentStaffSession({
+            ...currentStaff,
+            name: updatedUser.name || currentStaff.name,
+          });
+        }
+
+        return { success: true, user: updatedUser };
+      }
+      return { success: false, error: (res as any).error?.message || res.message || 'Failed to update profile' };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to update profile' };
+    }
+  };
+
   const activeBusiness = user?.business || (branches.length > 0 ? branches[0] : null);
 
   return (
@@ -358,6 +387,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         logout,
         refreshUser,
         updateBusiness,
+        updateProfile,
       }}
     >
       {children}

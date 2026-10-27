@@ -16,6 +16,7 @@ import {
   ChefHat,
   ChevronLeft,
   ChevronRight,
+  User,
   UserCheck,
   LogOut,
   CheckCircle2,
@@ -48,6 +49,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   staffSession: StaffAccountSession | null;
   onSwitchRole: () => void;
+  onOpenProfile?: () => void;
   onOpenAddBranch?: () => void;
   onNavigate: (route: string) => void;
   className?: string;
@@ -60,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   staffSession,
   onSwitchRole,
+  onOpenProfile,
   onOpenAddBranch,
   onNavigate,
   className = '',
@@ -281,12 +284,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-3 border-t border-zinc-200/80 bg-zinc-50/70 shrink-0 mt-auto pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         {!isCollapsed ? (
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-amber-600 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs">
-                {currentUserName.slice(0, 2).toUpperCase()}
+            <div 
+              className="flex items-center gap-2.5 min-w-0 cursor-pointer group/user hover:opacity-90 transition-opacity"
+              onClick={onOpenProfile || onSwitchRole}
+              title="View User Profile"
+            >
+              <div className="w-9 h-9 rounded-xl bg-amber-600 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-2xs group-hover/user:scale-105 transition-transform">
+                {Array.from(currentUserName).slice(0, 2).join('').toUpperCase()}
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-bold text-zinc-900 truncate">
+                <div className="text-xs font-bold text-zinc-900 truncate group-hover/user:text-amber-700">
                   {currentUserName}
                 </div>
                 <div className="text-[10px] font-mono text-zinc-500 truncate -mt-0.5">
@@ -299,11 +306,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 id="btn-switch-role-sidebar"
-                onClick={onSwitchRole}
+                onClick={onOpenProfile || onSwitchRole}
                 className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-600 hover:bg-zinc-100 transition cursor-pointer"
-                title="Switch Staff Role"
+                title="User Profile"
               >
-                <UserCheck className="w-4 h-4" />
+                <User className="w-4 h-4" />
               </button>
               <button
                 type="button"
@@ -319,11 +326,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div className="flex flex-col items-center gap-2">
             <div 
-              className="w-9 h-9 rounded-xl bg-amber-600 text-white font-bold flex items-center justify-center text-xs shadow-2xs cursor-pointer"
-              title={`${currentUserName} (@${userRole})`}
-              onClick={onSwitchRole}
+              className="w-9 h-9 rounded-xl bg-amber-600 text-white font-bold flex items-center justify-center text-xs shadow-2xs cursor-pointer hover:scale-105 transition-transform"
+              title={`${currentUserName} (@${userRole}) - User Profile`}
+              onClick={onOpenProfile || onSwitchRole}
             >
-              {currentUserName.slice(0, 2).toUpperCase()}
+              {Array.from(currentUserName).slice(0, 2).join('').toUpperCase()}
             </div>
             <button
               type="button"

@@ -78,6 +78,15 @@ export const authApi = {
     }
   },
 
+  async updateProfile(data: { name: string }) {
+    try {
+      const response = await api.put('/profile', data);
+      return response.data;
+    } catch (err: any) {
+      throw extractError(err);
+    }
+  },
+
   async logout(data?: { userId?: string; businessId?: string; email?: string; accountName?: string }) {
     try {
       const response = await api.post('/logout', data || {});

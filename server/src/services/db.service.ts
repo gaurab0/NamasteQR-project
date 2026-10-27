@@ -553,6 +553,7 @@ class PostgresDatabaseStore {
     password_hash: string;
     role: UserRole;
     allowed_tabs?: TabPermissionId[];
+    name?: string;
   }): Promise<User> {
     const biz = this.businesses.get(data.business_id);
     const userId = generateUserDocId(biz?.name || data.business_id, data.email);
@@ -560,6 +561,7 @@ class PostgresDatabaseStore {
       id: userId,
       business_id: data.business_id,
       email: data.email.toLowerCase().trim(),
+      name: data.name,
       password_hash: data.password_hash,
       role: data.role,
       status: 'PENDING_VERIFICATION',
@@ -577,6 +579,7 @@ class PostgresDatabaseStore {
           id: user.id,
           business_id: user.business_id,
           email: user.email,
+          name: user.name,
           password_hash: user.password_hash,
           role: user.role,
           status: user.status,
@@ -585,6 +588,7 @@ class PostgresDatabaseStore {
           updated_at: user.updated_at,
         },
         update: {
+          ...(user.name ? { name: user.name } : {}),
           password_hash: user.password_hash,
           role: user.role,
           status: user.status,
@@ -614,6 +618,7 @@ class PostgresDatabaseStore {
           id: dbUser.id,
           business_id: dbUser.business_id,
           email: dbUser.email,
+          name: dbUser.name || undefined,
           password_hash: dbUser.password_hash,
           role: dbUser.role as UserRole,
           status: dbUser.status as any,
@@ -633,6 +638,7 @@ class PostgresDatabaseStore {
     id?: string;
     business_id: string;
     email: string;
+    name?: string;
     role?: UserRole;
     password_hash?: string;
   }): Promise<User> {
@@ -651,6 +657,7 @@ class PostgresDatabaseStore {
       id: userId,
       business_id: data.business_id,
       email,
+      name: data.name,
       password_hash: data.password_hash || '',
       role: data.role || (biz?.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
       status: 'ACTIVE',
@@ -667,6 +674,7 @@ class PostgresDatabaseStore {
           id: user.id,
           business_id: user.business_id,
           email: user.email,
+          name: user.name,
           password_hash: user.password_hash,
           role: user.role,
           status: user.status,
@@ -676,6 +684,7 @@ class PostgresDatabaseStore {
           updated_at: user.updated_at,
         },
         update: {
+          ...(user.name ? { name: user.name } : {}),
           role: user.role,
           status: user.status,
           updated_at: new Date(),
@@ -698,6 +707,7 @@ class PostgresDatabaseStore {
           id: dbUser.id,
           business_id: dbUser.business_id,
           email: dbUser.email,
+          name: dbUser.name || undefined,
           password_hash: dbUser.password_hash,
           role: dbUser.role as UserRole,
           status: dbUser.status as any,
@@ -730,6 +740,7 @@ class PostgresDatabaseStore {
           id: d.id,
           business_id: d.business_id,
           email: d.email,
+          name: d.name || undefined,
           password_hash: d.password_hash || '',
           role: d.role as UserRole,
           status: d.status as any,
@@ -776,6 +787,56 @@ class PostgresDatabaseStore {
       console.warn('updateUserRoleAndPermissions error:', e.message);
     }
     return user || null;
+  }
+
+  async updateUserName(id: string, name: string): Promise<User | null> {
+    let user = this.users.get(id);
+    if (!user) {
+      user = await this.findUserById(id);
+    }
+    if (!user) {
+      return null;
+    }
+
+    user.name = name;
+    user.updated_at = new Date();
+    this.users.set(id, user);
+
+    try {
+      let dbUser: any = null;
+      try {
+        dbUser = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            name,
+            updated_at: new Date(),
+          },
+        });
+      } catch (err: any) {
+        if (user.email) {
+          try {
+            dbUser = await prisma.user.update({
+              where: { email: user.email },
+              data: {
+                name,
+                updated_at: new Date(),
+              },
+            });
+          } catch {}
+        }
+      }
+
+      if (dbUser) {
+        user.name = dbUser.name || user.name;
+        user.updated_at = dbUser.updated_at || user.updated_at;
+        if (dbUser.created_at && !user.created_at) user.created_at = dbUser.created_at;
+        this.users.set(user.id, user);
+        if (dbUser.id !== user.id) this.users.set(dbUser.id, user);
+      }
+    } catch (e: any) {
+      console.warn('updateUserName notice:', e.message);
+    }
+    return user;
   }
 
   private pinnedTabsGuard: Set<string> = new Set();

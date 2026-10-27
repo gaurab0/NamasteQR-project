@@ -357,6 +357,8 @@ export class AuthController {
           user: {
             id: user.id,
             email: user.email,
+            name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+            created_at: user.created_at,
             role: user.role,
             status: user.status,
             allowed_tabs: await db.ensureAllowedTabsPersisted(user),
@@ -413,6 +415,78 @@ export class AuthController {
         user: clientUser,
       },
     });
+  }
+
+  /**
+   * PUT /api/auth/profile
+   */
+  async updateProfile(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Authentication required. Please log in to continue.',
+          },
+        });
+      }
+
+      const { name } = req.body || {};
+      if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_NAME',
+            message: 'Display name must be between 1 and 80 characters.',
+          },
+        });
+      }
+
+      const trimmedName = name.trim();
+      const updatedUser = await db.updateUserName(req.user.id, trimmedName);
+      if (!updatedUser) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'USER_NOT_FOUND',
+            message: 'User account not found.',
+          },
+        });
+      }
+
+      req.user.name = updatedUser.name;
+
+      await auditService.logActivity({
+        userId: req.user.id,
+        accountName: req.user.business?.name || req.user.email,
+        businessName: req.user.business?.name,
+        businessId: req.user.business?.id,
+        email: req.user.email,
+        status: 'ONLINE',
+        eventType: 'PROFILE_UPDATED',
+        req,
+      });
+
+      const clientUser = {
+        ...req.user,
+        name: updatedUser.name,
+        created_at: req.user.created_at || updatedUser.created_at,
+      };
+      if ('acting_as' in clientUser) {
+        delete (clientUser as any).acting_as;
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Profile updated successfully.',
+        data: {
+          user: clientUser,
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
   }
 
   /**
