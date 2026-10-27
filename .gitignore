@@ -11,3 +11,4 @@ coverage/
 .antigravity/
 scratch/
 .vscode/
+graphify-out/
