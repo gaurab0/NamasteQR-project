@@ -1917,7 +1917,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   // Calculations (Supports both Exclusive of VAT% and Inclusive of VAT% modes; Discounts are deducted from Grand Total without combining with VAT)
   const currency = taxConfig?.currency_symbol || taxConfig?.currency || 'Rs.';
   const itemsMenuTotal = useMemo(() => {
-    return items.reduce((sum, item) => sum + (Number(item.total_price ?? item.subtotal ?? (item.price * item.quantity)) || 0), 0);
+    return items
+      .filter((item) => (item.name || '').trim().length > 0)
+      .reduce((sum, item) => sum + (Number(item.total_price ?? item.subtotal ?? (item.price * item.quantity)) || 0), 0);
   }, [items]);
 
   const billCalc = useMemo(() => {
@@ -2017,8 +2019,13 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const handleCompleteSale = async () => {
-    if (items.length === 0 || subtotal <= 0) {
-      alert('Please add at least one item with a valid price.');
+    // Exclude any empty item placeholder slots (unfilled dish rows)
+    const validItems = items.filter(
+      (item) => (item.name || '').trim().length > 0
+    );
+
+    if (validItems.length === 0 || subtotal <= 0) {
+      alert('Please add at least one dish with a valid name and price.');
       return;
     }
 
@@ -2028,6 +2035,25 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     }
 
     const tableObj = tables.find((t) => t.id === selectedTableId);
+    let resolvedTableNumber: string | undefined = undefined;
+    if (tableObj?.table_number) {
+      resolvedTableNumber = String(tableObj.table_number).toLowerCase().startsWith('table')
+        ? tableObj.table_number
+        : `Table ${tableObj.table_number}`;
+    } else {
+      if (saleType === 'DINE_IN') {
+        resolvedTableNumber = 'Dine-In Restaurant';
+      } else if (saleType === 'TAKEAWAY') {
+        resolvedTableNumber = 'Takeaway';
+      } else if (saleType === 'DELIVERY') {
+        resolvedTableNumber = 'Delivery';
+      } else if (saleType === 'ROOM_SERVICE') {
+        resolvedTableNumber = 'Room Service';
+      } else {
+        resolvedTableNumber = 'Dine-In Restaurant';
+      }
+    }
+
     const effectivePromoDiscount =
       promoDiscountAmount > 0
         ? promoDiscountAmount
@@ -2039,13 +2065,13 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       business_id: business.id,
       order_id: selectedOrderId || undefined,
       table_id: selectedTableId || undefined,
-      table_number: tableObj?.table_number,
+      table_number: resolvedTableNumber,
       customer_name: customerName.trim() || 'Walk-in Guest',
       customer_phone: customerPhone.trim(),
       invoice_number: customInvoiceNumber.trim() || undefined,
       order_number: customOrderNumber.trim() || undefined,
       sale_type: saleType,
-      items,
+      items: validItems,
       subtotal,
       discount_percent: totalDiscountPercent,
       discount_amount: totalDiscountAmount,

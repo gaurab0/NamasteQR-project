@@ -129,12 +129,22 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               <span className="text-zinc-500">Customer:</span>
               <span className="font-bold">{sale.customer_name}</span>
             </div>
-            {sale.table_number && (
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Table:</span>
-                <span className="font-bold">Table {sale.table_number}</span>
-              </div>
-            )}
+            <div className="flex justify-between">
+              <span className="text-zinc-500">
+                {sale.table_number && /^table\s/i.test(sale.table_number) ? 'Table:' : 'Service:'}
+              </span>
+              <span className="font-bold">
+                {sale.table_number
+                  ? (/^\d+$/.test(sale.table_number.trim()) ? `Table ${sale.table_number}` : sale.table_number)
+                  : sale.sale_type === 'TAKEAWAY'
+                  ? 'Takeaway'
+                  : sale.sale_type === 'DELIVERY'
+                  ? 'Delivery'
+                  : sale.sale_type === 'ROOM_SERVICE'
+                  ? 'Room Service'
+                  : 'Dine-In Restaurant'}
+              </span>
+            </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Cashier:</span>
               <span>{sale.cashier_name}</span>
@@ -145,7 +155,9 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
 
           {/* Items List */}
           <div className="space-y-1.5 text-[11px]">
-            {sale.items.map((item, idx) => {
+            {sale.items
+              .filter((item) => (item.name || '').trim().length > 0)
+              .map((item, idx) => {
               const uPrice = item.unit_price ?? item.price ?? 0;
               const tPrice = item.total_price ?? item.subtotal ?? (uPrice * item.quantity);
               return (

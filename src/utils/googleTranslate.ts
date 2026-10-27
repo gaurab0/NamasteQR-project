@@ -73,31 +73,60 @@ export function saveCustomerLanguage(code: string): void {
 }
 
 /**
+ * Thoroughly purges all googtrans cookies across domain and path variants
+ */
+export function clearGoogleTranslateCookie(): void {
+  if (typeof document === 'undefined') return;
+
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isLocalhost = host === 'localhost' || host === '127.0.0.1';
+  const domainParts = (!isLocalhost && host && host.includes('.')) ? host.split('.') : [];
+  const rootDomain = domainParts.length > 1 ? `.${domainParts.slice(-2).join('.')}` : (host ? `.${host}` : '');
+
+  const domains = ['', host, `.${host}`];
+  if (rootDomain && !domains.includes(rootDomain)) domains.push(rootDomain);
+  if (rootDomain && !domains.includes(`.${rootDomain.replace(/^\./, '')}`)) {
+    domains.push(`.${rootDomain.replace(/^\./, '')}`);
+  }
+
+  const paths = ['/', '', typeof window !== 'undefined' ? window.location.pathname : ''];
+
+  domains.forEach((d) => {
+    paths.forEach((p) => {
+      const dAttr = d ? `; domain=${d}` : '';
+      const pAttr = p ? `; path=${p}` : '';
+      document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; max-age=0${pAttr}${dAttr};`;
+      document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0${pAttr}${dAttr};`;
+    });
+  });
+
+  if (document.cookie.includes('googtrans')) {
+    document.cookie = 'googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; path=/;';
+    document.cookie = 'googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0;';
+  }
+}
+
+/**
  * Configure the googtrans cookie used by Google Translate
  */
 export function setGoogleTranslateCookie(langCode: string): void {
   if (typeof document === 'undefined') return;
 
+  // Clear existing cookies first across all scopes
+  clearGoogleTranslateCookie();
+
+  // If English (native language), do NOT write any googtrans cookie at all!
+  // Writing '/en/en' confuses Google Translate and prevents reverting to English.
+  if (langCode === 'en') {
+    return;
+  }
+
   const host = typeof window !== 'undefined' ? window.location.hostname : '';
   const isLocalhost = host === 'localhost' || host === '127.0.0.1';
-
-  // Domain variants to clear/set
   const domainParts = (!isLocalhost && host && host.includes('.')) ? host.split('.') : [];
   const rootDomain = domainParts.length > 1 ? `.${domainParts.slice(-2).join('.')}` : (host ? `.${host}` : '');
 
-  const clearCookie = (d?: string) => {
-    const dAttr = d ? `; domain=${d}` : '';
-    document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/${dAttr}`;
-    document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=${dAttr}`;
-  };
-
-  // Clear existing cookies to avoid duplicates
-  clearCookie();
-  if (!isLocalhost && host) clearCookie(`.${host}`);
-  if (rootDomain && rootDomain !== `.${host}`) clearCookie(rootDomain);
-
-  // Set the new target cookie
-  const targetVal = langCode === 'en' ? '/en/en' : `/en/${langCode}`;
+  const targetVal = `/en/${langCode}`;
   document.cookie = `googtrans=${targetVal}; path=/;`;
   if (!isLocalhost && host) {
     document.cookie = `googtrans=${targetVal}; path=/; domain=.${host};`;
@@ -158,7 +187,31 @@ export function triggerGoogleTranslateCombo(langCode: string): boolean {
  * Retries for several seconds if Google script is still initializing
  */
 export function applyLanguage(langCode: string): void {
+  if (langCode === 'en') {
+    // English is the native page language. Purge all translation cookies so Google Translate remains dormant.
+    clearGoogleTranslateCookie();
+
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.remove('translated-ltr', 'translated-rtl');
+      document.body?.classList.remove('translated-ltr', 'translated-rtl');
+    }
+
+    const select = document.querySelector('.goog-te-combo') as HTMLSelectElement | null;
+    if (select && select.value !== '') {
+      select.value = '';
+      select.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      if (typeof (select as any).onchange === 'function') {
+        try {
+          (select as any).onchange(new Event('change', { bubbles: true }));
+        } catch {}
+      }
+    }
+    return;
+  }
+
+  // Non-English language: Set cookie, ensure widget is mounted, and trigger combo
   setGoogleTranslateCookie(langCode);
+  initGoogleTranslate();
 
   const applied = triggerGoogleTranslateCombo(langCode);
   if (!applied) {

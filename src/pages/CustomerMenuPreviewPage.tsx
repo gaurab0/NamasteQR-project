@@ -275,7 +275,11 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
   // Initialize headless Google Translate element script
   useEffect(() => {
-    initGoogleTranslate();
+    if (selectedLanguage && selectedLanguage !== 'en') {
+      initGoogleTranslate();
+    } else {
+      applyLanguage('en');
+    }
   }, []);
 
   // When businessProfile loads: If customer has NOT manually chosen a language, apply venue default

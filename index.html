@@ -89,23 +89,61 @@
         };
       }
     </script>
+    <script>
+      // Early cookie purge: if customer has not selected a foreign language, purge any stale googtrans cookie immediately before any script runs
+      try {
+        var _savedLang = localStorage.getItem('serveflow_customer_language');
+        if (!_savedLang || _savedLang === 'en') {
+          var _h = window.location.hostname;
+          var _isLocal = _h === 'localhost' || _h === '127.0.0.1';
+          var _dParts = (!_isLocal && _h && _h.indexOf('.') !== -1) ? _h.split('.') : [];
+          var _rootD = _dParts.length > 1 ? '.' + _dParts.slice(-2).join('.') : (_h ? '.' + _h : '');
+          var _domains = ['', _h, '.' + _h];
+          if (_rootD && _domains.indexOf(_rootD) === -1) _domains.push(_rootD);
+          var _paths = ['/', '', window.location.pathname];
+          for (var _di = 0; _di < _domains.length; _di++) {
+            for (var _pi = 0; _pi < _paths.length; _pi++) {
+              var _dAttr = _domains[_di] ? '; domain=' + _domains[_di] : '';
+              var _pAttr = _paths[_pi] ? '; path=' + _paths[_pi] : '';
+              document.cookie = 'googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; max-age=0' + _pAttr + _dAttr + ';';
+            }
+          }
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="google_translate_element" style="position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-9999"></div>
     <script type="text/javascript">
       window.googleTranslateElementInit = function() {
-        if (window.google && window.google.translate) {
-          new window.google.translate.TranslateElement({
-            pageLanguage: 'en',
-            includedLanguages: 'en,ne,zh-CN,hi,ko,ja,th,tl,si,ta',
-            autoDisplay: false
-          }, 'google_translate_element');
-        }
+        try {
+          var saved = localStorage.getItem('serveflow_customer_language');
+          // Only instantiate TranslateElement if customer explicitly chose a foreign language
+          if (saved && saved !== 'en' && window.google && window.google.translate) {
+            new window.google.translate.TranslateElement({
+              pageLanguage: 'en',
+              includedLanguages: 'en,ne,zh-CN,hi,ko,ja,th,tl,si,ta',
+              autoDisplay: false
+            }, 'google_translate_element');
+          }
+        } catch (e) {}
       };
+
+      // Only load Google Translate script if foreign language was previously chosen
+      try {
+        var _activeLang = localStorage.getItem('serveflow_customer_language');
+        if (_activeLang && _activeLang !== 'en') {
+          var _gtScript = document.createElement('script');
+          _gtScript.id = 'google-translate-script';
+          _gtScript.type = 'text/javascript';
+          _gtScript.src = '//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+          _gtScript.async = true;
+          _gtScript.defer = true;
+          document.body.appendChild(_gtScript);
+        }
+      } catch (e) {}
     </script>
-    <script id="google-translate-script" type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit" async defer></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

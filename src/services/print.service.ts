@@ -250,7 +250,20 @@ class PrintService {
     const isBill = taskType === 'BILL';
 
     const orderNumber = data.order_number || (data.id ? String(data.id).slice(0, 8).toUpperCase() : 'ORD');
-    const tableNo = data.table_number || 'Takeaway';
+    let tableNo = data.table_number;
+    if (!tableNo) {
+      if (data.sale_type === 'TAKEAWAY') {
+        tableNo = 'Takeaway';
+      } else if (data.sale_type === 'DELIVERY') {
+        tableNo = 'Delivery';
+      } else if (data.sale_type === 'ROOM_SERVICE') {
+        tableNo = 'Room Service';
+      } else {
+        tableNo = 'Dine-In Restaurant';
+      }
+    } else if (/^\d+$/.test(String(tableNo).trim())) {
+      tableNo = `Table ${tableNo}`;
+    }
     const serverName = data.waiter_name || 'System';
     let billingFormat: any = 'ENGLISH';
 
@@ -313,7 +326,7 @@ class PrintService {
           </div>
       `;
 
-      const items = data.items || [];
+      const items = (data.items || []).filter((item: any) => item && (item.name || '').trim().length > 0);
       items.forEach((item: any) => {
         html += `
           <div class="item">
@@ -335,7 +348,7 @@ class PrintService {
           </div>
       `;
 
-      const items = data.items || [];
+      const items = (data.items || []).filter((item: any) => item && (item.name || '').trim().length > 0);
       items.forEach((item: any) => {
         html += `
           <div class="item">

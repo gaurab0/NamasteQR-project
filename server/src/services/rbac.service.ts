@@ -3671,7 +3671,7 @@ export class RBACService {
       business_id: businessId,
       order_id: posTableOrderId,
       table_id: saleData.table_id || null,
-      table_number: saleData.table_number || null,
+      table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : saleData.sale_type === 'ROOM_SERVICE' ? 'Room Service' : 'Dine-In Restaurant'),
       customer_name: (() => {
         const typed = (saleData.customer_name || '').trim();
         const isDefault = !typed || /^(walk-in guest|guest)$/i.test(typed);
@@ -3680,7 +3680,7 @@ export class RBACService {
       })(),
       customer_phone: saleData.customer_phone || (saleData.payment_method === 'CREDIT' ? (resolvedCreditCustomer.phone || '') : ''),
       sale_type: saleData.sale_type || 'DINE_IN',
-      items: saleData.items || [],
+      items: (saleData.items || []).filter((it: any) => it && (it.name || '').trim().length > 0),
       subtotal: Number(saleData.subtotal) || 0,
       discount_percent: Number(saleData.discount_percent) || 0,
       discount_amount: Number(saleData.discount_amount) || 0,
@@ -3715,7 +3715,7 @@ export class RBACService {
           business_id: businessId,
           order_id: saleData.order_id || null,
           table_id: saleData.table_id || null,
-          table_number: saleData.table_number || null,
+          table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : saleData.sale_type === 'ROOM_SERVICE' ? 'Room Service' : 'Dine-In Restaurant'),
           customer_name: newSale.customer_name,
           customer_phone: newSale.customer_phone || null,
           sale_type: newSale.sale_type,
