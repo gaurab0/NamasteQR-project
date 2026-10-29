@@ -14,7 +14,7 @@ import {
   generalApiLimiter,
   shouldSkipGeneralApiLimit,
 } from '../src/middleware/rateLimit.middleware';
-import { assertBusinessAccess } from '../src/middleware/auth.middleware';
+import { assertBusinessAccess, generateToken } from '../src/middleware/auth.middleware';
 import { config } from '../src/config/env';
 
 async function runSecurityTestSuite() {
@@ -257,10 +257,29 @@ async function runSecurityTestSuite() {
     // -----------------------------------------------------------------------
     console.log('\n📦 Section 5: Hardware & LAN Printer Security');
 
+    // 5.0 Unauthenticated request rejected with 401
+    const unauthPrintRes = await fetch(`${baseUrl}/api/print/test-connection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: '192.168.1.100', port: 9100 }),
+    });
+    assert.strictEqual(unauthPrintRes.status, 401, 'Unauthenticated print route request must return 401');
+    pass('Printer bridge enforces authentication (HTTP 401)');
+
+    const printSecToken = generateToken({
+      userId: 'sec-print-user',
+      role: 'RESTAURANT_OWNER',
+      businessId: 'sec-biz',
+    });
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${printSecToken}`,
+    };
+
     // 5.1 Cloud metadata IP is blocked
     const metadataRes = await fetch(`${baseUrl}/api/print/test-connection`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ host: '169.254.169.254', port: 9100 }),
     });
     assert.strictEqual(metadataRes.status, 400, 'Cloud metadata IP must be blocked with 400');
@@ -271,7 +290,7 @@ async function runSecurityTestSuite() {
     // 5.2 Invalid port numbers are rejected
     const badPortRes = await fetch(`${baseUrl}/api/print/test-connection`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({ host: '192.168.1.100', port: 70000 }),
     });
     assert.strictEqual(badPortRes.status, 400);
@@ -281,7 +300,7 @@ async function runSecurityTestSuite() {
     for (const p of [5432, 6379, 22, 3306, 27017]) {
       const pRes = await fetch(`${baseUrl}/api/print/test-connection`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify({ host: '192.168.1.100', port: p }),
       });
       assert.strictEqual(pRes.status, 400, `Dangerous port ${p} must be blocked`);

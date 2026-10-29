@@ -431,22 +431,25 @@ async function runAllScenarios() {
     const orderId = orderRes.data.data.id;
 
     // 2. Kitchen accepts -> IN_PREP
-    await axios.put(`${API_BASE}/rbac/orders/${orderId}/status`, {
-      businessId,
-      status: 'IN_PREP',
-    });
+    await axios.put(
+      `${API_BASE}/rbac/orders/${orderId}/status`,
+      { businessId, status: 'IN_PREP' },
+      { headers: { Authorization: `Bearer ${authToken}` } }
+    );
 
     // 3. Kitchen completes -> READY
-    await axios.put(`${API_BASE}/rbac/orders/${orderId}/status`, {
-      businessId,
-      status: 'READY',
-    });
+    await axios.put(
+      `${API_BASE}/rbac/orders/${orderId}/status`,
+      { businessId, status: 'READY' },
+      { headers: { Authorization: `Bearer ${authToken}` } }
+    );
 
     // 4. Waiter serves -> DELIVERED
-    const finalRes = await axios.put(`${API_BASE}/rbac/orders/${orderId}/status`, {
-      businessId,
-      status: 'DELIVERED',
-    });
+    const finalRes = await axios.put(
+      `${API_BASE}/rbac/orders/${orderId}/status`,
+      { businessId, status: 'DELIVERED' },
+      { headers: { Authorization: `Bearer ${authToken}` } }
+    );
 
     if (!finalRes.data.success) throw new Error('Failed to update status to DELIVERED');
     console.log(`\n      [Info: Order ${orderId} successfully progressed through KDS states: IN_PREP -> READY -> DELIVERED]`);

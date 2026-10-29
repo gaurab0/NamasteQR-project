@@ -37,12 +37,14 @@ export interface OperationsManagementTabProps {
   activeRole?: string;
   isViewOnly?: boolean;
   onNavigate?: (tab: any) => void;
+  initialSubTab?: 'shift' | 'records' | 'gl_accounts';
 }
 
 export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = ({
   business,
   user: propUser,
   isViewOnly = false,
+  initialSubTab,
 }) => {
   const { user: authUser } = useAuth();
   const user = propUser || authUser;
@@ -50,7 +52,15 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
   const activeBizId = currentBusiness?.id || user?.business?.id || user?.id || '';
 
   // Active Sub-Tab: 'shift' | 'records' | 'gl_accounts'
-  const [activeSubTab, setActiveSubTab] = useState<'shift' | 'records' | 'gl_accounts'>('shift');
+  const [activeSubTab, setActiveSubTab] = useState<'shift' | 'records' | 'gl_accounts'>(
+    initialSubTab || 'shift'
+  );
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

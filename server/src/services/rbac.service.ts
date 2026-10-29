@@ -1896,16 +1896,73 @@ export class RBACService {
       }
     }
 
-    // Format incoming new items
-    const newItems: TableOrderItem[] = orderData.items.map((item, idx) => ({
-      ...item,
-      item_key: item.item_key || `${item.item_id || 'dish'}_${now.getTime()}_${idx}`,
-      station: item.station || this.determineItemStation(item),
-      status: (tableDocData?.pay_first_enabled ? 'AWAITING_PAYMENT' : 'RECEIVED') as OrderStatus,
-      ready_at: null,
-      served_at: null,
-      ordered_at: item.ordered_at || now.toISOString(),
-    }));
+    // Security Hardening: verify item prices against the database menu item records to prevent client pricing tampering
+    const itemIds = orderData.items.map((it: any) => it.item_id || it.id).filter(Boolean);
+    const itemNames = orderData.items.map((it: any) => it.name).filter(Boolean);
+
+    let dbMenuItems: any[] = [];
+    try {
+      dbMenuItems = await prisma.menuItem.findMany({
+        where: {
+          business_id: businessId,
+          OR: [
+            ...(itemIds.length ? [{ id: { in: itemIds } }] : []),
+            ...(itemNames.length ? [{ name: { in: itemNames } }] : []),
+          ],
+        },
+      });
+    } catch (e: any) {
+      console.warn('DB menu items lookup for price verification note:', e.message);
+    }
+
+    const itemMapById = new Map<string, any>();
+    const itemMapByName = new Map<string, any>();
+    for (const m of dbMenuItems) {
+      itemMapById.set(m.id, m);
+      if (m.name) itemMapByName.set(m.name.toLowerCase().trim(), m);
+    }
+
+    // Format incoming new items with verified prices
+    const newItems: TableOrderItem[] = orderData.items.map((item: any, idx: number) => {
+      const dbItem = (item.item_id && itemMapById.get(item.item_id)) ||
+                     (item.id && itemMapById.get(item.id)) ||
+                     (item.name && itemMapByName.get(item.name.toLowerCase().trim()));
+
+      let verifiedPrice = Number(item.price) || 0;
+      if (dbItem) {
+        let matchedVariantPrice: number | null = null;
+        const variantKey = item.variant_id || item.variant_name || item.variant?.id || item.variant?.name || item.selected_variant?.id || item.selected_variant?.name;
+        if (variantKey && Array.isArray(dbItem.variants)) {
+          const normalizedKey = String(variantKey).trim().toLowerCase();
+          const v = (dbItem.variants as any[]).find(
+            (vr: any) =>
+              vr.id === variantKey ||
+              String(vr.id || '').trim().toLowerCase() === normalizedKey ||
+              String(vr.name || '').trim().toLowerCase() === normalizedKey
+          );
+          if (v && v.price != null) {
+            matchedVariantPrice = Number(v.price);
+          }
+        }
+        if (matchedVariantPrice != null) {
+          verifiedPrice = matchedVariantPrice;
+        } else {
+          verifiedPrice = Number(dbItem.price);
+        }
+      }
+      verifiedPrice = Math.max(0, verifiedPrice || 0);
+
+      return {
+        ...item,
+        price: verifiedPrice,
+        item_key: item.item_key || `${item.item_id || 'dish'}_${now.getTime()}_${idx}`,
+        station: item.station || this.determineItemStation(item),
+        status: (tableDocData?.pay_first_enabled ? 'AWAITING_PAYMENT' : 'RECEIVED') as OrderStatus,
+        ready_at: null,
+        served_at: null,
+        ordered_at: item.ordered_at || now.toISOString(),
+      };
+    });
 
     // If an existing unsettled order is found, APPEND new items & update bill immediately!
     if (existingDocSnap) {

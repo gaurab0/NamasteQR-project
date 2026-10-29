@@ -84,6 +84,7 @@ interface BillingPOSProps {
   isViewOnly?: boolean;
   onRequestRoleSignIn?: () => void;
   onNavigate?: (path: string) => void;
+  onNavigateTab?: (tab: any, subTab?: any) => void;
 }
 
 export const BillingPOS: React.FC<BillingPOSProps> = ({
@@ -93,6 +94,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   isViewOnly = false,
   onRequestRoleSignIn,
   onNavigate,
+  onNavigateTab,
 }) => {
   const canSettleBill = !isViewOnly;
   // State
@@ -1036,7 +1038,13 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               <button
                 id="btn-goto-records-page"
                 type="button"
-                onClick={() => { if (onNavigate) { onNavigate('operations'); } else { setActiveSubTab('records'); } }}
+                onClick={() => {
+                  if (onNavigateTab) {
+                    onNavigateTab('operations', 'records');
+                  } else if (onNavigate) {
+                    onNavigate('/dashboard');
+                  }
+                }}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-xl transition border border-amber-200 cursor-pointer"
               >
                 <span>Open Sales Records & Excel Export</span>
@@ -1419,8 +1427,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH');
   const [creditGlAccount, setCreditGlAccount] = useState<{id: string, name: string, number: string} | null>(null);
   const [isCreditModalOpen, setIsCreditModalOpen] = useState(false);
-  const [discountPercent, setDiscountPercent] = useState<number>(0);
-  const [flatDiscount, setFlatDiscount] = useState<number>(0);
+  const [discountPercent, setDiscountPercent] = useState<number | string>('');
+  const [flatDiscount, setFlatDiscount] = useState<number | string>('');
   const [notes, setNotes] = useState<string>('');
 
   // Promo Code State
@@ -1440,7 +1448,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       name: '',
       quantity: 1,
       price: 0,
-      unit_price: 0,
+      unit_price: '' as any,
       subtotal: 0,
       total_price: 0,
     },
@@ -1688,7 +1696,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           name: '',
           quantity: 1,
           price: 0,
-          unit_price: 0,
+          unit_price: '' as any,
           subtotal: 0,
           total_price: 0,
         });
@@ -1756,12 +1764,12 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       const target = { ...copy[index], [field]: val };
       if (field === 'quantity' || field === 'unit_price' || field === 'price') {
         const qty = field === 'quantity' && val === '' ? 1 : Math.max(1, Number(target.quantity) || 1);
-        const price = Number(target.unit_price ?? target.price) || 0;
+        const price = val === '' ? 0 : (Number(target.unit_price ?? target.price) || 0);
         if (field !== 'quantity' || val !== '') {
           target.quantity = qty;
         }
         target.price = price;
-        target.unit_price = price;
+        target.unit_price = val === '' ? ('' as any) : price;
         target.subtotal = qty * price;
         target.total_price = qty * price;
       }
@@ -1806,7 +1814,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           name: '',
           quantity: 1,
           price: 0,
-          unit_price: 0,
+          unit_price: '' as any,
           subtotal: 0,
           total_price: 0,
         },
@@ -1926,7 +1934,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     return calculateBillTotals({
       itemsMenuTotal,
       taxConfig,
-      manualDiscountPercent: discountPercent,
+      manualDiscountPercent: Number(discountPercent) || 0,
       manualFlatDiscount: Number(flatDiscount) || 0,
       promoDiscountPercent: appliedPromo?.discountPercent || 0,
     });
@@ -1939,7 +1947,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const manualDiscountAmount = billCalc.manualDiscountAmount;
   const promoDiscountAmount = billCalc.promoDiscountAmount;
   const totalDiscountAmount = billCalc.totalDiscountAmount;
-  const totalDiscountPercent = discountPercent + (appliedPromo?.discountPercent || 0);
+  const totalDiscountPercent = (Number(discountPercent) || 0) + (appliedPromo?.discountPercent || 0);
   const grandTotal = billCalc.grandTotal;
   const isInclusiveTax = billCalc.isInclusive;
 
@@ -2009,7 +2017,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   };
 
   const handleRemovePromo = () => {
-    if (appliedPromo && appliedPromo.discountPercent === 0 && flatDiscount > 0) {
+    if (appliedPromo && appliedPromo.discountPercent === 0 && Number(flatDiscount) > 0) {
       setFlatDiscount(0);
     }
     setAppliedPromo(null);
@@ -2020,9 +2028,20 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
   const handleCompleteSale = async () => {
     // Exclude any empty item placeholder slots (unfilled dish rows)
-    const validItems = items.filter(
-      (item) => (item.name || '').trim().length > 0
-    );
+    const validItems = items
+      .filter((item) => (item.name || '').trim().length > 0)
+      .map((item) => {
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        const price = Number(item.unit_price ?? item.price) || 0;
+        return {
+          ...item,
+          quantity: qty,
+          price,
+          unit_price: price,
+          subtotal: qty * price,
+          total_price: qty * price,
+        };
+      });
 
     if (validItems.length === 0 || subtotal <= 0) {
       alert('Please add at least one dish with a valid name and price.');
@@ -2392,11 +2411,28 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         min="0"
                         step="any"
                         inputMode="decimal"
-                        value={item.unit_price ?? item.price ?? 0}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) =>
-                          handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
-                        }
+                        placeholder="0.00"
+                        value={item.unit_price === 0 || (item.unit_price as any) === '' ? '' : item.unit_price}
+                        onFocus={(e) => {
+                          const t = e.currentTarget;
+                          setTimeout(() => t.select(), 0);
+                        }}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            handleItemChange(idx, 'unit_price', '');
+                          } else {
+                            const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
+                              ? raw.replace(/^0+/, '')
+                              : raw;
+                            handleItemChange(idx, 'unit_price', clean === '' ? '' : parseFloat(clean) || 0);
+                          }
+                        }}
+                        onBlur={() => {
+                          if ((item.unit_price as any) === '' || isNaN(Number(item.unit_price))) {
+                            handleItemChange(idx, 'unit_price', 0);
+                          }
+                        }}
                         className="w-20 pl-6 pr-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                       />
                     </div>
@@ -2522,11 +2558,28 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         min="0"
                         step="any"
                         inputMode="decimal"
-                        value={item.unit_price ?? item.price ?? 0}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) =>
-                          handleItemChange(idx, 'unit_price', parseFloat(e.target.value) || 0)
-                        }
+                        placeholder="0.00"
+                        value={item.unit_price === 0 || (item.unit_price as any) === '' ? '' : item.unit_price}
+                        onFocus={(e) => {
+                          const t = e.currentTarget;
+                          setTimeout(() => t.select(), 0);
+                        }}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '') {
+                            handleItemChange(idx, 'unit_price', '');
+                          } else {
+                            const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
+                              ? raw.replace(/^0+/, '')
+                              : raw;
+                            handleItemChange(idx, 'unit_price', clean === '' ? '' : parseFloat(clean) || 0);
+                          }
+                        }}
+                        onBlur={() => {
+                          if ((item.unit_price as any) === '' || isNaN(Number(item.unit_price))) {
+                            handleItemChange(idx, 'unit_price', 0);
+                          }
+                        }}
                         className="w-20 sm:w-24 px-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                       />
                     </td>
@@ -2611,8 +2664,30 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     type="number"
                     min="0"
                     max="100"
-                    value={discountPercent}
-                    onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
+                    step="any"
+                    placeholder="0"
+                    value={discountPercent === 0 || discountPercent === '' ? '' : discountPercent}
+                    onFocus={(e) => {
+                      const t = e.currentTarget;
+                      setTimeout(() => t.select(), 0);
+                    }}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        setDiscountPercent('');
+                      } else {
+                        const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
+                          ? raw.replace(/^0+/, '')
+                          : raw;
+                        const num = parseFloat(clean);
+                        setDiscountPercent(isNaN(num) ? '' : Math.min(100, Math.max(0, num)));
+                      }
+                    }}
+                    onBlur={() => {
+                      if (discountPercent === '' || isNaN(Number(discountPercent))) {
+                        setDiscountPercent(0);
+                      }
+                    }}
                     className="w-20 px-3 py-1.5 rounded-xl border border-zinc-300 text-xs font-bold text-right focus:ring-2 focus:ring-amber-500"
                   />
                   <span className="text-xs font-semibold text-zinc-500">%</span>
@@ -2628,11 +2703,31 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     id="input-sale-discount-flat"
                     type="number"
                     min="0"
-                    step="1"
-                    value={flatDiscount}
-                    onChange={(e) => setFlatDiscount(parseFloat(e.target.value) || 0)}
+                    step="any"
+                    placeholder="0"
+                    value={flatDiscount === 0 || flatDiscount === '' ? '' : flatDiscount}
+                    onFocus={(e) => {
+                      const t = e.currentTarget;
+                      setTimeout(() => t.select(), 0);
+                    }}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === '') {
+                        setFlatDiscount('');
+                      } else {
+                        const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
+                          ? raw.replace(/^0+/, '')
+                          : raw;
+                        const num = parseFloat(clean);
+                        setFlatDiscount(isNaN(num) ? '' : Math.max(0, num));
+                      }
+                    }}
+                    onBlur={() => {
+                      if (flatDiscount === '' || isNaN(Number(flatDiscount))) {
+                        setFlatDiscount(0);
+                      }
+                    }}
                     className="w-24 px-3 py-1.5 rounded-xl border border-zinc-300 text-xs font-bold text-right focus:ring-2 focus:ring-amber-500"
-                    placeholder="0.00"
                   />
                   <span className="text-xs font-semibold text-zinc-500">flat</span>
                 </div>
@@ -2773,7 +2868,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             {manualDiscountAmount > 0 && (
               <div className="flex items-center justify-between text-rose-600 font-semibold">
                 <span>
-                  Manual Discount{discountPercent > 0 ? ` (${discountPercent}%)` : ''}:
+                  Manual Discount{(Number(discountPercent) || 0) > 0 ? ` (${discountPercent}%)` : ''}:
                 </span>
                 <span>
                   -{currency} {manualDiscountAmount.toFixed(2)}

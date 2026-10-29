@@ -14,6 +14,16 @@ import {
   BrowserPrintDriver,
 } from './printer-drivers';
 
+function escapeHtml(val: any): string {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 class PrintService {
   private usbDriver = new WebUsbDriver();
   private bluetoothDriver = new WebBluetoothDriver();
@@ -320,9 +330,9 @@ class PrintService {
       html += `
           <div class="header">
             <h2>KITCHEN ORDER TICKET</h2>
-            <h1>Order #${orderNumber}</h1>
-            <div>Table: ${tableNo}</div>
-            <div>Time: ${time} | Server: ${serverName}</div>
+            <h1>Order #${escapeHtml(orderNumber)}</h1>
+            <div>Table: ${escapeHtml(tableNo)}</div>
+            <div>Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
           </div>
       `;
 
@@ -330,8 +340,8 @@ class PrintService {
       items.forEach((item: any) => {
         html += `
           <div class="item">
-            <span class="item-qty">${item.quantity}x</span> ${item.name}
-            ${item.notes ? `<div class="notes">- ${item.notes}</div>` : ''}
+            <span class="item-qty">${Number(item.quantity) || 1}x</span> ${escapeHtml(item.name)}
+            ${item.notes ? `<div class="notes">- ${escapeHtml(item.notes)}</div>` : ''}
           </div>
         `;
       });
@@ -341,10 +351,10 @@ class PrintService {
       html += `
           <div class="header">
             <h2>TAX INVOICE / RECEIPT</h2>
-            <h1>Order #${orderNumber}</h1>
-            ${data.invoice_number ? `<div>Invoice: ${data.invoice_number}</div>` : ''}
-            <div>Table: ${tableNo}</div>
-            <div>Time: ${time} | Server: ${serverName}</div>
+            <h1>Order #${escapeHtml(orderNumber)}</h1>
+            ${data.invoice_number ? `<div>Invoice: ${escapeHtml(data.invoice_number)}</div>` : ''}
+            <div>Table: ${escapeHtml(tableNo)}</div>
+            <div>Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
           </div>
       `;
 
@@ -353,10 +363,10 @@ class PrintService {
         html += `
           <div class="item">
             <div class="row">
-              <span>${item.quantity}x ${item.name}</span>
-              <span>Rs ${(item.quantity * (item.price || 0)).toFixed(2)}</span>
+              <span>${Number(item.quantity) || 1}x ${escapeHtml(item.name)}</span>
+              <span>Rs ${(Number(item.quantity || 1) * (Number(item.price) || 0)).toFixed(2)}</span>
             </div>
-            ${item.notes ? `<div class="notes">- ${item.notes}</div>` : ''}
+            ${item.notes ? `<div class="notes">- ${escapeHtml(item.notes)}</div>` : ''}
           </div>
         `;
       });

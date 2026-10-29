@@ -848,9 +848,12 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
     if (tableId) {
       socketService.joinTable(targetBizId, tableId);
-    } else {
+    } else if (user) {
       socketService.joinBusiness(targetBizId);
+    } else {
+      socketService.joinMenu(targetBizId);
     }
+    socketService.joinMenu(targetBizId);
 
     const unsubOrder = socketService.subscribeToOrders((updatedOrder) => {
       const targetOrderId = activeOrder?.id || successOrderData?.id;

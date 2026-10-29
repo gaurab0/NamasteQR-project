@@ -1,5 +1,11 @@
 import { ThermalPrinterDriver, DriverType, PrinterConfig } from '../../types/printer.types';
 
+function getAuthHeader(): Record<string, string> {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('serveflow_auth_token') || sessionStorage.getItem('serveflow_auth_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export class NetworkLanDriver implements ThermalPrinterDriver {
   public readonly type: DriverType = 'lan';
   private host: string = '';
@@ -58,7 +64,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
     try {
       const response = await fetch('/api/print/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({ host: this.host, port: this.port, timeout: 3500 }),
       });
 
@@ -116,6 +122,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
           'Content-Type': 'application/octet-stream',
           'x-printer-host': this.host,
           'x-printer-port': String(this.port),
+          ...getAuthHeader(),
         },
         body: data,
       });
@@ -128,7 +135,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       // Fallback: try JSON array payload
       const jsonRes = await fetch('/api/print/lan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         body: JSON.stringify({
           host: this.host,
           port: this.port,

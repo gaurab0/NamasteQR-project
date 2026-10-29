@@ -112,7 +112,6 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   useEffect(() => {
     if (!targetBizId || !liveOrder.id) return;
 
-    socketService.joinBusiness(targetBizId);
     if (liveOrder.table_id) {
       socketService.joinTable(targetBizId, liveOrder.table_id);
     }

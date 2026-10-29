@@ -74,6 +74,14 @@ interface AuditLogItem {
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user, logout, updateBusiness } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
+  const [operationsSubTab, setOperationsSubTab] = useState<'shift' | 'records' | 'gl_accounts'>('shift');
+
+  const handleNavigateTab = (tab: DashboardTab, subTab?: 'shift' | 'records' | 'gl_accounts') => {
+    setActiveTab(tab);
+    if (subTab) {
+      setOperationsSubTab(subTab);
+    }
+  };
   const [globalTimeFilter, setGlobalTimeFilter] = useState<'today' | 'week' | 'month'>('today');
   const [globalDaybookFilter, setGlobalDaybookFilter] = useState<string>('all');
   const [kdsDefaultStation, setKdsDefaultStation] = useState<KDSViewMode>('KITCHEN');
@@ -514,7 +522,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               business={currentBusinessObj}
               user={user}
               staffSession={staffSession}
-              onNavigateTab={(tab) => setActiveTab(tab)}
+              onNavigateTab={handleNavigateTab}
               onOpenRoleModal={() => setIsRoleModalOpen(true)}
               timeFilter={globalTimeFilter}
               onChangeTimeFilter={setGlobalTimeFilter}
@@ -529,6 +537,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               activeRole={staffSession?.role || user.role}
               isViewOnly={isViewOnly}
               onNavigate={onNavigate}
+              initialSubTab={operationsSubTab}
               />
           )}
 
@@ -598,6 +607,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               isViewOnly={isViewOnly}
               onRequestRoleSignIn={() => setIsRoleModalOpen(true)}
               onNavigate={onNavigate}
+              onNavigateTab={handleNavigateTab}
               />
           )}
 

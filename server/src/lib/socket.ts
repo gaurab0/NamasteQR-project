@@ -1,12 +1,113 @@
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import type { Server as HTTPServer } from 'http';
+import jwt from 'jsonwebtoken';
+import { config } from '../config/env';
+import { db } from '../services/db.service';
+import { prisma } from './prisma';
+import { assertBusinessAccess, buildSessionBusiness } from '../middleware/auth.middleware';
+import { BusinessType, UserRole } from '../types';
 
 let io: SocketIOServer | null = null;
+
+function extractSocketToken(socket: Socket, payloadToken?: string): string | null {
+  if (payloadToken && typeof payloadToken === 'string') return payloadToken;
+  if (socket.handshake?.auth?.token && typeof socket.handshake.auth.token === 'string') {
+    return socket.handshake.auth.token;
+  }
+  const authHeader = socket.handshake?.headers?.authorization;
+  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  const xAuthToken = socket.handshake?.headers?.['x-auth-token'];
+  if (xAuthToken && typeof xAuthToken === 'string') {
+    return xAuthToken;
+  }
+  const cookieHeader = socket.handshake?.headers?.cookie;
+  if (cookieHeader && typeof cookieHeader === 'string') {
+    const cookies = cookieHeader.split(';').map((c: string) => c.trim());
+    for (const c of cookies) {
+      if (c.startsWith('auth_token=')) {
+        return c.substring('auth_token='.length);
+      }
+    }
+  }
+  return null;
+}
+
+export async function authenticateSocket(socket: Socket, payloadToken?: string) {
+  const token = extractSocketToken(socket, payloadToken);
+  if (!token) return null;
+
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret) as {
+      userId: string;
+      role: UserRole;
+      email?: string;
+      businessId?: string;
+      businessName?: string;
+      businessType?: BusinessType;
+    };
+    let user = await db.findUserById(decoded.userId);
+    if (!user && decoded.email) {
+      user = await db.findUserByEmail(decoded.email);
+    }
+    if (!user) {
+      const targetBizId = decoded.businessId || 'maya-forest-resort';
+      const targetBizName = decoded.businessName;
+      const targetBizType = decoded.businessType;
+      const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
+      user = await db.ensureUser({
+        id: decoded.userId,
+        business_id: business.id,
+        email: decoded.email || `owner@${business.id}.app`,
+        role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
+      });
+    }
+
+    if (user && user.status !== 'SUSPENDED' && user.status !== 'DEACTIVATED') {
+      let business = await db.findBusinessById(user.business_id);
+      if (!business) {
+        business = await db.ensureBusiness(user.business_id);
+      }
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+        created_at: user.created_at,
+        role: user.role,
+        status: user.status,
+        allowed_tabs: await db.ensureAllowedTabsPersisted(user),
+        custom_permissions: user.custom_permissions,
+        business: buildSessionBusiness(business, user.business_id),
+      };
+    }
+  } catch (err) {
+    return null;
+  }
+  return null;
+}
 
 export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: '*',
+      origin: (requestOrigin, callback) => {
+        // Allow clients with no origin header (e.g. native mobile apps, local test runners)
+        if (!requestOrigin) return callback(null, true);
+
+        const allowed = [
+          config.frontendUrl,
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://127.0.0.1:3000',
+          'http://127.0.0.1:5173',
+          ...config.allowedOrigins,
+        ];
+
+        if (allowed.some((ao) => ao && requestOrigin.toLowerCase() === ao.toLowerCase()) || !config.isProduction) {
+          return callback(null, true);
+        }
+        return callback(new Error('Origin not allowed by Socket.IO CORS policy'));
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -15,28 +116,105 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
   });
 
   io.on('connection', (socket) => {
-    // When a client connects and joins their business room
-    socket.on('join:business', (businessId: string) => {
-      if (businessId) {
-        socket.join(`business:${businessId}`);
+    // When a staff or authorized user connects and joins their business room
+    socket.on('join:business', async (data: string | { businessId: string; token?: string }) => {
+      const businessId = typeof data === 'string' ? data : data?.businessId;
+      const payloadToken = typeof data === 'object' ? data?.token : undefined;
+
+      if (!businessId) {
+        socket.emit('socket:error', { code: 'INVALID_REQUEST', message: 'Missing businessId' });
+        return;
       }
+
+      const authUser = await authenticateSocket(socket, payloadToken);
+      if (!authUser) {
+        socket.emit('socket:error', {
+          code: 'UNAUTHORIZED',
+          message: 'Authentication required to join business room',
+        });
+        return;
+      }
+
+      const isAuthorized = await assertBusinessAccess(authUser as any, businessId);
+      if (!isAuthorized) {
+        socket.emit('socket:error', {
+          code: 'FORBIDDEN',
+          message: 'Access denied: You do not have permission to join this business room',
+        });
+        return;
+      }
+
+      socket.join(`business:${businessId}`);
+      socket.emit('joined:business', { businessId });
     });
 
-    socket.on('leave:business', (businessId: string) => {
+    socket.on('leave:business', (data: string | { businessId: string }) => {
+      const businessId = typeof data === 'string' ? data : data?.businessId;
       if (businessId) {
         socket.leave(`business:${businessId}`);
+        socket.emit('left:business', { businessId });
       }
     });
 
-    socket.on('join:table', ({ businessId, tableId }: { businessId: string; tableId: string }) => {
-      if (businessId && tableId) {
-        socket.join(`table:${businessId}:${tableId}`);
+    // When a customer joins their specific dining table
+    socket.on('join:table', async (data: any) => {
+      const businessId = data?.businessId;
+      const tableId = data?.tableId;
+      if (!businessId || !tableId) {
+        socket.emit('socket:error', { code: 'INVALID_REQUEST', message: 'Missing businessId or tableId' });
+        return;
+      }
+
+      try {
+        const table = await prisma.restaurantTable.findFirst({
+          where: {
+            business_id: businessId,
+            OR: [{ id: tableId }, { table_number: tableId }],
+          },
+        });
+
+        if (!table) {
+          socket.emit('socket:error', {
+            code: 'TABLE_NOT_FOUND',
+            message: `Table ${tableId} not found in business ${businessId}`,
+          });
+          return;
+        }
+
+        socket.join(`table:${businessId}:${table.id}`);
+        if (table.id !== tableId) {
+          socket.join(`table:${businessId}:${tableId}`);
+        }
+        socket.emit('joined:table', { businessId, tableId: table.id });
+      } catch (err) {
+        socket.emit('socket:error', {
+          code: 'INTERNAL_ERROR',
+          message: 'Failed to join table room',
+        });
       }
     });
 
-    socket.on('leave:table', ({ businessId, tableId }: { businessId: string; tableId: string }) => {
+    socket.on('leave:table', (data: any) => {
+      const businessId = data?.businessId;
+      const tableId = data?.tableId;
       if (businessId && tableId) {
         socket.leave(`table:${businessId}:${tableId}`);
+        socket.emit('left:table', { businessId, tableId });
+      }
+    });
+
+    // Public menu updates channel (diners can receive menu edits without leaking orders)
+    socket.on('join:menu', (businessId: string) => {
+      if (businessId) {
+        socket.join(`menu:${businessId}`);
+        socket.emit('joined:menu', { businessId });
+      }
+    });
+
+    socket.on('leave:menu', (businessId: string) => {
+      if (businessId) {
+        socket.leave(`menu:${businessId}`);
+        socket.emit('left:menu', { businessId });
       }
     });
   });
@@ -85,6 +263,9 @@ export const realtimeEmitter = {
   },
   menuUpdated(businessId: string) {
     emitToBusiness(businessId, 'menu:updated', { businessId, timestamp: new Date().toISOString() });
+    if (io && businessId) {
+      io.to(`menu:${businessId}`).emit('menu:updated', { businessId, timestamp: new Date().toISOString() });
+    }
   },
   taxConfigUpdated(businessId: string, config: any) {
     emitToBusiness(businessId, 'tax_config:updated', config);

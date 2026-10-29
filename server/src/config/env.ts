@@ -8,7 +8,15 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
   databaseUrl: process.env.DATABASE_URL || '',
-  jwtSecret: process.env.JWT_SECRET || 'namasteqr_default_secure_jwt_secret_token_2026',
+  jwtSecret: (() => {
+    if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim().length > 0) {
+      return process.env.JWT_SECRET.trim();
+    }
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL SECURITY ERROR: JWT_SECRET environment variable must be set in production');
+    }
+    return 'namasteqr_dev_insecure_jwt_secret_token_2026';
+  })(),
   sessionExpiryDays: parseInt(process.env.SESSION_EXPIRY_DAYS || '7', 10),
   bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
   

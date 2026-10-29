@@ -300,9 +300,16 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const probeNetworkPrinter = useCallback(async (host: string, port: number = 9100) => {
     try {
+      const token = typeof window !== 'undefined'
+        ? (localStorage.getItem('serveflow_auth_token') || sessionStorage.getItem('serveflow_auth_token'))
+        : null;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch('/api/print/test-connection', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ host, port, timeout: 3500 }),
       });
       const data = await res.json();

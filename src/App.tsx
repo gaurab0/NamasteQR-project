@@ -187,6 +187,9 @@ function AppContent() {
         return <DashboardPage onNavigate={navigate} />;
       case '/':
       default:
+        if (isAuthenticated) {
+          return <DashboardPage onNavigate={navigate} />;
+        }
         return <LandingPage onNavigate={navigate} onBookDemo={() => setIsDemoModalOpen(true)} />;
     }
   };

@@ -162,7 +162,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   useEffect(() => {
     if (!order?.id || !order?.business_id) return;
 
-    socketService.joinBusiness(order.business_id);
     if (order.table_id) {
       socketService.joinTable(order.business_id, order.table_id);
     }

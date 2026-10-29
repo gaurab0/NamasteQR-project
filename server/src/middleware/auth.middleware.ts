@@ -8,6 +8,8 @@ import {
   canAccessResource,
   describeResourceRequirement,
   isBusinessOwnerRole,
+  isOwnerSubject,
+  isManagerRole,
   type AccessKind,
 } from '../services/tabAccess';
 
@@ -124,15 +126,15 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
         // If the token was signed with our secret, it is authentic.
         // If the database was recently remixed or user record was cleared, restore/ensure it!
         if (!user) {
-          const targetBizId = decoded.businessId || (req.headers['x-business-id'] as string) || 'maya-forest-resort';
-          const targetBizName = decoded.businessName || (req.headers['x-business-name'] as string);
-          const targetBizType = decoded.businessType || (req.headers['x-business-type'] as BusinessType);
+          const targetBizId = decoded.businessId || 'maya-forest-resort';
+          const targetBizName = decoded.businessName;
+          const targetBizType = decoded.businessType;
           const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
           
           user = await db.ensureUser({
             id: decoded.userId,
             business_id: business.id,
-            email: decoded.email || (req.headers['x-user-email'] as string) || `owner@${business.id}.app`,
+            email: decoded.email || `owner@${business.id}.app`,
             role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
           });
         }
@@ -177,81 +179,7 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
           return next();
         }
       } catch (err) {
-        // Token was invalid or expired, continue to fallback session headers
-      }
-    }
-
-    // Fallback: Check staff / cached user session headers sent from active client session
-    const staffSessionHeader = req.headers['x-staff-session'] as string;
-    const staffEmailHeader = (req.headers['x-staff-email'] || req.headers['x-user-email']) as string;
-    const staffRoleHeader = (req.headers['x-staff-role'] || req.headers['x-user-role']) as string;
-    const businessIdHeader = req.headers['x-business-id'] as string;
-    const businessNameHeader = req.headers['x-business-name'] as string;
-    const businessTypeHeader = req.headers['x-business-type'] as BusinessType;
-    const userIdHeader = req.headers['x-user-id'] as string;
-
-    let targetEmail = staffEmailHeader;
-    let targetRole = staffRoleHeader;
-    let targetBizId = businessIdHeader;
-    let targetUserId = userIdHeader;
-
-    if (staffSessionHeader) {
-      try {
-        const parsed = JSON.parse(staffSessionHeader);
-        if (parsed.email) targetEmail = parsed.email;
-        if (parsed.role) targetRole = parsed.role;
-        if (parsed.businessId) targetBizId = parsed.businessId;
-        if (parsed.userId || parsed.id) targetUserId = parsed.userId || parsed.id;
-        else if (parsed.email) targetUserId = ''; // identify the staff member by email, not the cached owner id
-      } catch (e) {
-        // Ignore JSON parse error
-      }
-    }
-
-    if (targetEmail || targetBizId || targetRole || targetUserId) {
-      let business = targetBizId ? await db.findBusinessById(targetBizId) : null;
-      if (!business && targetBizId) {
-        business = await db.ensureBusiness(targetBizId, businessNameHeader, businessTypeHeader);
-      }
-      if (!business) {
-        business = await db.getDefaultBusiness();
-      }
-
-      let user = targetUserId ? await db.findUserById(targetUserId) : null;
-      if (!user && targetEmail) {
-        user = await db.findUserByEmail(targetEmail);
-      }
-
-      if (!user && business) {
-        user = await db.ensureUser({
-          id: targetUserId,
-          business_id: business.id,
-          email: targetEmail || `owner@${business.id}.app`,
-          role: (targetRole as UserRole) || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
-        });
-      }
-
-      if (business && user) {
-        // The role always comes from the database record: client-supplied role headers are never trusted.
-        const role = (user.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER')) as UserRole;
-        req.user = {
-          id: user.id,
-          email: user.email,
-          name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
-          created_at: user.created_at,
-          role,
-          status: 'ACTIVE',
-          allowed_tabs: await db.ensureAllowedTabsPersisted(user),
-          custom_permissions: user.custom_permissions,
-          business: buildSessionBusiness(business, business.id),
-          phone: {
-            countryCode: '+977',
-            number: '9800000000',
-            e164: '+9779800000000',
-            isVerified: true,
-          },
-        };
-        return next();
+        // Token was invalid or expired
       }
     }
 
@@ -295,15 +223,15 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
         }
 
         if (!user) {
-          const targetBizId = decoded.businessId || (req.headers['x-business-id'] as string) || 'maya-forest-resort';
-          const targetBizName = decoded.businessName || (req.headers['x-business-name'] as string);
-          const targetBizType = decoded.businessType || (req.headers['x-business-type'] as BusinessType);
+          const targetBizId = decoded.businessId || 'maya-forest-resort';
+          const targetBizName = decoded.businessName;
+          const targetBizType = decoded.businessType;
           const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
           
           user = await db.ensureUser({
             id: decoded.userId,
             business_id: business.id,
-            email: decoded.email || (req.headers['x-user-email'] as string) || `owner@${business.id}.app`,
+            email: decoded.email || `owner@${business.id}.app`,
             role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
           });
         }
@@ -336,82 +264,13 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
           return next();
         }
       } catch {
-        // Fall through to session headers
+        // Fall through to unauthenticated next
       }
     }
 
-    // Check session headers fallback
-    const staffSessionHeader = req.headers['x-staff-session'] as string;
-    const staffEmailHeader = (req.headers['x-staff-email'] || req.headers['x-user-email']) as string;
-    const staffRoleHeader = (req.headers['x-staff-role'] || req.headers['x-user-role']) as string;
-    const businessIdHeader = req.headers['x-business-id'] as string;
-    const businessNameHeader = req.headers['x-business-name'] as string;
-    const businessTypeHeader = req.headers['x-business-type'] as BusinessType;
-    const userIdHeader = req.headers['x-user-id'] as string;
-
-    if (staffSessionHeader || staffEmailHeader || businessIdHeader || userIdHeader) {
-      let targetEmail = staffEmailHeader;
-      let targetRole = staffRoleHeader;
-      let targetBizId = businessIdHeader;
-      let targetUserId = userIdHeader;
-
-      if (staffSessionHeader) {
-        try {
-          const parsed = JSON.parse(staffSessionHeader);
-          if (parsed.email) targetEmail = parsed.email;
-          if (parsed.role) targetRole = parsed.role;
-          if (parsed.businessId) targetBizId = parsed.businessId;
-          if (parsed.userId || parsed.id) targetUserId = parsed.userId || parsed.id;
-          else if (parsed.email) targetUserId = ''; // identify the staff member by email, not the cached owner id
-        } catch {}
-      }
-
-      let business = targetBizId ? await db.findBusinessById(targetBizId) : null;
-      if (!business && targetBizId) {
-        business = await db.ensureBusiness(targetBizId, businessNameHeader, businessTypeHeader);
-      }
-      if (!business) {
-        business = await db.getDefaultBusiness();
-      }
-
-      let user = targetUserId ? await db.findUserById(targetUserId) : null;
-      if (!user && targetEmail) {
-        user = await db.findUserByEmail(targetEmail);
-      }
-      if (!user && business) {
-        user = await db.ensureUser({
-          id: targetUserId,
-          business_id: business.id,
-          email: targetEmail || `owner@${business.id}.app`,
-          role: (targetRole as UserRole) || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
-        });
-      }
-
-      if (business && user) {
-        req.user = {
-          id: user.id,
-          email: user.email,
-          name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
-          created_at: user.created_at,
-          role: user.role || (targetRole as UserRole) || 'RESTAURANT_OWNER', // DB role wins over client headers
-          status: 'ACTIVE',
-          allowed_tabs: await db.ensureAllowedTabsPersisted(user),
-          custom_permissions: user.custom_permissions,
-          business: buildSessionBusiness(business, business.id),
-          phone: {
-            countryCode: '+977',
-            number: '9800000000',
-            e164: '+9779800000000',
-            isVerified: true,
-          },
-        };
-        return next();
-      }
-    }
-
-    next();
+    return next();
   } catch {
-    next();
+    return next();
   }
 }
 
@@ -443,7 +302,7 @@ export function requireRole(...allowedRoles: UserRole[]) {
  * is acting as) holds a tab that unlocks `resource` for the requested kind of access.
  * Pair with `authenticate` (401 when no user is present).
  */
-export function requireResourceAccess(resource: AppResource, kind: AccessKind) {
+export function requireResourceAccess(resource: AppResource | AppResource[], kind: AccessKind) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({
@@ -452,18 +311,46 @@ export function requireResourceAccess(resource: AppResource, kind: AccessKind) {
       });
     }
 
-    if (!canAccessResource(req.user, resource, kind)) {
+    const resources = Array.isArray(resource) ? resource : [resource];
+    const hasAccess = resources.some((r) => canAccessResource(req.user, r, kind));
+
+    if (!hasAccess) {
       return res.status(403).json({
         success: false,
         error: {
           code: 'TAB_ACCESS_DENIED',
-          message: `Permission denied: this action ${describeResourceRequirement(resource, kind)}.`,
+          message: `Permission denied: this action ${describeResourceRequirement(resources[0], kind)}.`,
         },
       });
     }
 
     next();
   };
+}
+
+/**
+ * Ensures authenticated user is a business owner or holds a manager role
+ */
+export function requireOwnerOrManager(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+    });
+  }
+
+  const effectiveRole = req.user.acting_as ? req.user.acting_as.role : req.user.role;
+  if (!isOwnerSubject(req.user) && !isManagerRole(effectiveRole)) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Permission denied: Requires owner or manager authorization.',
+      },
+    });
+  }
+
+  next();
 }
 
 /**

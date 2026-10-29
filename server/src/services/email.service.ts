@@ -4,7 +4,17 @@ import nodemailer from 'nodemailer';
 import { db } from './db.service';
 import { config } from '../config/env';
 
-export class EmailService {
+export function escapeHtml(val: any): string {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+class EmailService {
   private transporter: nodemailer.Transporter | null = null;
   private isTransporterReady: boolean = false;
 
@@ -219,32 +229,32 @@ Routed Directly To: ${targetEmail}
           <tbody>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; width: 140px; font-weight: 600;">Client Name</td>
-              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${data.name}</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${escapeHtml(data.name)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Business / Venue</td>
-              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${data.businessName}</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${escapeHtml(data.businessName)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Email Address</td>
               <td style="padding: 10px 0;">
-                <a href="mailto:${data.email}" style="color: #2563eb; font-weight: 600; text-decoration: none;">${data.email}</a>
+                <a href="mailto:${encodeURIComponent(data.email)}" style="color: #2563eb; font-weight: 600; text-decoration: none;">${escapeHtml(data.email)}</a>
               </td>
             </tr>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Phone Number</td>
               <td style="padding: 10px 0;">
-                <a href="tel:${data.phone}" style="color: #059669; font-weight: 700; text-decoration: none;">${data.phone}</a>
+                <a href="tel:${encodeURIComponent(data.phone)}" style="color: #059669; font-weight: 700; text-decoration: none;">${escapeHtml(data.phone)}</a>
               </td>
             </tr>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Venue Location</td>
-              <td style="padding: 10px 0; color: #18181b; font-weight: 600;">${data.location}</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 600;">${escapeHtml(data.location)}</td>
             </tr>
             <tr>
               <td style="padding: 10px 0; color: #71717a; font-weight: 600; vertical-align: top;">Other Queries</td>
               <td style="padding: 10px 0; color: #27272a; line-height: 1.5; background: #fafafa; padding: 10px 14px; border-radius: 8px;">
-                ${data.queries ? data.queries.replace(/\n/g, '<br/>') : '<em>No specific queries provided</em>'}
+                ${data.queries ? escapeHtml(data.queries).replace(/\n/g, '<br/>') : '<em>No specific queries provided</em>'}
               </td>
             </tr>
           </tbody>
@@ -330,26 +340,26 @@ Routed Directly To: ${targetEmail}
           <tbody>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; width: 140px; font-weight: 600;">Sender Name</td>
-              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${data.name}</td>
+              <td style="padding: 10px 0; color: #18181b; font-weight: 700;">${escapeHtml(data.name)}</td>
             </tr>
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Email Address</td>
               <td style="padding: 10px 0;">
-                <a href="mailto:${data.email}" style="color: #2563eb; font-weight: 600; text-decoration: none;">${data.email}</a>
+                <a href="mailto:${encodeURIComponent(data.email)}" style="color: #2563eb; font-weight: 600; text-decoration: none;">${escapeHtml(data.email)}</a>
               </td>
             </tr>
             ${data.phone ? `
             <tr style="border-bottom: 1px solid #f4f4f5;">
               <td style="padding: 10px 0; color: #71717a; font-weight: 600;">Phone Number</td>
               <td style="padding: 10px 0;">
-                <a href="tel:${data.phone}" style="color: #059669; font-weight: 700; text-decoration: none;">${data.phone}</a>
+                <a href="tel:${encodeURIComponent(data.phone)}" style="color: #059669; font-weight: 700; text-decoration: none;">${escapeHtml(data.phone)}</a>
               </td>
             </tr>
             ` : ''}
             <tr>
               <td style="padding: 10px 0; color: #71717a; font-weight: 600; vertical-align: top;">Message</td>
               <td style="padding: 10px 0; color: #27272a; line-height: 1.6; background: #fafafa; padding: 12px 14px; border-radius: 8px;">
-                ${data.message.replace(/\n/g, '<br/>')}
+                ${escapeHtml(data.message).replace(/\n/g, '<br/>')}
               </td>
             </tr>
           </tbody>

@@ -4,6 +4,7 @@ import net from 'net';
 import { createApp } from '../src/app';
 import { EscPosEncoder, ESCPOS } from '../../src/utils/escpos';
 import { BrowserPrintDriver } from '../../src/services/printer-drivers/BrowserPrintDriver';
+import { generateToken } from '../src/middleware/auth.middleware';
 
 async function runPrinterTests() {
   console.log('🧪 Starting ServeFlow Hardware & Printer Driver Test Suite...\n');
@@ -90,6 +91,12 @@ async function runPrinterTests() {
   const port = (server.address() as net.AddressInfo).port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
+  const authToken = generateToken({
+    userId: 'hw-printer-tester',
+    businessId: 'hw-printer-biz',
+    role: 'RESTAURANT_OWNER',
+  });
+
   try {
     console.log('\n📦 Test 3: Express Print Status Route (/api/print/status)...');
     const res = await fetch(`${baseUrl}/api/print/status`);
@@ -107,10 +114,21 @@ async function runPrinterTests() {
   // Test 4: Test Connection Validation (/api/print/test-connection)
   try {
     console.log('\n📦 Test 4: Socket Reachability Validation (/api/print/test-connection)...');
+    // Unauthenticated rejection
+    const unauthRes = await fetch(`${baseUrl}/api/print/test-connection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host: '192.168.1.1' }),
+    });
+    assert.strictEqual(unauthRes.status, 401, 'Unauthenticated test connection must return 401');
+
     // Validation on missing host
     const badRes = await fetch(`${baseUrl}/api/print/test-connection`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
       body: JSON.stringify({}),
     });
     assert.strictEqual(badRes.status, 400);
@@ -118,7 +136,10 @@ async function runPrinterTests() {
     // Validation with unreachable host with short timeout
     const timeoutRes = await fetch(`${baseUrl}/api/print/test-connection`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
       body: JSON.stringify({ host: '192.0.2.1', port: 9100, timeout: 500 }),
     });
     assert(timeoutRes.status === 504 || timeoutRes.status === 502);
@@ -147,6 +168,14 @@ async function runPrinterTests() {
     await new Promise<void>((resolve) => mockPrinterServer.listen(0, '127.0.0.1', () => resolve()));
     const mockPrinterPort = (mockPrinterServer.address() as net.AddressInfo).port;
 
+    // Unauthenticated rejection
+    const unauthLan = await fetch(`${baseUrl}/api/print/lan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: new Uint8Array([0x1b, 0x40]),
+    });
+    assert.strictEqual(unauthLan.status, 401, 'Unauthenticated LAN print must return 401');
+
     // Send binary ESC/POS payload via POST /api/print/lan
     const testData = new Uint8Array([0x1b, 0x40, 0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x0a]); // ESC @ Hello LF
     const printRes = await fetch(`${baseUrl}/api/print/lan?host=127.0.0.1&port=${mockPrinterPort}`, {
@@ -155,6 +184,7 @@ async function runPrinterTests() {
         'Content-Type': 'application/octet-stream',
         'x-printer-host': '127.0.0.1',
         'x-printer-port': String(mockPrinterPort),
+        Authorization: `Bearer ${authToken}`,
       },
       body: testData,
     });
@@ -183,7 +213,10 @@ async function runPrinterTests() {
 
     const hpRes = await fetch(`${baseUrl}/api/print/lan`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
       body: JSON.stringify({
         host: `127.0.0.1:${hpPort}`, // Combined IP:port format
         data: [0x1b, 0x40, 0x54, 0x45, 0x53, 0x54],

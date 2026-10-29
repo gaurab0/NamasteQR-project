@@ -9,9 +9,18 @@ interface ImageSearchResult {
   source: string;
 }
 
-// In-memory cache to avoid duplicate remote requests
+// In-memory cache to avoid duplicate remote requests with maximum bounded capacity
 const searchCache = new Map<string, { timestamp: number; results: ImageSearchResult[] }>();
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
+const MAX_CACHE_ENTRIES = 500;
+
+function setCachedResults(key: string, results: ImageSearchResult[]): void {
+  if (searchCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = searchCache.keys().next().value;
+    if (oldestKey) searchCache.delete(oldestKey);
+  }
+  searchCache.set(key, { timestamp: Date.now(), results });
+}
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
@@ -180,7 +189,7 @@ router.get('/search', async (req: Request, res: Response) => {
     // Return the top 3-4 images
     const finalResults = results.slice(0, 4);
     if (finalResults.length > 0) {
-      searchCache.set(queryKey, { timestamp: Date.now(), results: finalResults });
+      setCachedResults(queryKey, finalResults);
     }
 
     return res.json({ results: finalResults });

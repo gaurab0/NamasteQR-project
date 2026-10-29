@@ -1,5 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { authenticate, optionalAuthenticate, AuthenticatedRequest, assertBusinessAccess } from '../middleware/auth.middleware';
+import {
+  authenticate,
+  optionalAuthenticate,
+  AuthenticatedRequest,
+  assertBusinessAccess,
+  requireResourceAccess,
+  requireOwnerOrManager,
+} from '../middleware/auth.middleware';
 import { customerDiningLimiter } from '../middleware/rateLimit.middleware';
 import { rbacService } from '../services/rbac.service';
 import { db } from '../services/db.service';
@@ -1195,19 +1202,32 @@ router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Re
  */
 router.get('/orders', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = (req.query.businessId as string) || req.user?.business?.id || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
-    if (req.user) {
-      const isAuthorized = await assertBusinessAccess(req.user, businessId);
-      if (!isAuthorized) {
-        return res.status(403).json({
+    const tableId = req.query.tableId as string | undefined;
+
+    // Unauthenticated diners are strictly restricted to querying their own table's active orders
+    if (!req.user) {
+      if (!tableId || typeof tableId !== 'string' || tableId.trim().length === 0) {
+        return res.status(401).json({
           success: false,
-          error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied to orders for venue '${businessId}'.` }
+          error: { code: 'UNAUTHORIZED', message: 'Authentication required to view all orders' }
         });
       }
+      const businessId = (req.query.businessId as string) || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+      const orders = await rbacService.getTableOrders(businessId, createSystemContext(), tableId);
+      return res.json({ success: true, data: orders });
     }
 
-    const tableId = req.query.tableId as string;
-    const orders = await rbacService.getTableOrders(businessId, req.user || createSystemContext(), tableId);
+    // Authenticated staff/manager: verify access to requested business
+    const businessId = (req.query.businessId as string) || req.user?.business?.id || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied to orders for venue '${businessId}'.` }
+      });
+    }
+
+    const orders = await rbacService.getTableOrders(businessId, req.user, tableId);
     return res.json({ success: true, data: orders });
   } catch (err: any) {
     return res.status(500).json({
@@ -1220,7 +1240,7 @@ router.get('/orders', optionalAuthenticate, async (req: AuthenticatedRequest, re
 /**
  * Update order status (Kitchen/Bar/Waiter)
  */
-router.put('/orders/:orderId/status', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/orders/:orderId/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderId } = req.params;
     const { status } = req.body;
@@ -1256,7 +1276,7 @@ router.put('/orders/:orderId/status', optionalAuthenticate, async (req: Authenti
 /**
  * Update individual item status (Kitchen station & Bar station dish/beverage readiness)
  */
-router.put('/orders/:orderId/items/:itemIndex/status', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/orders/:orderId/items/:itemIndex/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderId, itemIndex } = req.params;
     const { status } = req.body;
@@ -1293,7 +1313,7 @@ router.put('/orders/:orderId/items/:itemIndex/status', optionalAuthenticate, asy
 /**
  * Update individual item status by key or id (Kitchen station & Bar station)
  */
-router.patch('/orders/:orderId/items/status', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.patch('/orders/:orderId/items/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { orderId } = req.params;
     const { itemIndex, itemKey, itemId, status } = req.body;
@@ -1335,9 +1355,9 @@ router.patch('/orders/:orderId/items/status', optionalAuthenticate, async (req: 
  * POST /api/rbac/orders/cleanup
  * Manually or automatically trigger daily order purge (>24h) and 30-day sales retention
  */
-router.post('/orders/cleanup', async (req: Request, res: Response) => {
+router.post('/orders/cleanup', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = (req.query.businessId as string) || (req.body.businessId as string);
+    const businessId = await getTargetBusinessId(req);
     const result = await rbacService.cleanupDailyOrdersAndOldSales(businessId);
     return res.json({
       success: true,
@@ -1356,9 +1376,9 @@ router.post('/orders/cleanup', async (req: Request, res: Response) => {
  * DELETE /api/rbac/orders/completed
  * Purge all completed and cancelled table tickets from database on demand
  */
-router.delete('/orders/completed', async (req: Request, res: Response) => {
+router.delete('/orders/completed', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const businessId = (req.query.businessId as string) || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const businessId = await getTargetBusinessId(req);
     const result = await rbacService.purgeCompletedTableOrders(businessId);
     return res.json({
       success: true,
@@ -1378,7 +1398,7 @@ router.delete('/orders/completed', async (req: Request, res: Response) => {
 // PAY-FIRST ORDER SETTLEMENT
 // ============================================================================
 
-router.post('/orders/:id/confirm-payment', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/orders/:id/confirm-payment', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const businessId = await getTargetBusinessId(req);
@@ -1399,7 +1419,7 @@ router.post('/orders/:id/confirm-payment', authenticate, async (req: Authenticat
   }
 });
 
-router.post('/orders/:id/reject-payment', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/orders/:id/reject-payment', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
     const businessId = await getTargetBusinessId(req);
@@ -1524,15 +1544,43 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
     const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     if (!existingOrder) throw new Error(`Order ${orderId} not found`);
 
+    if (existingOrder.business_id !== businessId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_MISMATCH', message: 'Order does not belong to specified business' }
+      });
+    }
+
+    // Server-side validation of pricing and totals to prevent client tampering
+    const taxConfig = await rbacService.getTaxConfig(businessId);
+    const existingItems = Array.isArray(existingOrder.items) ? (existingOrder.items as any[]) : [];
+    const activeItems = existingItems.filter((item: any) => item.status !== 'CANCELLED');
+    const itemsMenuTotal = activeItems.reduce(
+      (sum: number, item: any) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1),
+      0
+    );
+    const { subtotal, taxAmount, computedTaxes, totalAmount: preDiscountTotal } =
+      rbacService.calculateOrderTaxBreakdown(itemsMenuTotal, taxConfig);
+
+    const verifiedPromoCode = promo_code ? String(promo_code).trim() : (existingOrder.promo_code || null);
+    const verifiedPromoDiscount = verifiedPromoCode
+      ? rbacService.resolveOrderPromoDiscount(preDiscountTotal, { promo_code: verifiedPromoCode }, taxConfig)
+      : (existingOrder.promo_discount ? Number(existingOrder.promo_discount) : 0);
+
+    const verifiedTotalAmount = Math.max(0, Math.round((preDiscountTotal - verifiedPromoDiscount) * 100) / 100);
+
     const updatedOrder = await prisma.tableOrder.update({
       where: { id: orderId },
       data: {
         bill_requested: true,
         bill_requested_at: now,
         payment_method: payment_method || existingOrder.payment_method || undefined,
-        promo_code: promo_code || existingOrder.promo_code || undefined,
-        promo_discount: promo_discount != null ? Number(promo_discount) : undefined,
-        total_amount: total_amount != null ? Number(total_amount) : undefined,
+        promo_code: verifiedPromoCode,
+        promo_discount: verifiedPromoDiscount,
+        total_amount: verifiedTotalAmount,
+        subtotal: subtotal,
+        tax_amount: taxAmount,
+        taxes: computedTaxes as any,
       },
     });
 
@@ -1542,7 +1590,7 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
       update: {
         status: 'PENDING',
         payment_method: payment_method || existingOrder.payment_method || 'CASH',
-        total_amount: total_amount != null ? Number(total_amount) : Number(existingOrder.total_amount),
+        total_amount: verifiedTotalAmount,
         currency: currency || existingOrder.currency || 'Rs.',
       },
       create: {
@@ -1554,7 +1602,7 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
         table_number: existingOrder.table_number || '',
         order_number: existingOrder.order_number,
         payment_method: payment_method || existingOrder.payment_method || 'CASH',
-        total_amount: total_amount != null ? Number(total_amount) : Number(existingOrder.total_amount),
+        total_amount: verifiedTotalAmount,
         currency: currency || existingOrder.currency || 'Rs.',
         status: 'PENDING',
         notes: notes || undefined,
@@ -1598,7 +1646,7 @@ router.get('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest
  * PUT /api/rbac/tax-config
  * Update tax configuration for a business
  */
-router.put('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/tax-config', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const config = await rbacService.updateTaxConfig(businessId, req.body, req.user);
@@ -1623,7 +1671,7 @@ router.put('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest
  * GET /api/rbac/gl-accounts
  * Fetch all configured GL account numbers, names, and mappings
  */
-router.get('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/gl-accounts', authenticate, requireResourceAccess(['settings', 'billing'], 'read'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const accounts = await rbacService.getGLAccounts(businessId);
@@ -1640,7 +1688,7 @@ router.get('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedReques
  * POST /api/rbac/gl-accounts
  * Create a new GL Account link (Owner / Admin)
  */
-router.post('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/gl-accounts', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const account = await rbacService.createGLAccount(businessId, req.body, req.user);
@@ -1661,7 +1709,7 @@ router.post('/gl-accounts', optionalAuthenticate, async (req: AuthenticatedReque
  * PUT /api/rbac/gl-accounts/:id
  * Update an existing GL Account link (Owner / Admin)
  */
-router.put('/gl-accounts/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.put('/gl-accounts/:id', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const accountId = req.params.id;
@@ -1683,7 +1731,7 @@ router.put('/gl-accounts/:id', optionalAuthenticate, async (req: AuthenticatedRe
  * DELETE /api/rbac/gl-accounts/:id
  * Delete a GL Account link (Owner / Admin)
  */
-router.delete('/gl-accounts/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/gl-accounts/:id', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const accountId = req.params.id;
@@ -1704,7 +1752,7 @@ router.delete('/gl-accounts/:id', optionalAuthenticate, async (req: Authenticate
  * POST /api/rbac/gl-accounts/reset-default
  * Restore standard hospitality chart of accounts
  */
-router.post('/gl-accounts/reset-default', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/gl-accounts/reset-default', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const defaults = await rbacService.resetDefaultGLAccounts(businessId, req.user);
@@ -1725,7 +1773,7 @@ router.post('/gl-accounts/reset-default', optionalAuthenticate, async (req: Auth
  * GET /api/rbac/sales
  * Get sales records with date, range, and payment method filters
  */
-router.get('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const date = req.query.date as string | undefined;
@@ -1755,7 +1803,7 @@ router.get('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res
  * POST /api/rbac/sales
  * Create a new POS / Table sale record
  */
-router.post('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.post('/sales', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const saleData = req.body;
@@ -1778,7 +1826,7 @@ router.post('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, re
  * DELETE /api/rbac/sales/:saleId
  * Delete a single sale record
  */
-router.delete('/sales/:saleId', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/sales/:saleId', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const { saleId } = req.params;
@@ -1802,7 +1850,7 @@ router.delete('/sales/:saleId', optionalAuthenticate, async (req: AuthenticatedR
  * - ?date=YYYY-MM-DD : Delete all sales records for a single day
  * - ?all=true : Delete all sales records
  */
-router.delete('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/sales', authenticate, requireOwnerOrManager, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await getTargetBusinessId(req);
     const date = req.query.date as string | undefined;
@@ -1842,9 +1890,13 @@ router.delete('/sales', optionalAuthenticate, async (req: AuthenticatedRequest, 
  * GET /api/rbac/businesses/:businessId/operations
  * Retrieve business operational preferences, current day status, and recent shift history
  */
-router.get('/businesses/:businessId/operations', optionalAuthenticate, async (req: Request, res: Response) => {
+router.get('/businesses/:businessId/operations', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessId } = req.params;
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
     const biz = await prisma.business.findUnique({
       where: { id: businessId },
       select: { operations_config: true, current_operational_day: true },
@@ -1882,9 +1934,13 @@ router.get('/businesses/:businessId/operations', optionalAuthenticate, async (re
  * PUT /api/rbac/businesses/:businessId/operations/config
  * Save automatic schedule & operational preferences
  */
-router.put('/businesses/:businessId/operations/config', optionalAuthenticate, async (req: Request, res: Response) => {
+router.put('/businesses/:businessId/operations/config', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessId } = req.params;
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
     const { config } = req.body;
     await db.ensureBusiness(businessId);
     await prisma.business.update({
@@ -1901,9 +1957,13 @@ router.put('/businesses/:businessId/operations/config', optionalAuthenticate, as
  * POST /api/rbac/businesses/:businessId/operations/days
  * Start or record a new business operational day
  */
-router.post('/businesses/:businessId/operations/days', optionalAuthenticate, async (req: Request, res: Response) => {
+router.post('/businesses/:businessId/operations/days', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessId } = req.params;
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
     const dayData = req.body;
     await db.ensureBusiness(businessId);
 
@@ -1935,10 +1995,22 @@ router.post('/businesses/:businessId/operations/days', optionalAuthenticate, asy
  * PUT /api/rbac/businesses/:businessId/operations/days/:dayId
  * Update an existing operational day (close, reopen, override date)
  */
-router.put('/businesses/:businessId/operations/days/:dayId', optionalAuthenticate, async (req: Request, res: Response) => {
+router.put('/businesses/:businessId/operations/days/:dayId', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { businessId, dayId } = req.params;
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, error: 'Access denied' });
+    }
     const dayData = req.body;
+
+    const existing = await prisma.operationalDay.findFirst({
+      where: { id: dayId, business_id: businessId },
+    }).catch(() => null);
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Operational day record not found for this venue' });
+    }
 
     await prisma.operationalDay.update({
       where: { id: dayId },
@@ -2034,19 +2106,17 @@ router.post('/service-requests', customerDiningLimiter, optionalAuthenticate, as
  * GET /api/rbac/service-requests
  * Fetch all pending service requests for a business
  */
-router.get('/service-requests', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/service-requests', authenticate, requireResourceAccess('orders', 'read'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = (req.query.businessId as string) || (req.query.business_id as string) || req.user?.business?.id;
     if (!businessId) return res.status(400).json({ success: false, error: 'businessId required' });
 
-    if (req.user) {
-      const isAuthorized = await assertBusinessAccess(req.user, businessId);
-      if (!isAuthorized) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied to service requests for venue '${businessId}'.` }
-        });
-      }
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied to service requests for venue '${businessId}'.` }
+      });
     }
 
     const requests = await prisma.serviceRequest.findMany({

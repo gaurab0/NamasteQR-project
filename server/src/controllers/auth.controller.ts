@@ -282,7 +282,7 @@ export class AuthController {
         });
       }
 
-      const passwordMatch = user.password_hash ? await bcrypt.compare(validated.password, user.password_hash) : true;
+      const passwordMatch = Boolean(user.password_hash && user.password_hash.trim().length > 0) && (await bcrypt.compare(validated.password, user.password_hash));
       if (!passwordMatch) {
         await auditService.log({ userId: user.id, businessId: user.business_id, eventType: 'LOGIN_FAILED', req });
         return res.status(401).json({

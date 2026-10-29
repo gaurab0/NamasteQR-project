@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import net from 'net';
 import { printerLimiter } from '../middleware/rateLimit.middleware';
+import { authenticate } from '../middleware/auth.middleware';
 import { config } from '../config/env';
 
 const router = Router();
@@ -34,7 +35,8 @@ export function isRestrictedHost(host: string): boolean {
     normalized.startsWith('169.254.') ||
     normalized.includes('169.254.169.254') ||
     normalized === 'fd00:ec2::254' ||
-    normalized === '0.0.0.0'
+    normalized === '0.0.0.0' ||
+    normalized.includes('::ffff:169.254')
   ) {
     return true;
   }
@@ -43,12 +45,126 @@ export function isRestrictedHost(host: string): boolean {
       normalized === 'localhost' ||
       normalized === '127.0.0.1' ||
       normalized === '::1' ||
-      normalized.startsWith('127.')
+      normalized.startsWith('127.') ||
+      normalized.includes('::ffff:127.')
     ) {
       return true;
     }
   }
   return false;
+}
+
+
+export function validateTestConnectionInput(req: Request, res: Response, next: () => void) {
+  let host = (req.body?.host || req.query?.host || '').toString().trim();
+  let port = Number(req.body?.port || req.query?.port) || 9100;
+
+  if (host.includes(':') && !host.includes('[')) {
+    const parts = host.split(':');
+    host = parts[0].trim();
+    if (parts[1]) port = Number(parts[1]) || port;
+  }
+
+  if (!host) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required "host" (IP address or hostname) for printer connection test.',
+    });
+  }
+
+  if (isRestrictedHost(host)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid host: connections to cloud metadata or loopback endpoints are strictly prohibited.',
+    });
+  }
+
+  if (port < 1 || port > 65535) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid port: must be between 1 and 65535.',
+    });
+  }
+
+  if (isRestrictedPort(port)) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid port: port ${port} is restricted to protect internal services.`,
+    });
+  }
+
+  next();
+}
+
+export function validateLanPrintInput(req: Request, res: Response, next: () => void) {
+  let host = '';
+  let port = 9100;
+  let buffer: Buffer | null = null;
+
+  if (Buffer.isBuffer(req.body)) {
+    buffer = req.body;
+    host = (req.query.host as string) || (req.headers['x-printer-host'] as string) || '';
+    port = Number(req.query.port || req.headers['x-printer-port']) || 9100;
+  } else if (req.body && typeof req.body === 'object') {
+    host = (req.body.host || req.query.host || '').toString().trim();
+    port = Number(req.body.port || req.query.port) || 9100;
+
+    if (Array.isArray(req.body.data)) {
+      buffer = Buffer.from(req.body.data);
+    } else if (typeof req.body.data === 'string') {
+      buffer = Buffer.from(req.body.data, req.body.isBase64 ? 'base64' : 'utf-8');
+    }
+  }
+
+  if (host.includes(':') && !host.includes('[')) {
+    const parts = host.split(':');
+    host = parts[0].trim();
+    if (parts[1]) port = Number(parts[1]) || port;
+  }
+
+  if (!host) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing printer IP address (host parameter). Please provide printer IP.',
+    });
+  }
+
+  if (isRestrictedHost(host)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid host: connections to cloud metadata endpoints are strictly prohibited.',
+    });
+  }
+
+  if (port < 1 || port > 65535) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid port: must be between 1 and 65535.',
+    });
+  }
+
+  if (isRestrictedPort(port)) {
+    return res.status(400).json({
+      success: false,
+      error: `Invalid port: port ${port} is restricted to protect internal services.`,
+    });
+  }
+
+  if (!buffer || buffer.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Print payload buffer is empty. Nothing to print.',
+    });
+  }
+
+  if (buffer.length > 5 * 1024 * 1024) {
+    return res.status(413).json({
+      success: false,
+      error: 'Print payload buffer exceeds 5MB size limit.',
+    });
+  }
+
+  next();
 }
 
 /**
@@ -67,7 +183,7 @@ router.get('/status', (_req: Request, res: Response) => {
 /**
  * Quick socket test to verify IP/port reachability
  */
-router.post('/test-connection', (req: Request, res: Response) => {
+router.post('/test-connection', authenticate, validateTestConnectionInput, (req: Request, res: Response) => {
   let host = (req.body?.host || req.query?.host || '').toString().trim();
   let port = Number(req.body?.port || req.query?.port) || 9100;
   const timeout = Math.min(Math.max(Number(req.body?.timeout) || 4000, 100), 30000);
@@ -162,7 +278,7 @@ router.post('/test-connection', (req: Request, res: Response) => {
  * Direct LAN printer endpoint: pipes raw ESC/POS binary buffer directly
  * to printer's static IP over TCP port 9100 (Raw 9100 / JetDirect protocol)
  */
-router.post('/lan', (req: Request, res: Response) => {
+router.post('/lan', authenticate, validateLanPrintInput, (req: Request, res: Response) => {
   let host = '';
   let port = 9100;
   let timeout = 6000;
