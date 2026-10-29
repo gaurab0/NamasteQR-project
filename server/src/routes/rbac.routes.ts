@@ -62,6 +62,72 @@ async function getTargetBusinessId(req: AuthenticatedRequest): Promise<string> {
   return targetBiz;
 }
 
+type AsyncBusinessHandler = (
+  req: AuthenticatedRequest,
+  res: Response,
+  businessId: string
+) => Promise<any>;
+
+/**
+ * Concise async route handler wrapper that automatically resolves and isolates the target
+ * business ID, enforcing tenant authorization and mapping errors to consistent JSON responses.
+ */
+function asyncHandler(
+  errorCode: string,
+  fn: AsyncBusinessHandler
+): (req: AuthenticatedRequest, res: Response) => Promise<any>;
+function asyncHandler(
+  errorCode: string,
+  fallbackStatus: number,
+  fn: AsyncBusinessHandler
+): (req: AuthenticatedRequest, res: Response) => Promise<any>;
+function asyncHandler(
+  fn: AsyncBusinessHandler
+): (req: AuthenticatedRequest, res: Response) => Promise<any>;
+function asyncHandler(
+  codeOrFn: string | AsyncBusinessHandler,
+  statusOrFn?: number | AsyncBusinessHandler,
+  maybeFn?: AsyncBusinessHandler
+) {
+  let defaultCode = 'INTERNAL_ERROR';
+  let fallbackStatus = 500;
+  let fn: AsyncBusinessHandler;
+
+  if (typeof codeOrFn === 'function') {
+    fn = codeOrFn;
+  } else {
+    defaultCode = codeOrFn;
+    if (typeof statusOrFn === 'function') {
+      fn = statusOrFn;
+    } else {
+      if (typeof statusOrFn === 'number') fallbackStatus = statusOrFn;
+      fn = maybeFn!;
+    }
+  }
+
+  return async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const businessId = await getTargetBusinessId(req);
+      return await fn(req, res, businessId);
+    } catch (err: any) {
+      if (res.headersSent) {
+        return;
+      }
+      const isDenied =
+        err?.statusCode === 403 ||
+        err?.message?.includes('Permission denied') ||
+        err?.message?.includes('Access denied');
+      const status = err?.statusCode || (isDenied ? 403 : fallbackStatus);
+      const code = err?.code || (isDenied && defaultCode === 'INTERNAL_ERROR' ? 'RBAC_ACCESS_DENIED' : defaultCode);
+      return res.status(status).json({
+        success: false,
+        error: { code, message: err?.message || String(err) || 'Internal error' },
+      });
+    }
+  };
+}
+
+
 /**
  * GET /api/rbac/permissions
  * Retrieves the current user's effective role and permission capabilities
@@ -423,632 +489,432 @@ router.delete(['/branches/:branchId(*)', '/branch/:branchId(*)', '/branches', '/
  * GET /api/rbac/business-profile
  * Retrieves the business display name, tagline, location & kitchen hours
  */
-router.get('/business-profile', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    let business = await db.findBusinessById(businessId);
-    if (!business) {
-      business = await db.getDefaultBusiness();
-    }
+router.get('/business-profile', optionalAuthenticate, asyncHandler('BUSINESS_PROFILE_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  let business = await db.findBusinessById(businessId);
+  if (!business) {
+    business = await db.getDefaultBusiness();
+  }
 
-    if (!business) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'BUSINESS_NOT_FOUND', message: 'Business profile could not be found' }
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: {
-        id: business.id,
-        name: business.name,
-        type: business.business_type,
-        status: business.status,
-        tagline: business.tagline || (business.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-        location: business.location !== undefined ? business.location : 'Main Dining & Service Area',
-        address: business.address || '',
-        kitchen_hours: business.kitchen_hours || '07:30 AM – 10:30 PM',
-        phone: business.phone || '',
-        show_menu_images: business.show_menu_images !== false,
-        menu_theme_config: business.menu_theme_config,
-        kds_print_mode: business.kds_print_mode || 'DISPLAY_ONLY',
-        default_language: (business as any).default_language || 'en',
-      }
-    });
-  } catch (err: any) {
-    return res.status(500).json({
+  if (!business) {
+    return res.status(404).json({
       success: false,
-      error: { code: 'BUSINESS_PROFILE_FETCH_FAILED', message: err.message }
+      error: { code: 'BUSINESS_NOT_FOUND', message: 'Business profile could not be found' }
     });
   }
-});
+
+  return res.json({
+    success: true,
+    data: {
+      id: business.id,
+      name: business.name,
+      type: business.business_type,
+      status: business.status,
+      tagline: business.tagline || (business.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+      location: business.location !== undefined ? business.location : 'Main Dining & Service Area',
+      address: business.address || '',
+      kitchen_hours: business.kitchen_hours || '07:30 AM – 10:30 PM',
+      phone: business.phone || '',
+      show_menu_images: business.show_menu_images !== false,
+      menu_theme_config: business.menu_theme_config,
+      kds_print_mode: business.kds_print_mode || 'DISPLAY_ONLY',
+      default_language: (business as any).default_language || 'en',
+    }
+  });
+}));
 
 /**
  * PUT /api/rbac/business-profile
  * Owner & Manager endpoint to update business name, tagline, location, and kitchen open timings
  */
-router.put('/business-profile', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const role = rbacService.normalizeRole(user.role);
-    const targetBusinessId = await getTargetBusinessId(req);
+router.put('/business-profile', authenticate, asyncHandler('BUSINESS_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
+  const user = req.user!;
+  const role = rbacService.normalizeRole(user.role);
 
-    if (!canAccessResource(user, 'business_details', 'write')) {
-      return res.status(403).json({
+  if (!canAccessResource(user, 'business_details', 'write')) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'RBAC_ACCESS_DENIED',
+        message: `Permission denied: updating business configuration ${describeResourceRequirement('business_details', 'write')}.`
+      }
+    });
+  }
+
+  const { name, business_type, tagline, location, address, kitchen_hours, phone, show_menu_images, showMenuImages, menu_theme_config, date_format_nav, date_format_billing, kds_print_mode, kdsPrintMode, default_language, defaultLanguage } = req.body;
+  
+  if (name !== undefined && (!name || !name.trim())) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'Business name cannot be empty.' }
+    });
+  }
+
+  const targetPrintMode = kds_print_mode || kdsPrintMode;
+  const ALLOWED_LANGUAGES = ['en', 'ne', 'zh-CN', 'hi', 'ko', 'ja', 'th', 'tl', 'si', 'ta'];
+  let targetDefaultLanguage = default_language !== undefined ? default_language : defaultLanguage;
+  if (targetDefaultLanguage !== undefined && targetDefaultLanguage !== null) {
+    if (typeof targetDefaultLanguage !== 'string' || !ALLOWED_LANGUAGES.includes(targetDefaultLanguage.trim())) {
+      return res.status(400).json({
         success: false,
         error: {
-          code: 'RBAC_ACCESS_DENIED',
-          message: `Permission denied: updating business configuration ${describeResourceRequirement('business_details', 'write')}.`
+          code: 'INVALID_LANGUAGE',
+          message: `Invalid default_language '${targetDefaultLanguage}'. Supported languages are: ${ALLOWED_LANGUAGES.join(', ')}`
         }
       });
     }
+    targetDefaultLanguage = targetDefaultLanguage.trim();
+  }
 
-    const { name, business_type, tagline, location, address, kitchen_hours, phone, show_menu_images, showMenuImages, menu_theme_config, date_format_nav, date_format_billing, kds_print_mode, kdsPrintMode, default_language, defaultLanguage } = req.body;
-    
-    if (name !== undefined && (!name || !name.trim())) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Business name cannot be empty.' }
-      });
-    }
+  const updated = await db.updateBusinessProfile(targetBusinessId, {
+    name,
+    business_type,
+    tagline,
+    location,
+    address,
+    kitchen_hours,
+    phone,
+    show_menu_images: show_menu_images !== undefined ? show_menu_images : showMenuImages,
+    menu_theme_config,
+    date_format_nav,
+    date_format_billing,
+    ...(targetPrintMode !== undefined ? { kds_print_mode: targetPrintMode } : {}),
+    ...(targetDefaultLanguage !== undefined ? { default_language: targetDefaultLanguage } : {}),
+  });
 
-    const targetPrintMode = kds_print_mode || kdsPrintMode;
-    const ALLOWED_LANGUAGES = ['en', 'ne', 'zh-CN', 'hi', 'ko', 'ja', 'th', 'tl', 'si', 'ta'];
-    let targetDefaultLanguage = default_language !== undefined ? default_language : defaultLanguage;
-    if (targetDefaultLanguage !== undefined && targetDefaultLanguage !== null) {
-      if (typeof targetDefaultLanguage !== 'string' || !ALLOWED_LANGUAGES.includes(targetDefaultLanguage.trim())) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'INVALID_LANGUAGE',
-            message: `Invalid default_language '${targetDefaultLanguage}'. Supported languages are: ${ALLOWED_LANGUAGES.join(', ')}`
-          }
-        });
-      }
-      targetDefaultLanguage = targetDefaultLanguage.trim();
-    }
-
-    const updated = await db.updateBusinessProfile(targetBusinessId, {
-      name,
-      business_type,
-      tagline,
-      location,
-      address,
-      kitchen_hours,
-      phone,
-      show_menu_images: show_menu_images !== undefined ? show_menu_images : showMenuImages,
-      menu_theme_config,
-      date_format_nav,
-      date_format_billing,
-      ...(targetPrintMode !== undefined ? { kds_print_mode: targetPrintMode } : {}),
-      ...(targetDefaultLanguage !== undefined ? { default_language: targetDefaultLanguage } : {}),
+  if (!updated) {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'BUSINESS_NOT_FOUND', message: 'Business not found' }
     });
+  }
 
-    if (!updated) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'BUSINESS_NOT_FOUND', message: 'Business not found' }
-      });
+  realtimeEmitter.businessProfileUpdated(targetBusinessId, updated);
+
+  return res.json({
+    success: true,
+    message: 'Business profile & operational details updated successfully',
+    data: {
+      id: updated.id,
+      name: updated.name,
+      type: updated.business_type,
+      status: updated.status,
+      tagline: updated.tagline,
+      location: updated.location,
+      address: updated.address || '',
+      kitchen_hours: updated.kitchen_hours,
+      phone: updated.phone,
+      show_menu_images: updated.show_menu_images !== false,
+      menu_theme_config: updated.menu_theme_config,
+      kds_print_mode: updated.kds_print_mode || 'DISPLAY_ONLY',
+      default_language: updated.default_language || 'en',
     }
-
-    realtimeEmitter.businessProfileUpdated(targetBusinessId, updated);
-
-    return res.json({
-      success: true,
-      message: 'Business profile & operational details updated successfully',
-      data: {
-        id: updated.id,
-        name: updated.name,
-        type: updated.business_type,
-        status: updated.status,
-        tagline: updated.tagline,
-        location: updated.location,
-        address: updated.address || '',
-        kitchen_hours: updated.kitchen_hours,
-        phone: updated.phone,
-        show_menu_images: updated.show_menu_images !== false,
-        menu_theme_config: updated.menu_theme_config,
-        kds_print_mode: updated.kds_print_mode || 'DISPLAY_ONLY',
-        default_language: updated.default_language || 'en',
-      }
-    });
-    } catch (err: any) {
-      return res.status(err.statusCode || (err.message.includes('Permission denied') || err.message.includes('Access denied') ? 403 : 500)).json({
-        success: false,
-        error: { code: err.code || 'BUSINESS_UPDATE_FAILED', message: err.message }
-      });
-    }
-});
+  });
+}));
 
 // ============================================================================
 // CATEGORIES ENDPOINTS (Scoped strictly by business)
 // ============================================================================
 
-router.get('/categories', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const userContext = req.user || createGuestContext();
-    const categories = await rbacService.getCategories(businessId, userContext);
-    return res.json({ success: true, data: categories });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'CATEGORY_FETCH_FAILED', message: err.message }
-    });
-  }
-});
+router.get('/categories', optionalAuthenticate, asyncHandler('CATEGORY_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const userContext = req.user || createGuestContext();
+  const categories = await rbacService.getCategories(businessId, userContext);
+  return res.json({ success: true, data: categories });
+}));
 
-router.post('/categories', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const { name } = req.body;
-    if (!name || !name.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Category name is required' }
-      });
-    }
-    const cat = await rbacService.createCategory(businessId, { name: name.trim() }, user);
-    return res.status(201).json({ success: true, data: cat, message: 'Category created successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
+router.post('/categories', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const { name } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Category name is required' }
     });
   }
-});
+  const cat = await rbacService.createCategory(businessId, { name: name.trim() }, user);
+  return res.status(201).json({ success: true, data: cat, message: 'Category created successfully' });
+}));
 
-router.put('/categories/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const { name } = req.body;
-    if (!name || !name.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Category name is required' }
-      });
-    }
-    await rbacService.updateCategory(businessId, req.params.id, { name: name.trim() }, user);
-    return res.json({ success: true, message: 'Category renamed successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
+router.put('/categories/:id', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const { name } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Category name is required' }
     });
   }
-});
+  await rbacService.updateCategory(businessId, req.params.id, { name: name.trim() }, user);
+  return res.json({ success: true, message: 'Category renamed successfully' });
+}));
 
-router.delete('/categories/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    await rbacService.deleteCategory(businessId, req.params.id, user);
-    return res.json({ success: true, message: 'Category deleted successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
+router.delete('/categories/:id', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  await rbacService.deleteCategory(businessId, req.params.id, user);
+  return res.json({ success: true, message: 'Category deleted successfully' });
+}));
 
 // ============================================================================
 // MENUS ENDPOINTS (Scoped strictly by business)
 // ============================================================================
 
-router.get('/menus', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const userContext = req.user || createGuestContext();
-    const items = await rbacService.getMenuItems(businessId, userContext);
-    return res.json({ success: true, data: items });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
+router.get('/menus', optionalAuthenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const userContext = req.user || createGuestContext();
+  const items = await rbacService.getMenuItems(businessId, userContext);
+  return res.json({ success: true, data: items });
+}));
+
+router.post('/menus', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const {
+    name,
+    category,
+    category_id,
+    additional_categories,
+    price,
+    currency,
+    description,
+    image_url,
+    food_type,
+    status,
+    is_available,
+    has_variants,
+    variants,
+    display_style,
+    show_image,
+    promo_badge,
+    order_index,
+    preparation_time_mins,
+  } = req.body;
+  
+  if (!name || price === undefined) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Item name and price are required' }
     });
   }
-});
 
-router.post('/menus', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const {
-      name,
-      category,
+  const item = await rbacService.createMenuItem(
+    businessId,
+    { 
+      name, 
+      category: category || 'General', 
       category_id,
       additional_categories,
-      price,
-      currency,
-      description,
+      price: Number(price), 
+      currency: currency || 'Rs.', 
+      description, 
       image_url,
-      food_type,
-      status,
-      is_available,
-      has_variants,
-      variants,
+      food_type: food_type || 'non-veg',
+      status: status || 'available',
+      is_available: status === 'available' || is_available === true, 
+      has_variants: Boolean(has_variants),
+      variants: Array.isArray(variants) ? variants : undefined,
       display_style,
-      show_image,
+      show_image: show_image !== undefined ? Boolean(show_image) : undefined,
       promo_badge,
-      order_index,
-      preparation_time_mins,
-    } = req.body;
-    
-    if (!name || price === undefined) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Item name and price are required' }
-      });
-    }
+      order_index: order_index !== undefined ? Number(order_index) : undefined,
+      preparation_time_mins 
+    },
+    user
+  );
 
-    const item = await rbacService.createMenuItem(
-      businessId,
-      { 
-        name, 
-        category: category || 'General', 
-        category_id,
-        additional_categories,
-        price: Number(price), 
-        currency: currency || 'Rs.', 
-        description, 
-        image_url,
-        food_type: food_type || 'non-veg',
-        status: status || 'available',
-        is_available: status === 'available' || is_available === true, 
-        has_variants: Boolean(has_variants),
-        variants: Array.isArray(variants) ? variants : undefined,
-        display_style,
-        show_image: show_image !== undefined ? Boolean(show_image) : undefined,
-        promo_badge,
-        order_index: order_index !== undefined ? Number(order_index) : undefined,
-        preparation_time_mins 
-      },
-      user
-    );
+  return res.status(201).json({ success: true, data: item, message: 'Menu item created successfully' });
+}));
 
-    return res.status(201).json({ success: true, data: item, message: 'Menu item created successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
+router.put('/menus/:id', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const itemId = req.params.id;
+  await rbacService.updateMenuItem(businessId, itemId, req.body, user);
+  return res.json({ success: true, message: 'Menu item updated successfully' });
+}));
 
-router.put('/menus/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const itemId = req.params.id;
-    await rbacService.updateMenuItem(businessId, itemId, req.body, user);
-    return res.json({ success: true, message: 'Menu item updated successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
+router.patch('/menus/:id/status', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const itemId = req.params.id;
+  const { status, is_available } = req.body;
+  await rbacService.updateMenuItem(businessId, itemId, { status, is_available }, user);
+  return res.json({ success: true, message: 'Menu item availability status updated successfully' });
+}));
 
-router.patch('/menus/:id/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const itemId = req.params.id;
-    const { status, is_available } = req.body;
-    await rbacService.updateMenuItem(businessId, itemId, { status, is_available }, user);
-    return res.json({ success: true, message: 'Menu item availability status updated successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
-
-router.delete('/menus/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const itemId = req.params.id;
-    await rbacService.deleteMenuItem(businessId, itemId, user);
-    return res.json({ success: true, message: 'Menu item deleted successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
+router.delete('/menus/:id', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const itemId = req.params.id;
+  await rbacService.deleteMenuItem(businessId, itemId, user);
+  return res.json({ success: true, message: 'Menu item deleted successfully' });
+}));
 
 // ============================================================================
 // CHECK-INS ENDPOINTS (Scoped strictly by business)
 // ============================================================================
 
-router.get('/check-ins', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const status = req.query.status as any;
-    const records = await rbacService.getCheckIns(businessId, user, status ? { status } : undefined);
-    return res.json({ success: true, data: records });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
+router.get('/check-ins', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const status = req.query.status as any;
+  const records = await rbacService.getCheckIns(businessId, user, status ? { status } : undefined);
+  return res.json({ success: true, data: records });
+}));
+
+router.post('/check-ins', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const { guest_name, guest_phone, guest_email, room_or_table_number, total_amount, deposit_paid, notes } = req.body;
+
+  if (!guest_name || !room_or_table_number) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Guest name and room or table number are required' }
     });
   }
-});
 
-router.post('/check-ins', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const { guest_name, guest_phone, guest_email, room_or_table_number, total_amount, deposit_paid, notes } = req.body;
+  const checkIn = await rbacService.createCheckIn(
+    businessId,
+    { guest_name, guest_phone, guest_email, room_or_table_number, total_amount, deposit_paid, notes },
+    user
+  );
 
-    if (!guest_name || !room_or_table_number) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Guest name and room or table number are required' }
-      });
-    }
+  return res.status(201).json({ success: true, data: checkIn, message: 'Check-in processed successfully' });
+}));
 
-    const checkIn = await rbacService.createCheckIn(
-      businessId,
-      { guest_name, guest_phone, guest_email, room_or_table_number, total_amount, deposit_paid, notes },
-      user
-    );
+router.put('/check-ins/:id', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const checkInId = req.params.id;
+  await rbacService.updateCheckIn(businessId, checkInId, req.body, user);
+  return res.json({ success: true, message: 'Check-in record updated successfully' });
+}));
 
-    return res.status(201).json({ success: true, data: checkIn, message: 'Check-in processed successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
-
-router.put('/check-ins/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const checkInId = req.params.id;
-    await rbacService.updateCheckIn(businessId, checkInId, req.body, user);
-    return res.json({ success: true, message: 'Check-in record updated successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
-
-router.delete('/check-ins/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const checkInId = req.params.id;
-    await rbacService.deleteCheckIn(businessId, checkInId, user);
-    return res.json({ success: true, message: 'Check-in record removed by Manager' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
-    });
-  }
-});
+router.delete('/check-ins/:id', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const checkInId = req.params.id;
+  await rbacService.deleteCheckIn(businessId, checkInId, user);
+  return res.json({ success: true, message: 'Check-in record removed by Manager' });
+}));
 
 // ============================================================================
 // STAFF & TEAM MANAGEMENT ENDPOINTS (Scoped by business)
 // ============================================================================
 
-router.get('/staff', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const team = await rbacService.getTeamMembers(businessId, user);
-    return res.json({ success: true, data: team });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
+router.get('/staff', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const team = await rbacService.getTeamMembers(businessId, user);
+  return res.json({ success: true, data: team });
+}));
+
+router.post('/staff', authenticate, asyncHandler('STAFF_CREATION_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const { email, password, role, allowed_tabs } = req.body;
+
+  if (!email || !password || !role) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'RBAC_ACCESS_DENIED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Email, initial password, and role are required.' }
     });
   }
-});
 
-router.post('/staff', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const { email, password, role, allowed_tabs } = req.body;
+  const newStaff = await rbacService.createStaffMember(
+    businessId,
+    { email, password, role, allowed_tabs },
+    user
+  );
 
-    if (!email || !password || !role) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Email, initial password, and role are required.' }
-      });
-    }
+  return res.status(201).json({
+    success: true,
+    data: newStaff,
+    message: `Staff account provisioned for ${email} with role ${role}`
+  });
+}));
 
-    const newStaff = await rbacService.createStaffMember(
-      businessId,
-      { email, password, role, allowed_tabs },
-      user
-    );
+router.patch('/staff/:id/role', authenticate, asyncHandler('ROLE_UPDATE_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const targetUserId = req.params.id;
+  const { role, allowed_tabs } = req.body;
 
-    return res.status(201).json({
-      success: true,
-      data: newStaff,
-      message: `Staff account provisioned for ${email} with role ${role}`
-    });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 400).json({
+  if (!role) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'STAFF_CREATION_FAILED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'New role must be specified.' }
     });
   }
-});
 
-router.patch('/staff/:id/role', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const targetUserId = req.params.id;
-    const { role, allowed_tabs } = req.body;
+  const updated = await rbacService.updateStaffRole(businessId, targetUserId, role, user, allowed_tabs);
+  return res.json({
+    success: true,
+    data: updated,
+    message: `Role successfully updated to ${role}`
+  });
+}));
 
-    if (!role) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'New role must be specified.' }
-      });
-    }
-
-    const updated = await rbacService.updateStaffRole(businessId, targetUserId, role, user, allowed_tabs);
-    return res.json({
-      success: true,
-      data: updated,
-      message: `Role successfully updated to ${role}`
-    });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 400).json({
-      success: false,
-      error: { code: 'ROLE_UPDATE_FAILED', message: err.message }
-    });
-  }
-});
-
-router.delete('/staff/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const targetUserId = req.params.id;
-    await rbacService.removeStaffMember(businessId, targetUserId, user);
-    return res.json({
-      success: true,
-      message: 'Staff account removed successfully'
-    });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 400).json({
-      success: false,
-      error: { code: 'STAFF_DELETION_FAILED', message: err.message }
-    });
-  }
-});
+router.delete('/staff/:id', authenticate, asyncHandler('STAFF_DELETION_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const targetUserId = req.params.id;
+  await rbacService.removeStaffMember(businessId, targetUserId, user);
+  return res.json({
+    success: true,
+    message: 'Staff account removed successfully'
+  });
+}));
 
 // ============================================================================
 // TABLES & DIGITAL ORDERING ENDPOINTS (Strictly Isolated by business)
 // ============================================================================
 
-router.get('/tables', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const tables = await rbacService.getTables(businessId, req.user);
-    return res.json({ success: true, data: tables });
-  } catch (err: any) {
-    return res.status(500).json({
+router.get('/tables', optionalAuthenticate, asyncHandler('TABLES_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const tables = await rbacService.getTables(businessId, req.user);
+  return res.json({ success: true, data: tables });
+}));
+
+router.post('/tables', authenticate, asyncHandler('TABLE_CREATION_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const { table_number, floor, building, capacity, status } = req.body;
+
+  if (!table_number || !table_number.trim()) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'TABLES_FETCH_FAILED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Table number is required' }
     });
   }
-});
 
-router.post('/tables', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const { table_number, floor, building, capacity, status } = req.body;
+  const table = await rbacService.createTable(
+    businessId,
+    { table_number: table_number.trim(), floor, building, capacity, status },
+    user
+  );
 
-    if (!table_number || !table_number.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Table number is required' }
-      });
-    }
+  return res.status(201).json({ success: true, data: table, message: 'Table created successfully' });
+}));
 
-    const table = await rbacService.createTable(
-      businessId,
-      { table_number: table_number.trim(), floor, building, capacity, status },
-      user
-    );
+router.post('/tables/seed-defaults', authenticate, asyncHandler('TABLE_SEED_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const tables = await rbacService.seedDefaultTables(businessId);
+  return res.json({ success: true, data: tables, message: 'Default tables initialized for business' });
+}));
 
-    return res.status(201).json({ success: true, data: table, message: 'Table created successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
+router.put('/tables/:id', authenticate, asyncHandler('TABLE_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const tableId = req.params.id;
+  await rbacService.updateTable(businessId, tableId, req.body, user);
+  return res.json({ success: true, message: 'Table updated successfully' });
+}));
+
+router.patch('/tables/:id/status', authenticate, asyncHandler('STATUS_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const tableId = req.params.id;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({
       success: false,
-      error: { code: 'TABLE_CREATION_FAILED', message: err.message }
+      error: { code: 'INVALID_INPUT', message: 'Status is required' }
     });
   }
-});
 
-router.post('/tables/seed-defaults', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const tables = await rbacService.seedDefaultTables(businessId);
-    return res.json({ success: true, data: tables, message: 'Default tables initialized for business' });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'TABLE_SEED_FAILED', message: err.message }
-    });
-  }
-});
+  await rbacService.updateTableStatus(businessId, tableId, status, user);
+  return res.json({ success: true, message: `Table status updated to ${status}` });
+}));
 
-router.put('/tables/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const tableId = req.params.id;
-    await rbacService.updateTable(businessId, tableId, req.body, user);
-    return res.json({ success: true, message: 'Table updated successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'TABLE_UPDATE_FAILED', message: err.message }
-    });
-  }
-});
-
-router.patch('/tables/:id/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const tableId = req.params.id;
-    const { status } = req.body;
-
-    if (!status) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Status is required' }
-      });
-    }
-
-    await rbacService.updateTableStatus(businessId, tableId, status, user);
-    return res.json({ success: true, message: `Table status updated to ${status}` });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'STATUS_UPDATE_FAILED', message: err.message }
-    });
-  }
-});
-
-router.delete('/tables/:id', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const tableId = req.params.id;
-    await rbacService.deleteTable(businessId, tableId, user);
-    return res.json({ success: true, message: 'Table deleted successfully' });
-  } catch (err: any) {
-    return res.status(err.message.includes('Permission denied') ? 403 : 500).json({
-      success: false,
-      error: { code: 'TABLE_DELETION_FAILED', message: err.message }
-    });
-  }
-});
+router.delete('/tables/:id', authenticate, asyncHandler('TABLE_DELETION_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const tableId = req.params.id;
+  await rbacService.deleteTable(businessId, tableId, user);
+  return res.json({ success: true, message: 'Table deleted successfully' });
+}));
 
 /**
  * Public Scan Check-In: Customer scans QR barcode on table
@@ -1076,25 +942,17 @@ router.post('/tables/scan-checkin', customerDiningLimiter, async (req: Request, 
 /**
  * Manager/Staff Manual Session Reset: Manually clears dining session and resets table to ACTIVE
  */
-router.post('/tables/:id/reset-session', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const tableId = req.params.id;
+router.post('/tables/:id/reset-session', authenticate, asyncHandler('TABLE_SESSION_RESET_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const tableId = req.params.id;
 
-    const updatedTable = await rbacService.resetTableSession(businessId, tableId, user);
-    return res.json({
-      success: true,
-      data: updatedTable,
-      message: `Table ${updatedTable.table_number || tableId} session has been cleared and made available.`
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'TABLE_SESSION_RESET_FAILED', message: err.message }
-    });
-  }
-});
+  const updatedTable = await rbacService.resetTableSession(businessId, tableId, user);
+  return res.json({
+    success: true,
+    data: updatedTable,
+    message: `Table ${updatedTable.table_number || tableId} session has been cleared and made available.`
+  });
+}));
 
 /**
  * Public/Guest Table Reset: Customer requests bill or pays, setting table back to ACTIVE default
@@ -1148,9 +1006,10 @@ router.post('/orders', customerDiningLimiter, async (req: Request, res: Response
       message: `Order ${order.id} processed successfully!`
     });
   } catch (err: any) {
-    return res.status(500).json({
+    const statusCode = err.statusCode || (err.message && (err.message.includes('out of stock') || err.message.includes('unavailable')) ? 400 : 500);
+    return res.status(statusCode).json({
       success: false,
-      error: { code: 'ORDER_CREATION_FAILED', message: err.message }
+      error: { code: err.code || (statusCode === 400 ? 'ITEM_OUT_OF_STOCK' : 'ORDER_CREATION_FAILED'), message: err.message }
     });
   }
 });
@@ -1190,9 +1049,10 @@ router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Re
       message: `Order ${order.id} processed successfully!`
     });
   } catch (err: any) {
-    return res.status(500).json({
+    const statusCode = err.statusCode || (err.message && (err.message.includes('out of stock') || err.message.includes('unavailable')) ? 400 : 500);
+    return res.status(statusCode).json({
       success: false,
-      error: { code: 'ORDER_CREATION_FAILED', message: err.message }
+      error: { code: err.code || (statusCode === 400 ? 'ITEM_OUT_OF_STOCK' : 'ORDER_CREATION_FAILED'), message: err.message }
     });
   }
 });
@@ -1240,204 +1100,148 @@ router.get('/orders', optionalAuthenticate, async (req: AuthenticatedRequest, re
 /**
  * Update order status (Kitchen/Bar/Waiter)
  */
-router.put('/orders/:orderId/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { orderId } = req.params;
-    const { status } = req.body;
-    const targetBusinessId = await getTargetBusinessId(req);
+router.put('/orders/:orderId/status', authenticate, asyncHandler('ORDER_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
+  const { orderId } = req.params;
+  const { status } = req.body;
 
-    if (!status) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'MISSING_STATUS', message: 'Status is required' }
-      });
-    }
-
-    const updatedOrder = await rbacService.updateTableOrderStatus(
-      targetBusinessId,
-      orderId,
-      status,
-      req.user
-    );
-
-    return res.json({
-      success: true,
-      data: updatedOrder,
-      message: `Order status updated to ${status}`
-    });
-  } catch (err: any) {
-    return res.status(err.statusCode || (err.message.includes('Permission denied') ? 403 : 500)).json({
+  if (!status) {
+    return res.status(400).json({
       success: false,
-      error: { code: err.code || 'ORDER_UPDATE_FAILED', message: err.message }
+      error: { code: 'MISSING_STATUS', message: 'Status is required' }
     });
   }
-});
+
+  const updatedOrder = await rbacService.updateTableOrderStatus(
+    targetBusinessId,
+    orderId,
+    status,
+    req.user
+  );
+
+  return res.json({
+    success: true,
+    data: updatedOrder,
+    message: `Order status updated to ${status}`
+  });
+}));
 
 /**
  * Update individual item status (Kitchen station & Bar station dish/beverage readiness)
  */
-router.put('/orders/:orderId/items/:itemIndex/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { orderId, itemIndex } = req.params;
-    const { status } = req.body;
-    const targetBusinessId = await getTargetBusinessId(req);
+router.put('/orders/:orderId/items/:itemIndex/status', authenticate, asyncHandler('ITEM_STATUS_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
+  const { orderId, itemIndex } = req.params;
+  const { status } = req.body;
 
-    if (!status) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'MISSING_STATUS', message: 'Item status is required' }
-      });
-    }
-
-    const updatedOrder = await rbacService.updateTableOrderItemStatus(
-      targetBusinessId,
-      orderId,
-      { index: parseInt(itemIndex, 10) },
-      status,
-      req.user
-    );
-
-    return res.json({
-      success: true,
-      data: updatedOrder,
-      message: `Item #${itemIndex} status updated to ${status}`
-    });
-  } catch (err: any) {
-    return res.status(err.statusCode || (err.message.includes('Permission denied') ? 403 : 500)).json({
+  if (!status) {
+    return res.status(400).json({
       success: false,
-      error: { code: err.code || 'ITEM_STATUS_UPDATE_FAILED', message: err.message }
+      error: { code: 'MISSING_STATUS', message: 'Item status is required' }
     });
   }
-});
+
+  const updatedOrder = await rbacService.updateTableOrderItemStatus(
+    targetBusinessId,
+    orderId,
+    { index: parseInt(itemIndex, 10) },
+    status,
+    req.user
+  );
+
+  return res.json({
+    success: true,
+    data: updatedOrder,
+    message: `Item #${itemIndex} status updated to ${status}`
+  });
+}));
 
 /**
  * Update individual item status by key or id (Kitchen station & Bar station)
  */
-router.patch('/orders/:orderId/items/status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { orderId } = req.params;
-    const { itemIndex, itemKey, itemId, status } = req.body;
-    const targetBusinessId = await getTargetBusinessId(req);
+router.patch('/orders/:orderId/items/status', authenticate, asyncHandler('ITEM_STATUS_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
+  const { orderId } = req.params;
+  const { itemIndex, itemKey, itemId, status } = req.body;
 
-    if (!status) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'MISSING_STATUS', message: 'Item status is required' }
-      });
-    }
-
-    const updatedOrder = await rbacService.updateTableOrderItemStatus(
-      targetBusinessId,
-      orderId,
-      {
-        index: typeof itemIndex === 'number' ? itemIndex : undefined,
-        itemKey,
-        itemId
-      },
-      status,
-      req.user
-    );
-
-    return res.json({
-      success: true,
-      data: updatedOrder,
-      message: `Item status updated to ${status}`
-    });
-  } catch (err: any) {
-    return res.status(err.statusCode || (err.message.includes('Permission denied') ? 403 : 500)).json({
+  if (!status) {
+    return res.status(400).json({
       success: false,
-      error: { code: err.code || 'ITEM_STATUS_UPDATE_FAILED', message: err.message }
+      error: { code: 'MISSING_STATUS', message: 'Item status is required' }
     });
   }
-});
+
+  const updatedOrder = await rbacService.updateTableOrderItemStatus(
+    targetBusinessId,
+    orderId,
+    {
+      index: typeof itemIndex === 'number' ? itemIndex : undefined,
+      itemKey,
+      itemId
+    },
+    status,
+    req.user
+  );
+
+  return res.json({
+    success: true,
+    data: updatedOrder,
+    message: `Item status updated to ${status}`
+  });
+}));
 
 /**
  * POST /api/rbac/orders/cleanup
  * Manually or automatically trigger daily order purge (>24h) and 30-day sales retention
  */
-router.post('/orders/cleanup', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const result = await rbacService.cleanupDailyOrdersAndOldSales(businessId);
-    return res.json({
-      success: true,
-      data: result,
-      message: `Cleanup completed: deleted ${result.deletedOrders} orders (>24h) and ${result.deletedSales} sales (>30d).`
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'CLEANUP_FAILED', message: err.message }
-    });
-  }
-});
+router.post('/orders/cleanup', authenticate, requireOwnerOrManager, asyncHandler('CLEANUP_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const result = await rbacService.cleanupDailyOrdersAndOldSales(businessId);
+  return res.json({
+    success: true,
+    data: result,
+    message: `Cleanup completed: deleted ${result.deletedOrders} orders (>24h) and ${result.deletedSales} sales (>30d).`
+  });
+}));
 
 /**
  * DELETE /api/rbac/orders/completed
  * Purge all completed and cancelled table tickets from database on demand
  */
-router.delete('/orders/completed', authenticate, requireOwnerOrManager, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const result = await rbacService.purgeCompletedTableOrders(businessId);
-    return res.json({
-      success: true,
-      data: result,
-      message: `Successfully cleared ${result.deletedCount} completed table order(s).`
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'PURGE_COMPLETED_FAILED', message: err.message }
-    });
-  }
-});
+router.delete('/orders/completed', authenticate, requireOwnerOrManager, asyncHandler('PURGE_COMPLETED_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const result = await rbacService.purgeCompletedTableOrders(businessId);
+  return res.json({
+    success: true,
+    data: result,
+    message: `Successfully cleared ${result.deletedCount} completed table order(s).`
+  });
+}));
 
 
 // ============================================================================
 // PAY-FIRST ORDER SETTLEMENT
 // ============================================================================
 
-router.post('/orders/:id/confirm-payment', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const orderId = req.params.id;
-    const { payment_method, notes } = req.body;
-    
-    // Using cashier name as the user's name or email
-    const cashierName = (user as any).name || user.email || 'Cashier';
-    
-    await rbacService.confirmTableOrderPayment(orderId, businessId, payment_method, cashierName, notes);
-    
-    return res.json({ success: true, message: 'Payment confirmed and order processed to Kitchen' });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'PAYMENT_CONFIRM_FAILED', message: err.message }
-    });
-  }
-});
+router.post('/orders/:id/confirm-payment', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('PAYMENT_CONFIRM_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const orderId = req.params.id;
+  const { payment_method, notes } = req.body;
+  
+  // Using cashier name as the user's name or email
+  const cashierName = (user as any).name || user.email || 'Cashier';
+  
+  await rbacService.confirmTableOrderPayment(orderId, businessId, payment_method, cashierName, notes);
+  
+  return res.json({ success: true, message: 'Payment confirmed and order processed to Kitchen' });
+}));
 
-router.post('/orders/:id/reject-payment', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const user = req.user!;
-    const businessId = await getTargetBusinessId(req);
-    const orderId = req.params.id;
-    const { reason } = req.body;
-    
-    const cashierName = (user as any).name || user.email || 'Cashier';
-    
-    await rbacService.rejectTableOrderPayment(orderId, businessId, reason, cashierName);
-    
-    return res.json({ success: true, message: 'Payment rejected and order cancelled' });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'PAYMENT_REJECT_FAILED', message: err.message }
-    });
-  }
-});
+router.post('/orders/:id/reject-payment', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('PAYMENT_REJECT_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const orderId = req.params.id;
+  const { reason } = req.body;
+  
+  const cashierName = (user as any).name || user.email || 'Cashier';
+  
+  await rbacService.rejectTableOrderPayment(orderId, businessId, reason, cashierName);
+  
+  return res.json({ success: true, message: 'Payment rejected and order cancelled' });
+}));
 
 router.post('/orders/:id/payment-method', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
@@ -1629,39 +1433,23 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
  * GET /api/rbac/tax-config
  * Get tax configuration for a business
  */
-router.get('/tax-config', optionalAuthenticate, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const config = await rbacService.getTaxConfig(businessId);
-    return res.json({ success: true, data: config });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'TAX_CONFIG_FETCH_FAILED', message: err.message }
-    });
-  }
-});
+router.get('/tax-config', optionalAuthenticate, asyncHandler('TAX_CONFIG_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const config = await rbacService.getTaxConfig(businessId);
+  return res.json({ success: true, data: config });
+}));
 
 /**
  * PUT /api/rbac/tax-config
  * Update tax configuration for a business
  */
-router.put('/tax-config', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const config = await rbacService.updateTaxConfig(businessId, req.body, req.user);
-    return res.json({
-      success: true,
-      data: config,
-      message: 'Tax configuration saved successfully'
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'TAX_CONFIG_UPDATE_FAILED', message: err.message }
-    });
-  }
-});
+router.put('/tax-config', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('TAX_CONFIG_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const config = await rbacService.updateTaxConfig(businessId, req.body, req.user);
+  return res.json({
+    success: true,
+    data: config,
+    message: 'Tax configuration saved successfully'
+  });
+}));
 
 // ============================================================================
 // GL (GENERAL LEDGER) ACCOUNTS & ERP MAPPING (Owner Configurable)
@@ -1671,178 +1459,114 @@ router.put('/tax-config', authenticate, requireResourceAccess(['settings', 'bill
  * GET /api/rbac/gl-accounts
  * Fetch all configured GL account numbers, names, and mappings
  */
-router.get('/gl-accounts', authenticate, requireResourceAccess(['settings', 'billing'], 'read'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const accounts = await rbacService.getGLAccounts(businessId);
-    return res.json({ success: true, data: accounts });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'GL_ACCOUNTS_FETCH_FAILED', message: err.message }
-    });
-  }
-});
+router.get('/gl-accounts', authenticate, requireResourceAccess(['settings', 'billing'], 'read'), asyncHandler('GL_ACCOUNTS_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const accounts = await rbacService.getGLAccounts(businessId);
+  return res.json({ success: true, data: accounts });
+}));
 
 /**
  * POST /api/rbac/gl-accounts
  * Create a new GL Account link (Owner / Admin)
  */
-router.post('/gl-accounts', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const account = await rbacService.createGLAccount(businessId, req.body, req.user);
-    return res.status(201).json({
-      success: true,
-      data: account,
-      message: `GL Account ${account.account_number} created successfully`
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'GL_ACCOUNT_CREATE_FAILED', message: err.message }
-    });
-  }
-});
+router.post('/gl-accounts', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('GL_ACCOUNT_CREATE_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const account = await rbacService.createGLAccount(businessId, req.body, req.user);
+  return res.status(201).json({
+    success: true,
+    data: account,
+    message: `GL Account ${account.account_number} created successfully`
+  });
+}));
 
 /**
  * PUT /api/rbac/gl-accounts/:id
  * Update an existing GL Account link (Owner / Admin)
  */
-router.put('/gl-accounts/:id', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const accountId = req.params.id;
-    const updated = await rbacService.updateGLAccount(businessId, accountId, req.body, req.user);
-    return res.json({
-      success: true,
-      data: updated,
-      message: `GL Account ${updated.account_number} updated successfully`
-    });
-  } catch (err: any) {
-    return res.status(400).json({
-      success: false,
-      error: { code: 'GL_ACCOUNT_UPDATE_FAILED', message: err.message }
-    });
-  }
-});
+router.put('/gl-accounts/:id', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('GL_ACCOUNT_UPDATE_FAILED', 400, async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const accountId = req.params.id;
+  const updated = await rbacService.updateGLAccount(businessId, accountId, req.body, req.user);
+  return res.json({
+    success: true,
+    data: updated,
+    message: `GL Account ${updated.account_number} updated successfully`
+  });
+}));
 
 /**
  * DELETE /api/rbac/gl-accounts/:id
  * Delete a GL Account link (Owner / Admin)
  */
-router.delete('/gl-accounts/:id', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const accountId = req.params.id;
-    await rbacService.deleteGLAccount(businessId, accountId, req.user);
-    return res.json({
-      success: true,
-      message: 'GL Account removed successfully'
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'GL_ACCOUNT_DELETE_FAILED', message: err.message }
-    });
-  }
-});
+router.delete('/gl-accounts/:id', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('GL_ACCOUNT_DELETE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const accountId = req.params.id;
+  await rbacService.deleteGLAccount(businessId, accountId, req.user);
+  return res.json({
+    success: true,
+    message: 'GL Account removed successfully'
+  });
+}));
 
 /**
  * POST /api/rbac/gl-accounts/reset-default
  * Restore standard hospitality chart of accounts
  */
-router.post('/gl-accounts/reset-default', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const defaults = await rbacService.resetDefaultGLAccounts(businessId, req.user);
-    return res.json({
-      success: true,
-      data: defaults,
-      message: 'Restored standard hospitality General Ledger chart of accounts'
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'GL_ACCOUNTS_RESET_FAILED', message: err.message }
-    });
-  }
-});
+router.post('/gl-accounts/reset-default', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('GL_ACCOUNTS_RESET_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const defaults = await rbacService.resetDefaultGLAccounts(businessId, req.user);
+  return res.json({
+    success: true,
+    data: defaults,
+    message: 'Restored standard hospitality General Ledger chart of accounts'
+  });
+}));
 
 /**
  * GET /api/rbac/sales
  * Get sales records with date, range, and payment method filters
  */
-router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const date = req.query.date as string | undefined;
-    const startDate = req.query.startDate as string | undefined;
-    const endDate = req.query.endDate as string | undefined;
-    const paymentMethod = req.query.paymentMethod as string | undefined;
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), asyncHandler('SALES_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const date = req.query.date as string | undefined;
+  const startDate = req.query.startDate as string | undefined;
+  const endDate = req.query.endDate as string | undefined;
+  const paymentMethod = req.query.paymentMethod as string | undefined;
+  const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
 
-    const sales = await rbacService.getSales(businessId, {
-      date,
-      startDate,
-      endDate,
-      paymentMethod,
-      limit
-    });
+  const sales = await rbacService.getSales(businessId, {
+    date,
+    startDate,
+    endDate,
+    paymentMethod,
+    limit
+  });
 
-    return res.json({ success: true, data: sales });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'SALES_FETCH_FAILED', message: err.message }
-    });
-  }
-});
+  return res.json({ success: true, data: sales });
+}));
 
 /**
  * POST /api/rbac/sales
  * Create a new POS / Table sale record
  */
-router.post('/sales', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const saleData = req.body;
-    const sale = await rbacService.createSale(businessId, saleData, req.user);
+router.post('/sales', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('SALE_CREATION_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const saleData = req.body;
+  const sale = await rbacService.createSale(businessId, saleData, req.user);
 
-    return res.status(201).json({
-      success: true,
-      data: sale,
-      message: 'Sale record registered successfully'
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'SALE_CREATION_FAILED', message: err.message }
-    });
-  }
-});
+  return res.status(201).json({
+    success: true,
+    data: sale,
+    message: 'Sale record registered successfully'
+  });
+}));
 
 /**
  * DELETE /api/rbac/sales/:saleId
  * Delete a single sale record
  */
-router.delete('/sales/:saleId', authenticate, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const { saleId } = req.params;
-    await rbacService.deleteSale(businessId, saleId, req.user);
+router.delete('/sales/:saleId', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('SALE_DELETION_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const { saleId } = req.params;
+  await rbacService.deleteSale(businessId, saleId, req.user);
 
-    return res.json({
-      success: true,
-      message: `Sale record ${saleId} deleted successfully`
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'SALE_DELETION_FAILED', message: err.message }
-    });
-  }
-});
+  return res.json({
+    success: true,
+    message: `Sale record ${saleId} deleted successfully`
+  });
+}));
 
 /**
  * DELETE /api/rbac/sales
@@ -1850,41 +1574,33 @@ router.delete('/sales/:saleId', authenticate, requireResourceAccess('billing', '
  * - ?date=YYYY-MM-DD : Delete all sales records for a single day
  * - ?all=true : Delete all sales records
  */
-router.delete('/sales', authenticate, requireOwnerOrManager, requireResourceAccess('billing', 'write'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const businessId = await getTargetBusinessId(req);
-    const date = req.query.date as string | undefined;
-    const all = req.query.all === 'true';
+router.delete('/sales', authenticate, requireOwnerOrManager, requireResourceAccess('billing', 'write'), asyncHandler('SALES_BATCH_DELETE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const date = req.query.date as string | undefined;
+  const all = req.query.all === 'true';
 
-    if (date) {
-      const result = await rbacService.deleteSalesByDate(businessId, date, req.user);
-      return res.json({
-        success: true,
-        data: result,
-        message: `Deleted ${result.deletedCount} sale record(s) for ${date}`
-      });
-    }
-
-    if (all) {
-      const result = await rbacService.deleteAllSales(businessId, req.user);
-      return res.json({
-        success: true,
-        data: result,
-        message: `Cleared entire sales history (${result.deletedCount} records deleted)`
-      });
-    }
-
-    return res.status(400).json({
-      success: false,
-      error: { code: 'INVALID_PARAMETERS', message: 'Specify either ?date=YYYY-MM-DD or ?all=true' }
-    });
-  } catch (err: any) {
-    return res.status(500).json({
-      success: false,
-      error: { code: 'SALES_BATCH_DELETE_FAILED', message: err.message }
+  if (date) {
+    const result = await rbacService.deleteSalesByDate(businessId, date, req.user);
+    return res.json({
+      success: true,
+      data: result,
+      message: `Deleted ${result.deletedCount} sale record(s) for ${date}`
     });
   }
-});
+
+  if (all) {
+    const result = await rbacService.deleteAllSales(businessId, req.user);
+    return res.json({
+      success: true,
+      data: result,
+      message: `Cleared entire sales history (${result.deletedCount} records deleted)`
+    });
+  }
+
+  return res.status(400).json({
+    success: false,
+    error: { code: 'INVALID_PARAMETERS', message: 'Specify either ?date=YYYY-MM-DD or ?all=true' }
+  });
+}));
 
 /**
  * GET /api/rbac/businesses/:businessId/operations

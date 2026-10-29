@@ -136,8 +136,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentRoute, onBook
                   rightIcon={<ArrowRight className="w-3.5 h-3.5 hidden sm:inline" />}
                   className="px-3 sm:px-4 text-xs sm:text-sm font-semibold shadow-xs"
                 >
-                  <span className="hidden xs:inline">Create Account</span>
-                  <span className="xs:hidden">Join</span>
+                  <span>Sign Up</span>
                 </Button>
               )}
             </div>

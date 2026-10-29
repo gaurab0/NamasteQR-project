@@ -353,7 +353,17 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Staff cannot create menu items. Manager role required.');
     }
 
-    const itemStatus = itemData.status || (itemData.is_available === false ? 'unavailable' : 'available');
+    let itemStatus = itemData.status || (itemData.is_available === false ? 'unavailable' : 'available');
+    let isAvailable = itemData.is_available !== false && itemStatus === 'available';
+    if (itemData.is_available === false) {
+      isAvailable = false;
+      if (itemStatus === 'available') {
+        itemStatus = 'unavailable';
+      }
+    } else if (itemStatus === 'out_of_stock' || itemStatus === 'unavailable') {
+      isAvailable = false;
+    }
+
     const docId = generateMenuDocId(itemData.name.trim(), businessId);
 
     const newItem: MenuItem = {
@@ -369,7 +379,7 @@ export class RBACService {
       image_url: itemData.image_url || '',
       food_type: itemData.food_type || 'non-veg',
       status: itemStatus,
-      is_available: itemStatus === 'available',
+      is_available: isAvailable,
       has_variants: Boolean(itemData.has_variants),
       variants: Array.isArray(itemData.variants) ? itemData.variants : undefined,
       display_style: itemData.display_style,
@@ -449,7 +459,10 @@ export class RBACService {
       if (updates.description !== undefined) prismaData.description = updates.description;
       if (updates.image_url !== undefined) prismaData.image_url = updates.image_url;
       if (updates.food_type !== undefined) prismaData.food_type = updates.food_type;
-      if (updates.status !== undefined) {
+      if (updates.is_available !== undefined && updates.status !== undefined) {
+        prismaData.is_available = updates.is_available && updates.status === 'available';
+        prismaData.status = !prismaData.is_available && updates.status === 'available' ? 'unavailable' : updates.status;
+      } else if (updates.status !== undefined) {
         prismaData.status = updates.status;
         prismaData.is_available = updates.status === 'available';
       } else if (updates.is_available !== undefined) {
@@ -1928,10 +1941,36 @@ export class RBACService {
                      (item.id && itemMapById.get(item.id)) ||
                      (item.name && itemMapByName.get(item.name.toLowerCase().trim()));
 
+      // Backend security validation: Throw 400 error if item is marked out of stock or unavailable
+      const hasDbVariants = dbItem && Array.isArray(dbItem.variants) && dbItem.variants.length > 0;
+      const areAllDbVariantsOOS = hasDbVariants && dbItem.variants.every(
+        (v: any) => v.is_available === false || v.status === 'out_of_stock' || v.status === 'unavailable'
+      );
+
+      const hasItemVariants = Array.isArray(item.variants) && item.variants.length > 0;
+      const areAllItemVariantsOOS = hasItemVariants && item.variants.every(
+        (v: any) => v.is_available === false || v.status === 'out_of_stock' || v.status === 'unavailable'
+      );
+
+      const isItemOOS =
+        (dbItem && (dbItem.status === 'out_of_stock' || dbItem.status === 'unavailable' || dbItem.is_available === false || areAllDbVariantsOOS)) ||
+        (item.status === 'out_of_stock' || item.status === 'unavailable' || item.is_available === false || areAllItemVariantsOOS);
+      if (isItemOOS) {
+        const itemName = dbItem?.name || item.name || 'Selected item';
+        const err: any = new Error(`Item "${itemName}" is currently out of stock or unavailable.`);
+        err.statusCode = 400;
+        err.code = 'ITEM_OUT_OF_STOCK';
+        throw err;
+      }
+
       let verifiedPrice = Number(item.price) || 0;
       if (dbItem) {
         let matchedVariantPrice: number | null = null;
-        const variantKey = item.variant_id || item.variant_name || item.variant?.id || item.variant?.name || item.selected_variant?.id || item.selected_variant?.name;
+        const variantKey =
+          item.variant_id ||
+          item.variant_name ||
+          (typeof item.variant === 'string' ? item.variant : item.variant?.id || item.variant?.name) ||
+          (typeof item.selected_variant === 'string' ? item.selected_variant : item.selected_variant?.id || item.selected_variant?.name);
         if (variantKey && Array.isArray(dbItem.variants)) {
           const normalizedKey = String(variantKey).trim().toLowerCase();
           const v = (dbItem.variants as any[]).find(
@@ -1940,8 +1979,16 @@ export class RBACService {
               String(vr.id || '').trim().toLowerCase() === normalizedKey ||
               String(vr.name || '').trim().toLowerCase() === normalizedKey
           );
-          if (v && v.price != null) {
-            matchedVariantPrice = Number(v.price);
+          if (v) {
+            if (v.is_available === false || v.status === 'out_of_stock' || v.status === 'unavailable') {
+              const err: any = new Error(`Option "${v.name}" for "${dbItem.name || item.name}" is currently out of stock or unavailable.`);
+              err.statusCode = 400;
+              err.code = 'ITEM_OUT_OF_STOCK';
+              throw err;
+            }
+            if (v.price != null) {
+              matchedVariantPrice = Number(v.price);
+            }
           }
         }
         if (matchedVariantPrice != null) {
@@ -1950,6 +1997,15 @@ export class RBACService {
           verifiedPrice = Number(dbItem.price);
         }
       }
+
+      const rawVariant = typeof item.selected_variant === 'object' ? item.selected_variant : typeof item.variant === 'object' ? item.variant : null;
+      if (rawVariant && (rawVariant.is_available === false || rawVariant.status === 'out_of_stock' || rawVariant.status === 'unavailable')) {
+        const err: any = new Error(`Option "${rawVariant.name || 'selected option'}" for "${dbItem?.name || item.name}" is currently out of stock or unavailable.`);
+        err.statusCode = 400;
+        err.code = 'ITEM_OUT_OF_STOCK';
+        throw err;
+      }
+
       verifiedPrice = Math.max(0, verifiedPrice || 0);
 
       return {

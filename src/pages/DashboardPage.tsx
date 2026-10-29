@@ -11,7 +11,7 @@ import { WaiterStationDashboard } from '../components/waiter/WaiterStationDashbo
 import { DateTimeDisplay } from '../components/common/DateTimeDisplay';
 import { StaffRoleLoginModal } from '../components/team/StaffRoleLoginModal';
 import { BillingPOS } from '../components/billing/BillingPOS';
-import { StaffAccountSession, AppRole } from '../types/rbac';
+import { StaffAccountSession, AppRole, TableOrder } from '../types/rbac';
 import { Business, BusinessType } from '../types/auth';
 import { 
   Building2, 
@@ -39,6 +39,7 @@ import {
   Sparkles,
   AlertCircle,
   ChevronDown,
+  ChevronRight,
   UserCheck,
   User,
   LogOut
@@ -51,6 +52,8 @@ import { BusinessConfigurationCenter } from '../components/config/BusinessConfig
 import { Sidebar, DashboardTab } from '../components/layout/Sidebar';
 import { OperationsOverviewDashboard } from '../components/dashboard/OperationsOverviewDashboard';
 import { OperationsManagementTab } from '../components/operations/OperationsManagementTab';
+import { LiveStationOrdersModal } from '../components/dashboard/LiveStationOrdersModal';
+import { socketService } from '../services/socket.service';
 
 interface DashboardPageProps {
   onNavigate: (route: string) => void;
@@ -88,6 +91,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [isAddBranchModalOpen, setIsAddBranchModalOpen] = useState(false);
+
+  // Station Live Notifications State
+  const [liveOrders, setLiveOrders] = useState<TableOrder[]>([]);
+  const [isStationModalOpen, setIsStationModalOpen] = useState(false);
+  const [stationModalTab, setStationModalTab] = useState<'kitchen' | 'waiter' | 'all'>('all');
+
+  const handleOpenStationModal = (tab: 'kitchen' | 'waiter' | 'all' = 'all') => {
+    setStationModalTab(tab);
+    setIsStationModalOpen(true);
+  };
   
   // Sidebar responsive collapse state
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -136,7 +149,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       setBizForm({
         name: user.business.name || '',
         type: user.business.type || 'RESTAURANT',
-        tagline: user.business.tagline || (user.business.type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+        tagline: user.business.tagline || 'Authentic Cuisine • Prepared Fresh to Order',
         location: user.business.location !== undefined ? user.business.location : 'Main Dining & Service Area',
         address: user.business.address || '',
         kitchen_hours: user.business.kitchen_hours || '07:30 AM – 10:30 PM',
@@ -154,7 +167,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           setBizForm({
             name: fresh.name || '',
             type: fresh.type || 'RESTAURANT',
-            tagline: fresh.tagline || (fresh.type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+            tagline: fresh.tagline || 'Authentic Cuisine • Prepared Fresh to Order',
             location: fresh.location !== undefined ? fresh.location : 'Main Dining & Service Area',
             address: fresh.address || '',
             kitchen_hours: fresh.kitchen_hours || '07:30 AM – 10:30 PM',
@@ -164,6 +177,94 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       }).catch(() => {});
     }
   }, [activeTab, user?.business?.id]);
+
+  // Live real-time socket & polling subscription for station notifications
+  useEffect(() => {
+    if (!businessId) return;
+
+    let isMounted = true;
+    socketService.joinBusiness(businessId);
+
+    const fetchLiveOrders = async () => {
+      try {
+        const res = await rbacService.getTableOrdersApi(undefined, businessId);
+        if (isMounted && res && Array.isArray(res)) {
+          const active = res.filter(
+            (o) => o.status !== 'AWAITING_PAYMENT' && o.status !== 'SERVED' && o.status !== 'COMPLETED' && o.status !== 'CANCELLED'
+          );
+          setLiveOrders(active);
+        }
+      } catch (err) {
+        // non-blocking
+      }
+    };
+
+    fetchLiveOrders();
+    const pollInterval = setInterval(fetchLiveOrders, 20000);
+
+    const unsub = socketService.subscribeToOrders((updatedOrder: any) => {
+      if (!isMounted || !updatedOrder?.id) return;
+      if (
+        updatedOrder.status === 'AWAITING_PAYMENT' ||
+        updatedOrder.status === 'SERVED' ||
+        updatedOrder.status === 'COMPLETED' ||
+        updatedOrder.status === 'CANCELLED'
+      ) {
+        setLiveOrders((prev) => prev.filter((o) => o.id !== updatedOrder.id));
+        return;
+      }
+
+      setLiveOrders((prev) => {
+        const idx = prev.findIndex((o) => o.id === updatedOrder.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...updatedOrder };
+          return next;
+        }
+        return [updatedOrder, ...prev];
+      });
+    });
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+      unsub?.();
+    };
+  }, [businessId]);
+
+  // Active live queue calculations
+  const allKitchenOrders = React.useMemo(() => {
+    return liveOrders.filter((o) =>
+      o.status === 'PENDING' || o.status === 'RECEIVED' || o.status === 'PREPARING'
+    );
+  }, [liveOrders]);
+
+  const allWaiterOrders = React.useMemo(() => {
+    return liveOrders.filter((o) =>
+      o.status === 'READY' || o.status === 'PREPARING' || o.status === 'PENDING' || o.status === 'RECEIVED'
+    );
+  }, [liveOrders]);
+
+  // Top 3 in ascending order according to time taken (lowest elapsed turnaround duration first)
+  const kitchenOrders = React.useMemo(() => {
+    return [...allKitchenOrders]
+      .sort((a, b) => {
+        const tA = Math.max(0, Date.now() - new Date(a.created_at).getTime());
+        const tB = Math.max(0, Date.now() - new Date(b.created_at).getTime());
+        return tA - tB;
+      })
+      .slice(0, 3);
+  }, [allKitchenOrders]);
+
+  const waiterOrders = React.useMemo(() => {
+    return [...allWaiterOrders]
+      .sort((a, b) => {
+        const tA = Math.max(0, Date.now() - new Date(a.created_at).getTime());
+        const tB = Math.max(0, Date.now() - new Date(b.created_at).getTime());
+        return tA - tB;
+      })
+      .slice(0, 3);
+  }, [allWaiterOrders]);
 
     // Role Authentication / View-Only State
   const [staffSession, setStaffSession] = useState<StaffAccountSession | null>(() => rbacService.getCurrentStaffSession());
@@ -476,6 +577,72 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
         </header>
 
+        {/* Live Station Notifications Bar just below header */}
+        <div className="bg-zinc-50/95 border-b border-zinc-200/90 px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5 shrink-0 shadow-2xs z-10">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-500 uppercase tracking-wider pr-1">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="hidden sm:inline">Station Monitor</span>
+            </div>
+
+            {/* Kitchen & Bar Station Pill */}
+            <button
+              type="button"
+              id="btn-live-kitchen-bar-notif"
+              onClick={() => handleOpenStationModal('kitchen')}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-amber-300 hover:bg-amber-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+              title="Click to view live Kitchen & Bar orders"
+            >
+              <div className="w-5 h-5 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <ChefHat className="w-3.5 h-3.5" />
+              </div>
+              <span>Kitchen & Bar</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                allKitchenOrders.length > 0
+                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                  : 'bg-zinc-100 text-zinc-500'
+              }`}>
+                {allKitchenOrders.length} {allKitchenOrders.length === 1 ? 'order' : 'orders'}
+              </span>
+            </button>
+
+            {/* Waiter Service Station Pill */}
+            <button
+              type="button"
+              id="btn-live-waiter-notif"
+              onClick={() => handleOpenStationModal('waiter')}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-blue-300 hover:bg-blue-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+              title="Click to view live Waiter Service Station orders"
+            >
+              <div className="w-5 h-5 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <Bell className="w-3.5 h-3.5" />
+              </div>
+              <span>Waiter Station</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                allWaiterOrders.length > 0
+                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                  : 'bg-zinc-100 text-zinc-500'
+              }`}>
+                {allWaiterOrders.length} {allWaiterOrders.length === 1 ? 'order' : 'orders'}
+              </span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleOpenStationModal('all')}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-zinc-600 hover:text-zinc-900 transition cursor-pointer"
+          >
+            <Activity className="w-3.5 h-3.5 text-amber-600" />
+            <span className="hidden sm:inline">Inspect Live Orders (Ascending)</span>
+            <span className="sm:hidden">Inspect</span>
+            <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
+          </button>
+        </div>
+
         {/* Main Workspace Body */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7 space-y-6">
           {!isBusinessOwner(subject?.role) && getFirstPermittedTab(subject) === null ? (
@@ -746,11 +913,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                           className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition cursor-pointer"
                         >
                           <option value="RESTAURANT">Restaurant (Dining & Kitchen)</option>
-                          <option value="HOTEL">Hotel Property (Rooms & Hospitality)</option>
-                          <option value="RESORT">Resort & Spa</option>
                           <option value="CAFE">Café & Bakery</option>
                           <option value="BAR">Bar & Lounge</option>
-                          <option value="OTHER">Other Hospitality</option>
+                          <option value="RESORT">Resort Dining</option>
+                          <option value="OTHER">Dining & Food Venue</option>
                         </select>
                       </div>
 
@@ -955,6 +1121,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       <AddBranchModal
         isOpen={isAddBranchModalOpen}
         onClose={() => setIsAddBranchModalOpen(false)}
+      />
+
+      {/* Live Station Orders Modal */}
+      <LiveStationOrdersModal
+        isOpen={isStationModalOpen}
+        onClose={() => setIsStationModalOpen(false)}
+        kitchenOrders={kitchenOrders}
+        totalKitchenOrdersCount={allKitchenOrders.length}
+        waiterOrders={waiterOrders}
+        totalWaiterOrdersCount={allWaiterOrders.length}
+        initialTab={stationModalTab}
+        onNavigateToKDS={() => {
+          setIsStationModalOpen(false);
+          setActiveTab('kds');
+        }}
+        onNavigateToWaiter={() => {
+          setIsStationModalOpen(false);
+          setActiveTab('waiter');
+        }}
+        currency={user?.business?.currency || 'Rs.'}
       />
     </div>
   );

@@ -69,7 +69,6 @@ const MAPPING_OPTIONS = [
   { key: 'CARD_SETTLEMENT', label: 'Card Machine Clearing (POS Swipes)' },
   { key: 'QR_SETTLEMENT', label: 'QR Digital Payment Clearing (Mobile & Wallets)' },
   { key: 'ONLINE_SETTLEMENT', label: 'Online Payment Gateway Clearing' },
-  { key: 'ROOM_CHARGE', label: 'Hotel Guest Folio / Room Charge' },
   { key: 'CREDIT_SETTLEMENT', label: 'Accounts Receivable (Credit Sales)' },
   { key: 'CUSTOM_MAPPING', label: 'Custom ERP Mapping' },
 ];

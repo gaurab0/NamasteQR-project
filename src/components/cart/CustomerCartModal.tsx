@@ -102,6 +102,23 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
       return;
     }
 
+    const oos = items.filter((ci) => {
+      const m = ci.menuItem;
+      const hasVariants = Boolean(Array.isArray(m.variants) && m.variants.length > 0);
+      const areAllVariantsUnavailable = hasVariants && m.variants!.every(
+        (v) => v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable'
+      );
+      if (m.status === 'out_of_stock' || m.status === 'unavailable' || m.is_available === false || areAllVariantsUnavailable) return true;
+      const v = ci.selected_variant;
+      if (v && (v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable')) return true;
+      return false;
+    });
+    if (oos.length > 0) {
+      const names = oos.map((ci) => ci.selected_variant ? `${ci.menuItem.name} (${ci.selected_variant.name})` : ci.menuItem.name).join(', ');
+      setErrorMsg(`Item(s) currently out of stock: ${names}. Please remove them to proceed.`);
+      return;
+    }
+
     setLoading(true);
     setErrorMsg(null);
 
@@ -152,7 +169,8 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to place table order');
+        const errorMsg = data.error?.message || (typeof data.error === 'string' ? data.error : 'Failed to place table order');
+        throw new Error(errorMsg);
       }
 
       onOrderConfirmed(data.data);
@@ -275,6 +293,12 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                   const unitPrice = cartItem.selected_variant ? Number(cartItem.selected_variant.price) : Number(item.price);
                   const itemTotal = unitPrice * cartItem.quantity;
                   const itemKey = cartItem.selected_variant ? `${item.id}_${cartItem.selected_variant.id}` : item.id;
+                  const hasVariants = Boolean(Array.isArray(item.variants) && item.variants.length > 0);
+                  const areAllVariantsUnavailable = hasVariants && item.variants!.every(
+                    (v) => v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable'
+                  );
+                  const isItemOutOfStock = item.status === 'out_of_stock' || item.status === 'unavailable' || item.is_available === false || areAllVariantsUnavailable;
+                  const isVariantUnavailable = isItemOutOfStock || cartItem.selected_variant?.is_available === false || (cartItem.selected_variant as any)?.status === 'out_of_stock' || (cartItem.selected_variant as any)?.status === 'unavailable';
 
                   return (
                     <div 
@@ -299,10 +323,15 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
 
                           <div className="min-w-0">
                             <h5 className="text-xs sm:text-sm font-bold text-zinc-900 truncate flex items-center gap-1.5 flex-wrap leading-tight">
-                              <span>{item.name}</span>
+                              <span className={isVariantUnavailable ? 'line-through text-zinc-400' : ''}>{item.name}</span>
                               {cartItem.selected_variant && (
-                                <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${isVariantUnavailable ? 'bg-zinc-100 text-zinc-400 line-through' : 'bg-amber-100 text-amber-900 border border-amber-300'}`}>
                                   {cartItem.selected_variant.name}
+                                </span>
+                              )}
+                              {isVariantUnavailable && (
+                                <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
+                                  Out of Stock
                                 </span>
                               )}
                             </h5>
@@ -312,8 +341,19 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Quantity Counter Buttons */}
+                        {/* Quantity Counter Buttons & Remove Action */}
                         <div className="flex items-center gap-2 shrink-0">
+                          {isVariantUnavailable && (
+                            <button
+                              id={`cart-remove-oos-${itemKey}`}
+                              type="button"
+                              onClick={() => onUpdateQuantity(itemKey, 0)}
+                              className="p-1 rounded-md text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                              title="Remove out of stock item from order"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <div className="flex items-center bg-zinc-100 rounded-lg p-0.5 border border-zinc-200/80">
                             <button
                               id={`cart-minus-${itemKey}`}
@@ -332,9 +372,14 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                             <button
                               id={`cart-plus-${itemKey}`}
                               type="button"
-                              onClick={() => onUpdateQuantity(itemKey, cartItem.quantity + 1)}
-                              className="w-6 h-6 flex items-center justify-center rounded-md bg-zinc-900 text-white hover:bg-zinc-800 transition shadow-2xs cursor-pointer"
-                              title="Increase quantity"
+                              disabled={isVariantUnavailable}
+                              onClick={() => !isVariantUnavailable && onUpdateQuantity(itemKey, cartItem.quantity + 1)}
+                              className={`w-6 h-6 flex items-center justify-center rounded-md transition shadow-2xs ${
+                                isVariantUnavailable
+                                  ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed'
+                                  : 'bg-zinc-900 text-white hover:bg-zinc-800 cursor-pointer'
+                              }`}
+                              title={isVariantUnavailable ? 'Item is out of stock' : 'Increase quantity'}
                             >
                               <Plus className="w-3 h-3" />
                             </button>

@@ -957,14 +957,18 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     if (!Array.isArray(item.variants) || item.variants.length === 0) {
       return undefined;
     }
-    if (selectedVariants[item.id]) {
+    const isVariantAvailable = (v: MenuItemVariant) =>
+      v.is_available !== false && (v as any).status !== 'out_of_stock' && (v as any).status !== 'unavailable';
+
+    if (selectedVariants[item.id] && isVariantAvailable(selectedVariants[item.id])) {
       return selectedVariants[item.id];
     }
     if (dietaryFilter !== 'all') {
-      const matching = item.variants.find(v => (v.food_type || item.food_type) === dietaryFilter);
+      const matching = item.variants.find(v => (v.food_type || item.food_type) === dietaryFilter && isVariantAvailable(v));
       if (matching) return matching;
     }
-    return item.variants[0];
+    const firstAvailable = item.variants.find(isVariantAvailable);
+    return firstAvailable || selectedVariants[item.id] || item.variants[0];
   };
 
   const handleSelectVariant = (itemId: string, variant: MenuItemVariant, e?: React.MouseEvent) => {
@@ -997,6 +1001,18 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
   const handleAddToCartWithDetails = (item: MenuItem, quantity: number, instructions?: string, selectedVariant?: MenuItemVariant) => {
     if (!isHost) return;
+    const hasVariants = Boolean(Array.isArray(item.variants) && item.variants.length > 0);
+    const areAllVariantsUnavailable = hasVariants && item.variants!.every(
+      (v) => v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable'
+    );
+    if (item.status === 'out_of_stock' || item.status === 'unavailable' || item.is_available === false || areAllVariantsUnavailable) {
+      alert(`"${item.name}" is currently out of stock or unavailable.`);
+      return;
+    }
+    if (selectedVariant && (selectedVariant.is_available === false || (selectedVariant as any).status === 'out_of_stock' || (selectedVariant as any).status === 'unavailable')) {
+      alert(`Option "${selectedVariant.name}" for "${item.name}" is currently out of stock.`);
+      return;
+    }
     setCartItems((prev) => {
       const existing = prev.find((ci) => {
         if (ci.menuItem.id !== item.id) return false;
@@ -1046,15 +1062,33 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const handleUpdateQuantity = (itemKeyOrId: string, newQuantity: number) => {
     if (!isHost) return;
     setCartItems((prev) => {
+      const matchCartItem = (ci: CartItem, idOrKey: string) => {
+        const key = ci.selected_variant ? `${ci.menuItem.id}_${ci.selected_variant.id}` : ci.menuItem.id;
+        return key === idOrKey || (!ci.selected_variant && ci.menuItem.id === idOrKey);
+      };
+
       if (newQuantity <= 0) {
-        return prev.filter((ci) => {
-          const key = ci.selected_variant ? `${ci.menuItem.id}_${ci.selected_variant.id}` : ci.menuItem.id;
-          return key !== itemKeyOrId && ci.menuItem.id !== itemKeyOrId;
-        });
+        return prev.filter((ci) => !matchCartItem(ci, itemKeyOrId));
+      }
+      const existing = prev.find((ci) => matchCartItem(ci, itemKeyOrId));
+      if (existing && newQuantity > existing.quantity) {
+        const m = existing.menuItem;
+        const hasVariants = Boolean(Array.isArray(m.variants) && m.variants.length > 0);
+        const areAllVariantsUnavailable = hasVariants && m.variants!.every(
+          (v) => v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable'
+        );
+        if (m.status === 'out_of_stock' || m.status === 'unavailable' || m.is_available === false || areAllVariantsUnavailable) {
+          alert(`"${m.name}" is currently out of stock or unavailable.`);
+          return prev;
+        }
+        const v = existing.selected_variant;
+        if (v && (v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable')) {
+          alert(`Option "${v.name}" for "${m.name}" is currently out of stock.`);
+          return prev;
+        }
       }
       return prev.map((ci) => {
-        const key = ci.selected_variant ? `${ci.menuItem.id}_${ci.selected_variant.id}` : ci.menuItem.id;
-        return (key === itemKeyOrId || ci.menuItem.id === itemKeyOrId)
+        return matchCartItem(ci, itemKeyOrId)
           ? { ...ci, quantity: newQuantity }
           : ci;
       });
@@ -1646,10 +1680,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                       </div>
                     </div>
                   <p className="text-xs text-zinc-200 font-medium mt-0.5 drop-shadow-xs max-w-xl line-clamp-1 sm:line-clamp-2">
-                    {businessProfile?.tagline ||
-                      (businessProfile?.type === 'HOTEL'
-                        ? 'Luxury Hospitality & Premier Guest Stays'
-                        : 'Authentic Cuisine & Bar ? Prepared Fresh to Order')}
+                    {businessProfile?.tagline || 'Authentic Cuisine & Bar • Prepared Fresh to Order'}
                   </p>
                 </div>
               </div>
@@ -1764,7 +1795,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                   : `${theme.filterInactive}`
               }`}
             >
-              <span>Pure Vegetarian</span>
+              <span>Vegetarian</span>
               {menuItems.filter((i) => i.food_type === 'veg').length > 0 && (
                 <span
                   className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
@@ -1936,9 +1967,13 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             className={`grid gap-2.5 sm:gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-2`}
           >
             {filteredItems.map((item, idx) => {
-              const isOutOfStock = item.status === 'out_of_stock';
-              const isAvailable = item.status === 'available' && item.is_available !== false;
               const hasVariants = Boolean(Array.isArray(item.variants) && item.variants.length > 0);
+              const areAllVariantsUnavailable = hasVariants && item.variants!.every(
+                (v) => v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable'
+              );
+              const isItemOutOfStock = item.status === 'out_of_stock' || item.status === 'unavailable' || item.is_available === false || areAllVariantsUnavailable;
+              const isOutOfStock = isItemOutOfStock;
+              const isAvailable = !isItemOutOfStock;
               const activeVariant = getActiveVariant(item);
               const activeFoodType = activeVariant?.food_type || item.food_type;
               const isVeg = activeFoodType === 'veg';
@@ -2072,15 +2107,21 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                               >
                                 {item.variants.map((v) => {
                                   const isSelected = activeVariant?.id === v.id;
+                                  const isVariantUnavailable = isItemOutOfStock || v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable';
                                   return (
                                     <button
                                       key={v.id}
                                       type="button"
-                                      onClick={(e) => handleSelectVariant(item.id, v, e)}
-                                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap cursor-pointer flex items-center gap-1 border shrink-0 ${
-                                        isSelected
-                                          ? theme.variantActive
-                                          : theme.variantInactive
+                                      onClick={(e) => {
+                                        if (isVariantUnavailable) return;
+                                        handleSelectVariant(item.id, v, e);
+                                      }}
+                                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 border shrink-0 ${
+                                        isVariantUnavailable
+                                          ? 'opacity-60 bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed'
+                                          : isSelected
+                                            ? theme.variantActive + ' cursor-pointer'
+                                            : theme.variantInactive + ' cursor-pointer'
                                       }`}
                                     >
                                       {(v.food_type === 'veg' || v.food_type === 'non-veg') && (
@@ -2088,10 +2129,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                       <div className={`w-1 h-1 rounded-full ${v.food_type === 'veg' ? 'bg-emerald-600' : 'bg-rose-600'}`} />
                                     </div>
                                   )}
-                                  <span>{v.name}</span>
-                                      <span className={`font-mono text-[10px] notranslate ${isSelected ? 'font-black' : 'opacity-70'}`}>
+                                  <span className={isVariantUnavailable ? 'line-through' : ''}>{v.name}</span>
+                                      <span className={`font-mono text-[10px] notranslate ${isSelected && !isVariantUnavailable ? 'font-black' : 'opacity-70'}`}>
                                         · {item.currency || 'Rs.'}{Number(v.price).toLocaleString()}
                                       </span>
+                                      {isVariantUnavailable && (
+                                        <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded-xs ml-0.5">
+                                          Sold Out
+                                        </span>
+                                      )}
                                     </button>
                                   );
                                 })}
@@ -2100,9 +2146,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                           )}
                         </div>
 
-                        {isOutOfStock ? (
-                          <span className="text-xs font-bold text-rose-500 bg-rose-50 px-3 py-1.5 rounded-xl">
-                            Sold Out
+                        {isItemOutOfStock ? (
+                          <span className="text-xs font-bold text-rose-500 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+                            {item.status === 'unavailable' ? 'Unavailable' : 'Sold Out'}
                           </span>
                         ) : !isReadOnlyMode && isHost && isAvailable ? (
                           <button
@@ -2195,9 +2241,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                               )}
                             </div>
 
-                            {isOutOfStock ? (
-                              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md">
-                                Sold Out
+                            {isItemOutOfStock ? (
+                              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                                {item.status === 'unavailable' ? 'Unavailable' : 'Sold Out'}
                               </span>
                             ) : !isReadOnlyMode && isHost && isAvailable ? (
                               <button
@@ -2237,15 +2283,21 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                             </span>
                             {item.variants.map((v) => {
                               const isSelected = activeVariant?.id === v.id;
+                              const isVariantUnavailable = isItemOutOfStock || v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable';
                               return (
                                 <button
                                   key={v.id}
                                   type="button"
-                                  onClick={(e) => handleSelectVariant(item.id, v, e)}
-                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap cursor-pointer flex items-center gap-1 border shrink-0 ${
-                                    isSelected
-                                      ? theme.variantActive
-                                      : theme.variantInactive
+                                  onClick={(e) => {
+                                    if (isVariantUnavailable) return;
+                                    handleSelectVariant(item.id, v, e);
+                                  }}
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 border shrink-0 ${
+                                    isVariantUnavailable
+                                      ? 'opacity-60 bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed'
+                                      : isSelected
+                                        ? theme.variantActive + ' cursor-pointer'
+                                        : theme.variantInactive + ' cursor-pointer'
                                   }`}
                                 >
                                   {(v.food_type === 'veg' || v.food_type === 'non-veg') && (
@@ -2253,10 +2305,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                       <div className={`w-1 h-1 rounded-full ${v.food_type === 'veg' ? 'bg-emerald-600' : 'bg-rose-600'}`} />
                                     </div>
                                   )}
-                                  <span>{v.name}</span>
-                                  <span className={`font-mono text-[10px] notranslate ${isSelected ? 'font-black' : 'opacity-70'}`}>
+                                  <span className={isVariantUnavailable ? 'line-through' : ''}>{v.name}</span>
+                                  <span className={`font-mono text-[10px] notranslate ${isSelected && !isVariantUnavailable ? 'font-black' : 'opacity-70'}`}>
                                     · {item.currency || 'Rs.'}{Number(v.price).toLocaleString()}
                                   </span>
+                                  {isVariantUnavailable && (
+                                    <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded-xs ml-0.5">
+                                      Sold Out
+                                    </span>
+                                  )}
                                 </button>
                               );
                             })}
@@ -2327,15 +2384,21 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                               </span>
                               {item.variants.map((v) => {
                                 const isSelected = activeVariant?.id === v.id;
+                                const isVariantUnavailable = isItemOutOfStock || v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable';
                                 return (
                                   <button
                                     key={v.id}
                                     type="button"
-                                    onClick={(e) => handleSelectVariant(item.id, v, e)}
-                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap cursor-pointer flex items-center gap-1 border shrink-0 ${
-                                      isSelected
-                                        ? theme.variantActive
-                                        : theme.variantInactive
+                                    onClick={(e) => {
+                                      if (isVariantUnavailable) return;
+                                      handleSelectVariant(item.id, v, e);
+                                    }}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 border shrink-0 ${
+                                      isVariantUnavailable
+                                        ? 'opacity-60 bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed'
+                                        : isSelected
+                                          ? theme.variantActive + ' cursor-pointer'
+                                          : theme.variantInactive + ' cursor-pointer'
                                     }`}
                                   >
                                     {(v.food_type === 'veg' || v.food_type === 'non-veg') && (
@@ -2343,10 +2406,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                       <div className={`w-1 h-1 rounded-full ${v.food_type === 'veg' ? 'bg-emerald-600' : 'bg-rose-600'}`} />
                                     </div>
                                   )}
-                                  <span>{v.name}</span>
-                                    <span className={`font-mono text-[10px] notranslate ${isSelected ? 'font-black' : 'opacity-70'}`}>
+                                  <span className={isVariantUnavailable ? 'line-through' : ''}>{v.name}</span>
+                                    <span className={`font-mono text-[10px] notranslate ${isSelected && !isVariantUnavailable ? 'font-black' : 'opacity-70'}`}>
                                       · {item.currency || 'Rs.'}{Number(v.price).toLocaleString()}
                                     </span>
+                                    {isVariantUnavailable && (
+                                      <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded-xs ml-0.5">
+                                        Sold Out
+                                      </span>
+                                    )}
                                   </button>
                                 );
                               })}
@@ -2358,9 +2426,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                       {/* Footer Actions */}
                       <div className="pt-3 border-t border-black/5 dark:border-white/5 flex items-center justify-between">
                         <span className="text-[11px] opacity-60 font-medium">Prepared Fresh</span>
-                        {isOutOfStock ? (
-                          <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg">
-                            Sold Out
+                        {isItemOutOfStock ? (
+                          <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                            {item.status === 'unavailable' ? 'Unavailable' : 'Sold Out'}
                           </span>
                         ) : !isReadOnlyMode && isHost && isAvailable ? (
                           <button
@@ -2388,11 +2456,17 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                       /* STYLE D: UPDATED INTERACTIVE CUSTOMER CARD (Compact Mobile + Desktop) */
                       /* ---------------------------------------------------------------------- */
                       <div className="bg-white p-2.5 sm:p-3 flex flex-col gap-1.5 sm:gap-2 relative w-full h-full justify-between rounded-2xl border border-zinc-200 shadow-2xs">
-                        {/* Top Right: Cart Pill (Always visible by default: 0 in cart) */}
+                        {/* Top Right: Cart Pill or Out of Stock Badge */}
                         <div className="absolute top-2 right-2 sm:top-2.5 sm:right-2.5 z-10 pointer-events-none">
-                          <div className="px-2 sm:px-2.5 py-0.5 rounded-full border border-[#3b2d24] text-[#3b2d24] text-[10px] sm:text-xs font-black bg-white shadow-2xs">
-                            {getItemCartQuantity(item.id)} in cart
-                          </div>
+                          {isItemOutOfStock ? (
+                            <div className="px-2 sm:px-2.5 py-0.5 rounded-full border border-rose-300 text-rose-600 text-[10px] sm:text-xs font-black bg-rose-50 shadow-2xs">
+                              {item.status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}
+                            </div>
+                          ) : (
+                            <div className="px-2 sm:px-2.5 py-0.5 rounded-full border border-[#3b2d24] text-[#3b2d24] text-[10px] sm:text-xs font-black bg-white shadow-2xs">
+                              {getItemCartQuantity(item.id)} in cart
+                            </div>
+                          )}
                         </div>
 
                         {/* Top Section: Image on left, Name & Price & Thin Description Box beside Image */}
@@ -2472,41 +2546,74 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                         </div>
 
                         {/* Divider */}
-                        {((hasVariants && item.variants && item.variants.length > 0) || (!isReadOnlyMode && isHost && isAvailable)) && (
+                        {((hasVariants && item.variants && item.variants.length > 0) || (!isReadOnlyMode && isHost && isAvailable) || isItemOutOfStock) && (
                           <hr className="border-[#e8e4e1] my-0.5" />
                         )}
 
                         {/* Bottom Section: Variants & Add */}
                         {hasVariants && item.variants && item.variants.length > 0 ? (
                           <div className="flex flex-col gap-1">
-                            <p className="text-[9px] sm:text-[10px] font-extrabold text-[#8c7b6d] uppercase tracking-wider leading-none">
-                              {item.variant_group_name ? `${item.variant_group_name}:` : 'PORTION / SIZE:'}
-                            </p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-[9px] sm:text-[10px] font-extrabold text-[#8c7b6d] uppercase tracking-wider leading-none">
+                                {item.variant_group_name ? `${item.variant_group_name}:` : 'PORTION / SIZE:'}
+                              </p>
+                              {isItemOutOfStock && (
+                                <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-md">
+                                  {item.status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}
+                                </span>
+                              )}
+                            </div>
                             <div className="flex flex-wrap gap-1 sm:gap-1.5">
                               {item.variants.map((v) => {
+                                 const isVariantUnavailable = isItemOutOfStock || v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable';
                                  const vQty = getItemVariantCartQty(item.id, v.id);
                                  const isSelected = activeVariant?.id === v.id;
-                                 const isExpanded = vQty > 0 || isSelected;
+                                 const isExpanded = !isVariantUnavailable && !isReadOnlyMode && isHost && isAvailable && (vQty > 0 || isSelected);
                                  
                                  return (
                                    <div key={v.id} 
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        if (isVariantUnavailable) return;
                                         if (!isExpanded) handleSelectVariant(item.id, v, e);
                                       }} 
                                       className={`flex items-center rounded-xl overflow-hidden border transition-all ${
-                                        isExpanded ? 'bg-[#5c4a3d] border-[#5c4a3d] text-white shadow-2xs' : 'bg-[#faf8f5] border-[#e8e4e1] text-[#3b2d24] cursor-pointer hover:bg-[#f3eee8] hover:border-[#ded8d2]'
+                                        isVariantUnavailable
+                                          ? 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                                          : isExpanded 
+                                            ? 'bg-[#5c4a3d] border-[#5c4a3d] text-white shadow-2xs' 
+                                            : 'bg-[#faf8f5] border-[#e8e4e1] text-[#3b2d24] cursor-pointer hover:bg-[#f3eee8] hover:border-[#ded8d2]'
                                       }`}
                                    >
-                                      <div className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 font-bold text-xs ${isExpanded ? "text-white" : "text-[#3b2d24]"}`}>
+                                      <div className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 font-bold text-xs ${isExpanded ? "text-white" : isVariantUnavailable ? "text-zinc-400" : "text-[#3b2d24]"}`}>
                                         {(v.food_type === "veg" || v.food_type === "non-veg") && (
-                                          <div className={`w-2.5 h-2.5 rounded-[2px] flex flex-shrink-0 items-center justify-center border ${isExpanded ? "bg-transparent border-white/40" : "bg-white " + (v.food_type === "veg" ? "border-emerald-600" : "border-rose-600")}`}>
-                                            <div className={`w-1.5 h-1.5 rounded-full ${isExpanded ? "bg-white" : (v.food_type === "veg" ? "bg-emerald-600" : "bg-rose-600")}`} />
+                                          <div className={`w-2.5 h-2.5 rounded-[2px] flex flex-shrink-0 items-center justify-center border ${
+                                            isVariantUnavailable
+                                              ? "bg-zinc-200 border-zinc-300"
+                                              : isExpanded 
+                                                ? "bg-transparent border-white/40" 
+                                                : "bg-white " + (v.food_type === "veg" ? "border-emerald-600" : "border-rose-600")
+                                          }`}>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${
+                                              isVariantUnavailable
+                                                ? "bg-zinc-400"
+                                                : isExpanded 
+                                                  ? "bg-white" 
+                                                  : (v.food_type === "veg" ? "bg-emerald-600" : "bg-rose-600")
+                                            }`} />
                                           </div>
                                         )}
-                                        <span>{v.name}</span> <span className="opacity-70 font-mono text-[10px] ml-1 notranslate">• {item.currency || "Rs."} {Number(v.price).toLocaleString()}</span>
+                                        <span className={isVariantUnavailable ? 'line-through' : ''}>{v.name}</span>
+                                        <span className={`font-mono text-[10px] ml-1 notranslate ${isExpanded ? 'opacity-70' : isVariantUnavailable ? 'text-zinc-400' : 'opacity-70'}`}>
+                                          • {item.currency || "Rs."} {Number(v.price).toLocaleString()}
+                                        </span>
+                                        {isVariantUnavailable && (
+                                          <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200/80 px-1.5 py-0.2 rounded-md ml-1 not-italic no-underline inline-block">
+                                            Out of Stock
+                                          </span>
+                                        )}
                                       </div>
-                                      {isExpanded && (
+                                      {isExpanded && !isVariantUnavailable && (
                                         <div className="flex items-center gap-2 sm:gap-2.5 px-1.5 sm:px-2 py-0.5 bg-[#4a3b30] text-white border-l border-[#6b5849] font-black text-sm">
                                           <button 
                                             type="button"
@@ -2536,9 +2643,16 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                         </div>
                                       )}
                                    </div>
-                                 )
+                                 );
                               })}
                             </div>
+                          </div>
+                        ) : isItemOutOfStock ? (
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200/80 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                              {item.status === 'unavailable' ? 'Currently Unavailable' : 'Out of Stock'}
+                            </span>
                           </div>
                         ) : (
                           !isReadOnlyMode && isHost && isAvailable && (

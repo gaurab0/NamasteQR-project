@@ -37,7 +37,10 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
       if (initialVariant) {
         setSelectedVariant(initialVariant);
       } else if (Array.isArray(item.variants) && item.variants.length > 0) {
-        setSelectedVariant(item.variants[0]);
+        const firstAvailable = item.variants.find(
+          (v) => v.is_available !== false && (v as any).status !== 'out_of_stock' && (v as any).status !== 'unavailable'
+        );
+        setSelectedVariant(firstAvailable || item.variants[0]);
       } else {
         setSelectedVariant(null);
       }
@@ -71,6 +74,21 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
     ? matchingCartItem.quantity
     : (cartItems ? 0 : (currentCartQuantity || 0));
 
+  const hasVariants = Boolean(Array.isArray(item.variants) && item.variants.length > 0);
+  const areAllVariantsOutOfStock = Boolean(
+    hasVariants &&
+    item.variants!.every((v) => v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable')
+  );
+  const isItemOutOfStock = item.status === 'out_of_stock' || item.status === 'unavailable' || item.is_available === false || areAllVariantsOutOfStock;
+  const isVariantOutOfStock = Boolean(
+    selectedVariant && (
+      selectedVariant.is_available === false ||
+      (selectedVariant as any).status === 'out_of_stock' ||
+      (selectedVariant as any).status === 'unavailable'
+    )
+  );
+  const isEffectivelyOutOfStock = isItemOutOfStock || isVariantOutOfStock;
+
   const isVeg = item.food_type === 'veg';
   const hasDietary = item.food_type === 'veg' || item.food_type === 'non-veg';
   const currency = item.currency || 'Rs.';
@@ -79,7 +97,7 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
   const displayDescription = selectedVariant?.description?.trim() ? selectedVariant.description : item.description;
 
   const handleIncrease = () => {
-    if (!isHost || isReadOnly) return;
+    if (!isHost || isReadOnly || isEffectivelyOutOfStock) return;
     const newQty = currentVariantCartQty + 1;
     const updater = onUpdateCartItem || onAddToCart;
     if (updater && item) {
@@ -149,7 +167,7 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
                   isVeg ? 'bg-emerald-500/90 text-white' : 'bg-red-500/90 text-white'
                 }`}>
                   <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                  {isVeg ? 'Pure Vegetarian' : 'Non-Vegetarian'}
+                  {isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
                 </span>
               )}
               {item.category && (
@@ -212,6 +230,11 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
                   [{selectedVariant.name}]
                 </span>
               )}
+              {isEffectivelyOutOfStock && (
+                <span className="inline-block mt-1 text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
+                  {isItemOutOfStock && item.status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}
+                </span>
+              )}
             </div>
           </div>
 
@@ -230,6 +253,7 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                 {item.variants.map((v) => {
+                  const isVOutOfStock = isItemOutOfStock || v.is_available === false || (v as any).status === 'out_of_stock' || (v as any).status === 'unavailable';
                   const isSelected = selectedVariant?.id === v.id;
                   const vCartQty = cartItems?.find(
                     (ci) => ci.menuItem.id === item.id && ci.selected_variant?.id === v.id
@@ -242,8 +266,12 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
                       onClick={() => setSelectedVariant(v)}
                       className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-amber-500 text-zinc-950 border-amber-500 shadow-xs font-bold ring-2 ring-amber-400/40'
-                          : 'bg-white border-zinc-200 text-zinc-800 hover:border-amber-300'
+                          ? isVOutOfStock
+                            ? 'bg-rose-50 text-rose-900 border-rose-300 ring-2 ring-rose-200 font-bold'
+                            : 'bg-amber-500 text-zinc-950 border-amber-500 shadow-xs font-bold ring-2 ring-amber-400/40'
+                          : isVOutOfStock
+                            ? 'bg-zinc-50 border-zinc-200 text-zinc-400 opacity-75'
+                            : 'bg-white border-zinc-200 text-zinc-800 hover:border-amber-300'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1">
@@ -253,17 +281,23 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
                               <div className={`w-1.5 h-1.5 rounded-full ${v.food_type === 'veg' ? 'bg-emerald-600' : 'bg-rose-600'}`} />
                             </div>
                           )}
-                          <div className="text-xs font-bold truncate">{v.name}</div>
+                          <div className={`text-xs font-bold truncate ${isVOutOfStock ? 'line-through text-zinc-400' : ''}`}>{v.name}</div>
                         </div>
-                        {vCartQty > 0 && (
+                        {isVOutOfStock ? (
+                          <span className="text-[10px] font-bold text-rose-600 bg-rose-100/80 px-1.5 py-0.5 rounded-full shrink-0">
+                            Out of Stock
+                          </span>
+                        ) : vCartQty > 0 ? (
                           <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${
                             isSelected ? 'bg-zinc-950 text-white' : 'bg-amber-100 text-amber-900 border border-amber-300'
                           }`}>
                             {vCartQty} in cart
                           </span>
-                        )}
+                        ) : null}
                       </div>
-                      <div className={`text-xs font-mono font-black mt-0.5 notranslate ${isSelected ? 'text-zinc-950' : 'text-amber-700'}`}>
+                      <div className={`text-xs font-mono font-black mt-0.5 notranslate ${
+                        isVOutOfStock ? 'text-zinc-400 line-through' : isSelected ? 'text-zinc-950' : 'text-amber-700'
+                      }`}>
                         {currency} {Number(v.price).toLocaleString()}
                       </div>
                     </button>
@@ -324,7 +358,27 @@ export const MenuItemDetailModal: React.FC<MenuItemDetailModalProps> = ({
 
         {/* Modal Footer Controls */}
         <div className="p-4 bg-stone-50 border-t border-stone-200 flex items-center justify-between gap-3 shrink-0">
-          {!isReadOnly && isHost ? (
+          {isEffectivelyOutOfStock ? (
+            <div className="w-full flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                  {isItemOutOfStock 
+                    ? (item.status === 'unavailable' ? 'Currently Unavailable' : 'Out of Stock') 
+                    : 'Selected Option Out of Stock'}
+                </span>
+                <span className="text-xs text-stone-500 hidden sm:inline">This item cannot be ordered right now.</span>
+              </div>
+              <button
+                id="modal-close-out-of-stock-btn"
+                type="button"
+                onClick={onClose}
+                className="px-5 py-2.5 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          ) : !isReadOnly && isHost ? (
             <>
               {/* Quantity Stepper & in-cart indicator */}
               <div className="flex items-center gap-2.5 sm:gap-3">

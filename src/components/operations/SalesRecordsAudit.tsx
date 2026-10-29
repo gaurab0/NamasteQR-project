@@ -635,16 +635,6 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
             </span>
           </div>
 
-          <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-200/60 col-span-2 sm:col-span-1">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">Room Charge</span>
-            <p className="text-sm font-black text-zinc-800 mt-0.5">
-              {currencySymbol} {(metrics.paymentCounts['ROOM_CHARGE']?.total || 0).toLocaleString()}
-            </p>
-            <span className="text-[10px] text-zinc-400">
-              {metrics.paymentCounts['ROOM_CHARGE']?.count || 0} bills
-            </span>
-          </div>
-
           <div className="p-3 rounded-xl bg-rose-50 border border-rose-200/60 col-span-2 sm:col-span-1">
             <span className="text-[10px] font-bold text-rose-600 uppercase">Credit</span>
             <p className="text-sm font-black text-zinc-800 mt-0.5">
@@ -686,7 +676,6 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
               <option value="CARD">Card / Machine</option>
               <option value="QR_CODE">QR Code (Fonepay)</option>
               <option value="ONLINE">Online Portal</option>
-              <option value="ROOM_CHARGE">Room Charge</option>
               <option value="CREDIT">Credit</option>
             </select>
             <span className="text-xs font-bold text-zinc-400 px-1">

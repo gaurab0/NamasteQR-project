@@ -1769,7 +1769,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           target.quantity = qty;
         }
         target.price = price;
-        target.unit_price = val === '' ? ('' as any) : price;
+        target.unit_price = val === '' ? ('' as any) : val;
         target.subtotal = qty * price;
         target.total_price = qty * price;
       }
@@ -2200,7 +2200,6 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               <option value="DINE_IN">Dine-In Restaurant</option>
               <option value="TAKEAWAY">Takeaway / Counter</option>
               <option value="DELIVERY">Home Delivery</option>
-              <option value="ROOM_SERVICE">Hotel Room Service</option>
             </select>
           </div>
 
@@ -2412,7 +2411,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         step="any"
                         inputMode="decimal"
                         placeholder="0.00"
-                        value={item.unit_price === 0 || (item.unit_price as any) === '' ? '' : item.unit_price}
+                        value={item.unit_price ?? ''}
                         onFocus={(e) => {
                           const t = e.currentTarget;
                           setTimeout(() => t.select(), 0);
@@ -2422,15 +2421,15 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           if (raw === '') {
                             handleItemChange(idx, 'unit_price', '');
                           } else {
-                            const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
-                              ? raw.replace(/^0+/, '')
-                              : raw;
-                            handleItemChange(idx, 'unit_price', clean === '' ? '' : parseFloat(clean) || 0);
+                            const clean = raw.replace(/^0+(?=\d)/, '');
+                            handleItemChange(idx, 'unit_price', clean);
                           }
                         }}
                         onBlur={() => {
                           if ((item.unit_price as any) === '' || isNaN(Number(item.unit_price))) {
                             handleItemChange(idx, 'unit_price', 0);
+                          } else {
+                            handleItemChange(idx, 'unit_price', Number(item.unit_price));
                           }
                         }}
                         className="w-20 pl-6 pr-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
@@ -2559,7 +2558,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         step="any"
                         inputMode="decimal"
                         placeholder="0.00"
-                        value={item.unit_price === 0 || (item.unit_price as any) === '' ? '' : item.unit_price}
+                        value={item.unit_price ?? ''}
                         onFocus={(e) => {
                           const t = e.currentTarget;
                           setTimeout(() => t.select(), 0);
@@ -2569,15 +2568,15 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                           if (raw === '') {
                             handleItemChange(idx, 'unit_price', '');
                           } else {
-                            const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
-                              ? raw.replace(/^0+/, '')
-                              : raw;
-                            handleItemChange(idx, 'unit_price', clean === '' ? '' : parseFloat(clean) || 0);
+                            const clean = raw.replace(/^0+(?=\d)/, '');
+                            handleItemChange(idx, 'unit_price', clean);
                           }
                         }}
                         onBlur={() => {
                           if ((item.unit_price as any) === '' || isNaN(Number(item.unit_price))) {
                             handleItemChange(idx, 'unit_price', 0);
+                          } else {
+                            handleItemChange(idx, 'unit_price', Number(item.unit_price));
                           }
                         }}
                         className="w-20 sm:w-24 px-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
@@ -2666,7 +2665,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     max="100"
                     step="any"
                     placeholder="0"
-                    value={discountPercent === 0 || discountPercent === '' ? '' : discountPercent}
+                    value={discountPercent}
                     onFocus={(e) => {
                       const t = e.currentTarget;
                       setTimeout(() => t.select(), 0);
@@ -2676,16 +2675,16 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       if (raw === '') {
                         setDiscountPercent('');
                       } else {
-                        const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
-                          ? raw.replace(/^0+/, '')
-                          : raw;
+                        const clean = raw.replace(/^0+(?=\d)/, '');
                         const num = parseFloat(clean);
-                        setDiscountPercent(isNaN(num) ? '' : Math.min(100, Math.max(0, num)));
+                        setDiscountPercent(isNaN(num) ? '' : clean);
                       }
                     }}
                     onBlur={() => {
                       if (discountPercent === '' || isNaN(Number(discountPercent))) {
                         setDiscountPercent(0);
+                      } else {
+                        setDiscountPercent(Math.min(100, Math.max(0, Number(discountPercent))));
                       }
                     }}
                     className="w-20 px-3 py-1.5 rounded-xl border border-zinc-300 text-xs font-bold text-right focus:ring-2 focus:ring-amber-500"
@@ -2705,7 +2704,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                     min="0"
                     step="any"
                     placeholder="0"
-                    value={flatDiscount === 0 || flatDiscount === '' ? '' : flatDiscount}
+                    value={flatDiscount}
                     onFocus={(e) => {
                       const t = e.currentTarget;
                       setTimeout(() => t.select(), 0);
@@ -2715,16 +2714,16 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       if (raw === '') {
                         setFlatDiscount('');
                       } else {
-                        const clean = raw.length > 1 && raw.startsWith('0') && !raw.startsWith('0.')
-                          ? raw.replace(/^0+/, '')
-                          : raw;
+                        const clean = raw.replace(/^0+(?=\d)/, '');
                         const num = parseFloat(clean);
-                        setFlatDiscount(isNaN(num) ? '' : Math.max(0, num));
+                        setFlatDiscount(isNaN(num) ? '' : clean);
                       }
                     }}
                     onBlur={() => {
                       if (flatDiscount === '' || isNaN(Number(flatDiscount))) {
                         setFlatDiscount(0);
+                      } else {
+                        setFlatDiscount(Math.max(0, Number(flatDiscount)));
                       }
                     }}
                     className="w-24 px-3 py-1.5 rounded-xl border border-zinc-300 text-xs font-bold text-right focus:ring-2 focus:ring-amber-500"

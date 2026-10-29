@@ -19,7 +19,8 @@ import {
   ArrowRight,
   ShieldAlert,
   Lock,
-  DollarSign
+  DollarSign,
+  BookOpen
 } from 'lucide-react';
 import { rbacService } from '../../services/rbac.service';
 import { Business } from '../../types/auth';
@@ -114,10 +115,6 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
     const takeawayAmount = filteredSales
       .filter((s) => s.sale_type === 'TAKEAWAY' || s.sale_type === 'QUICK_POS')
       .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
-    const reservationAmount = filteredSales
-      .filter((s) => s.sale_type === 'ROOM_SERVICE')
-      .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
-
     // Staff sales calculation
     const staffSalesMap: Record<string, number> = {};
     filteredSales.forEach((s) => {
@@ -132,7 +129,7 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
       customerMap[cust] = (customerMap[cust] || 0) + (Number(s.total_amount) || 0);
     });
 
-        const cashSales = filteredSales
+    const cashSales = filteredSales
       .filter((s) => (s.payment_method || '').toUpperCase() === 'CASH')
       .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
     const cardSales = filteredSales
@@ -141,16 +138,19 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
     const qrSales = filteredSales
       .filter((s) => { const pm = (s.payment_method || '').toUpperCase(); return pm === 'QR_CODE' || pm === 'UPI_QR'; })
       .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
+    const creditSales = filteredSales
+      .filter((s) => (s.payment_method || '').toUpperCase() === 'CREDIT')
+      .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
 
     return {
       totalSales: totalSalesAmount,
       dineIn: dineInAmount,
       delivery: deliveryAmount,
       takeaway: takeawayAmount,
-      reservation: reservationAmount,
       cashSales,
       cardSales,
       qrSales,
+      creditSales,
       staffCount: Object.keys(staffSalesMap).length || 0,
       customerCount: Object.keys(customerMap).length || 0,
     };
@@ -192,8 +192,8 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
         </div>
       )}
 
-      {/* TOP ROW: 4 KPI Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+      {/* TOP ROW: 5 KPI Metric Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
         {/* Card 1: Sales */}
         <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-2xs hover:shadow-xs transition flex flex-col justify-between">
           <div className="flex items-center justify-between">
@@ -273,6 +273,26 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
             </p>
           </div>
         </div>
+
+        {/* Card 5: Credit Sales */}
+        <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-2xs hover:shadow-xs transition flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-zinc-500 flex items-center gap-1.5">
+              <span className="w-5 h-5 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center text-[10px] font-bold">
+                <BookOpen className="w-3 h-3" />
+              </span>
+              Credit Sales
+            </span>
+          </div>
+          <div className="mt-2.5">
+            <div className="text-base sm:text-lg font-black text-zinc-900">
+              {currency} {stats.creditSales?.toLocaleString()}
+            </div>
+            <p className="text-[10px] font-semibold text-zinc-400 mt-0.5">
+              Credit ledger account
+            </p>
+          </div>
+        </div>
       </div>
       {/* MIDDLE ROW: Sales Breakdown + Sales Overview Graph */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -329,18 +349,6 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
                 </div>
                 <span className="font-extrabold text-zinc-900">
                   {currency} {stats.delivery.toLocaleString()}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-zinc-700 font-semibold">
-                  <span className="w-6 h-6 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center text-xs">
-                    📅
-                  </span>
-                  <span>Reservation Services</span>
-                </div>
-                <span className="font-extrabold text-zinc-900">
-                  {currency} {stats.reservation.toLocaleString()}
                 </span>
               </div>
 
@@ -593,7 +601,7 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
             onClick={() => onNavigateTab('checkins')}
             className="w-full mt-4 py-1.5 text-xs font-bold text-amber-700 hover:text-amber-800 transition flex items-center justify-center gap-1 cursor-pointer"
           >
-            <span>View Table Guests</span>
+            <span>View Tables & QR</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>

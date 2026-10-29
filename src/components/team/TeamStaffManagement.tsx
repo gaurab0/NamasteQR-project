@@ -36,7 +36,7 @@ const TAB_DESCRIPTIONS: Record<TabPermissionId, string> = {
   operations: 'Table layout, space management, and operational floor plan',
   kds: 'Kitchen, Bar & live kitchen display order management',
   waiter: 'Waiter order dispatch, table status, and service station',
-  checkins: 'Guest check-ins, reservations, and room/table assignments',
+  checkins: 'Restaurant tables, QR codes, and dining area layout',
   menus: 'Menu catalog, categories, pricing, and dish availability',
   billing: 'Finance, POS billing, invoicing, payments, and receipts',
   team: 'Staff directory, account provisioning, and tab permissions',
@@ -485,13 +485,11 @@ export const TeamStaffManagement: React.FC<TeamStaffManagementProps> = ({
                           onChange={(e) => handleRoleChange(member.id, e.target.value)}
                           className="bg-white border border-zinc-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-amber-500 cursor-pointer"
                         >
-                          <option value="HOTEL_OWNER">Hotel / Resort Owner</option>
                           <option value="RESTAURANT_OWNER">Restaurant Owner</option>
                           <option value="ADMIN">System Administrator</option>
                           <option value="MANAGER">General Manager</option>
                           <option value="KITCHEN_STAFF">Kitchen Staff / Chef</option>
-                          <option value="FRONT_DESK">Front Desk / Reception</option>
-                          <option value="HOUSEKEEPING">Housekeeping</option>
+                          <option value="FRONT_DESK">Host / Dining Reception</option>
                           <option value="CASHIER">Cashier / Billing</option>
                           <option value="WAITER">Waiter / Service Staff</option>
                           <option value="BAR_STAFF">Bar Staff / Bartender</option>

@@ -29,9 +29,112 @@ class PostgresDatabaseStore {
   private devOtpStore: Map<string, string> = new Map();
   private demoBookings: Map<string, any> = new Map();
   private contactEnquiries: Map<string, any> = new Map();
+  private pinnedTabsGuard: Set<string> = new Set();
 
   constructor() {
     this.initPostgres();
+  }
+
+  // --- Entity Mapping Helpers (Single source of truth for DB -> In-Memory) ---
+  private mapBusiness(d: any, fallbackType?: BusinessType): Business {
+    return {
+      id: d.id,
+      name: d.name || 'Unnamed Venue',
+      business_type: (d.business_type as BusinessType) || fallbackType || 'RESTAURANT',
+      status: (d.status as any) || 'ACTIVE',
+      tagline: d.tagline ?? (d.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+      location: d.location ?? 'Main Dining & Service Area',
+      address: d.address || '',
+      kitchen_hours: d.kitchen_hours ?? '07:30 AM – 10:30 PM',
+      phone: d.phone ?? '',
+      parent_business_id: d.parent_business_id || undefined,
+      owner_uid: d.owner_uid || undefined,
+      branch_code: d.branch_code || undefined,
+      currency: d.currency || 'Rs.',
+      tax_rate: typeof d.tax_rate === 'number' ? d.tax_rate : 0,
+      show_menu_images: d.show_menu_images !== undefined && d.show_menu_images !== null ? Boolean(d.show_menu_images) : true,
+      menu_theme_config: (d.menu_theme_config as any) || undefined,
+      date_format_nav: (d.date_format_nav as any) || 'BOTH',
+      date_format_billing: (d.date_format_billing as any) || 'BOTH',
+      kds_print_mode: (d as any).kds_print_mode || 'DISPLAY_ONLY',
+      default_language: (d as any).default_language || ((d.operations_config as any)?.default_language) || 'en',
+      created_at: d.created_at,
+      updated_at: d.updated_at,
+    };
+  }
+
+  private mapUser(d: any): User {
+    return {
+      id: d.id,
+      business_id: d.business_id,
+      email: d.email,
+      name: d.name || undefined,
+      password_hash: d.password_hash || '',
+      role: d.role as UserRole,
+      status: d.status as any,
+      allowed_tabs: Array.isArray(d.allowed_tabs) ? sanitizeTabs(d.allowed_tabs as any) : undefined,
+      last_login_at: d.last_login_at,
+      created_at: d.created_at,
+      updated_at: d.updated_at,
+    };
+  }
+
+  private mapPhoneVerification(d: any): PhoneVerification {
+    return {
+      id: d.id,
+      user_id: d.user_id,
+      phone_country_code: d.phone_country_code,
+      phone_number: d.phone_number,
+      phone_e164: d.phone_e164,
+      is_verified: d.is_verified,
+      verified_at: d.verified_at,
+      created_at: d.created_at,
+      updated_at: d.updated_at,
+    };
+  }
+
+  private mapAuditLog(d: any): AuditLog {
+    return {
+      id: d.id,
+      user_id: d.user_id || d.account_name,
+      business_id: d.business_id || d.account_name,
+      account_name: d.account_name || 'NamasteQR Business',
+      email: d.email || undefined,
+      status: (d.status as any) || 'OFFLINE',
+      event_type: d.event_type as any,
+      ip_address: d.ip_address || undefined,
+      user_agent: d.user_agent || undefined,
+      last_active_at: d.last_active_at || d.created_at,
+      created_at: d.created_at,
+      updated_at: d.updated_at || d.created_at,
+    };
+  }
+
+  private mapPasswordResetToken(d: any): PasswordResetToken {
+    return {
+      id: d.id,
+      user_id: d.user_id,
+      token_hash: d.token_hash,
+      expires_at: d.expires_at,
+      used_at: d.used_at,
+      created_at: d.created_at,
+    };
+  }
+
+  private async mutateUser(id: string, updates: Partial<User>): Promise<User | null> {
+    const user = this.users.get(id) || await this.findUserById(id);
+    const now = new Date();
+    if (user) {
+      Object.assign(user, updates, { updated_at: now });
+      this.users.set(id, user);
+    }
+    try {
+      await prisma.user.update({
+        where: { id },
+        data: { ...updates, updated_at: now } as any,
+      });
+    } catch (e) {}
+    return user || null;
   }
 
   private async initPostgres() {
@@ -50,28 +153,7 @@ class PostgresDatabaseStore {
       // 1. Sync Businesses
       const dbBusinesses = await prisma.business.findMany();
       for (const d of dbBusinesses) {
-        this.businesses.set(d.id, {
-          id: d.id,
-          name: d.name,
-          business_type: (d.business_type as BusinessType) || 'RESTAURANT',
-          status: (d.status as any) || 'ACTIVE',
-          tagline: d.tagline ?? (d.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: d.location ?? 'Main Dining & Service Area',
-          address: d.address || '',
-          kitchen_hours: d.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: d.phone ?? '',
-          parent_business_id: d.parent_business_id || undefined,
-          owner_uid: d.owner_uid || undefined,
-          branch_code: d.branch_code || undefined,
-          currency: d.currency || 'Rs.',
-          tax_rate: typeof d.tax_rate === 'number' ? d.tax_rate : 0,
-          show_menu_images: d.show_menu_images,
-          menu_theme_config: (d.menu_theme_config as any) || undefined,
-          date_format_nav: (d.date_format_nav as any) || 'BOTH',
-          date_format_billing: (d.date_format_billing as any) || 'BOTH',
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-        });
+        this.businesses.set(d.id, this.mapBusiness(d));
       }
 
       // If database has 0 businesses, initialize default
@@ -82,35 +164,13 @@ class PostgresDatabaseStore {
       // 2. Sync Users
       const dbUsers = await prisma.user.findMany();
       for (const d of dbUsers) {
-        this.users.set(d.id, {
-          id: d.id,
-          business_id: d.business_id,
-          email: d.email,
-          name: d.name || undefined,
-          password_hash: d.password_hash,
-          role: d.role as UserRole,
-          status: d.status as any,
-          allowed_tabs: Array.isArray(d.allowed_tabs) ? sanitizeTabs(d.allowed_tabs as any) : undefined,
-          last_login_at: d.last_login_at,
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-        });
+        this.users.set(d.id, this.mapUser(d));
       }
 
       // 3. Sync Phone Verifications
       const dbPhones = await prisma.phoneVerification.findMany();
       for (const d of dbPhones) {
-        this.phoneVerifications.set(d.id, {
-          id: d.id,
-          user_id: d.user_id,
-          phone_country_code: d.phone_country_code,
-          phone_number: d.phone_number,
-          phone_e164: d.phone_e164,
-          is_verified: d.is_verified,
-          verified_at: d.verified_at,
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-        });
+        this.phoneVerifications.set(d.id, this.mapPhoneVerification(d));
       }
 
       // 4. Sync Audit Logs
@@ -119,19 +179,7 @@ class PostgresDatabaseStore {
         orderBy: { created_at: 'desc' },
       });
       for (const d of dbAudits) {
-        this.auditLogs.set(d.id, {
-          id: d.id,
-          user_id: d.user_id || d.account_name,
-          business_id: d.business_id || d.account_name,
-          account_name: d.account_name || 'NamasteQR Business',
-          email: d.email || undefined,
-          status: (d.status as any) || 'OFFLINE',
-          event_type: d.event_type as any,
-          ip_address: d.ip_address || undefined,
-          user_agent: d.user_agent || undefined,
-          created_at: d.created_at,
-          updated_at: d.created_at,
-        });
+        this.auditLogs.set(d.id, this.mapAuditLog(d));
       }
     } catch (e: any) {
       console.warn('PostgreSQL initial sync notice:', e.message);
@@ -165,6 +213,8 @@ class PostgresDatabaseStore {
       menu_theme_config: extra?.menu_theme_config,
       date_format_nav: extra?.date_format_nav || 'BOTH',
       date_format_billing: extra?.date_format_billing || 'BOTH',
+      kds_print_mode: (extra as any)?.kds_print_mode || 'DISPLAY_ONLY',
+      default_language: (extra as any)?.default_language || 'en',
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -192,6 +242,8 @@ class PostgresDatabaseStore {
           menu_theme_config: (business.menu_theme_config as any) || null,
           date_format_nav: business.date_format_nav || 'BOTH',
           date_format_billing: business.date_format_billing || 'BOTH',
+          kds_print_mode: business.kds_print_mode || 'DISPLAY_ONLY',
+          default_language: business.default_language || 'en',
           created_at: business.created_at,
           updated_at: business.updated_at,
         },
@@ -310,27 +362,7 @@ class PostgresDatabaseStore {
     try {
       const dbBiz = await prisma.business.findUnique({ where: { id } });
       if (dbBiz) {
-        const b: Business = {
-          id: dbBiz.id,
-          name: dbBiz.name,
-          business_type: (dbBiz.business_type as BusinessType) || type || 'RESTAURANT',
-          status: (dbBiz.status as any) || 'ACTIVE',
-          tagline: dbBiz.tagline ?? (dbBiz.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: dbBiz.location ?? 'Main Dining & Service Area',
-          address: dbBiz.address || '',
-          kitchen_hours: dbBiz.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: dbBiz.phone ?? '',
-          parent_business_id: dbBiz.parent_business_id || undefined,
-          owner_uid: dbBiz.owner_uid || undefined,
-          branch_code: dbBiz.branch_code || undefined,
-          currency: dbBiz.currency || undefined,
-          tax_rate: typeof dbBiz.tax_rate === 'number' ? dbBiz.tax_rate : undefined,
-          show_menu_images: dbBiz.show_menu_images,
-          menu_theme_config: (dbBiz.menu_theme_config as any) || undefined,
-          default_language: (dbBiz as any).default_language || ((dbBiz.operations_config as any)?.default_language) || 'en',
-          created_at: dbBiz.created_at,
-          updated_at: dbBiz.updated_at,
-        };
+        const b = this.mapBusiness(dbBiz, type);
         this.businesses.set(b.id, b);
         return b;
       }
@@ -338,55 +370,13 @@ class PostgresDatabaseStore {
 
     const formattedName = name || id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     const bType: BusinessType = type || (id.includes('hotel') || id.includes('resort') ? 'HOTEL' : 'RESTAURANT');
-    const business: Business = {
+    return this.createBusiness(formattedName, bType, {
       id,
-      name: formattedName,
-      business_type: bType,
-      status: 'ACTIVE',
-      tagline: extra?.tagline ?? (bType === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-      location: extra?.location ?? 'Main Dining & Service Area',
-      kitchen_hours: extra?.kitchen_hours ?? '07:30 AM – 10:30 PM',
+      date_format_nav: 'ENGLISH',
+      date_format_billing: 'ENGLISH',
+      ...extra,
       phone: extra?.phone || '+9779800000000',
-      parent_business_id: extra?.parent_business_id,
-      owner_uid: extra?.owner_uid,
-      branch_code: extra?.branch_code,
-      currency: extra?.currency,
-      tax_rate: extra?.tax_rate,
-      date_format_nav: extra?.date_format_nav || 'ENGLISH',
-      date_format_billing: extra?.date_format_billing || 'ENGLISH',
-      default_language: (extra as any)?.default_language || 'en',
-      created_at: new Date(),
-      updated_at: new Date(),
-    };
-    this.businesses.set(business.id, business);
-
-    try {
-      await prisma.business.upsert({
-        where: { id: business.id },
-        create: {
-          id: business.id,
-          name: business.name,
-          business_type: business.business_type,
-          status: business.status,
-          tagline: business.tagline || null,
-          location: business.location || null,
-          kitchen_hours: business.kitchen_hours || null,
-          phone: business.phone || null,
-          parent_business_id: business.parent_business_id || null,
-          created_at: business.created_at,
-          updated_at: business.updated_at,
-        },
-        update: {
-          name: business.name,
-          business_type: business.business_type,
-          status: business.status,
-        },
-      });
-    } catch (err: any) {
-      console.warn('PostgreSQL ensureBusiness notice:', err.message);
-    }
-
-    return business;
+    });
   }
 
   async findBusinessById(id: string): Promise<Business | null> {
@@ -396,30 +386,7 @@ class PostgresDatabaseStore {
     try {
       const dbBiz = await prisma.business.findUnique({ where: { id } });
       if (dbBiz) {
-        const b: Business = {
-          id: dbBiz.id,
-          name: dbBiz.name,
-          business_type: dbBiz.business_type as BusinessType,
-          status: dbBiz.status as any,
-          tagline: dbBiz.tagline ?? (dbBiz.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: dbBiz.location ?? 'Main Dining & Service Area',
-          address: dbBiz.address || '',
-          kitchen_hours: dbBiz.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: dbBiz.phone ?? '',
-          parent_business_id: dbBiz.parent_business_id || undefined,
-          owner_uid: dbBiz.owner_uid || undefined,
-          branch_code: dbBiz.branch_code || undefined,
-          currency: dbBiz.currency || undefined,
-          tax_rate: typeof dbBiz.tax_rate === 'number' ? dbBiz.tax_rate : undefined,
-          show_menu_images: dbBiz.show_menu_images,
-          menu_theme_config: (dbBiz.menu_theme_config as any) || undefined,
-          date_format_nav: (dbBiz.date_format_nav as any) || undefined,
-          date_format_billing: (dbBiz.date_format_billing as any) || undefined,
-          kds_print_mode: (dbBiz as any).kds_print_mode || 'DISPLAY_ONLY',
-          default_language: (dbBiz as any).default_language || ((dbBiz.operations_config as any)?.default_language) || 'en',
-          created_at: dbBiz.created_at,
-          updated_at: dbBiz.updated_at,
-        };
+        const b = this.mapBusiness(dbBiz);
         this.businesses.set(b.id, b);
         return b;
       }
@@ -430,36 +397,15 @@ class PostgresDatabaseStore {
   async getAllBusinesses(): Promise<Business[]> {
     try {
       const dbBizs = await prisma.business.findMany();
-      const list: Business[] = [];
-      for (const d of dbBizs) {
-        const b: Business = {
-          id: d.id,
-          name: d.name || 'Unnamed Venue',
-          business_type: (d.business_type as BusinessType) || 'RESTAURANT',
-          status: (d.status as any) || 'ACTIVE',
-          tagline: d.tagline ?? (d.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
-          location: d.location ?? 'Main Dining & Service Area',
-          address: d.address || '',
-          kitchen_hours: d.kitchen_hours ?? '07:30 AM – 10:30 PM',
-          phone: d.phone ?? '',
-          parent_business_id: d.parent_business_id || undefined,
-          owner_uid: d.owner_uid || undefined,
-          branch_code: d.branch_code || undefined,
-          currency: d.currency || undefined,
-          tax_rate: typeof d.tax_rate === 'number' ? d.tax_rate : undefined,
-          show_menu_images: d.show_menu_images,
-          menu_theme_config: (d.menu_theme_config as any) || undefined,
-          date_format_nav: (d.date_format_nav as any) || undefined,
-          date_format_billing: (d.date_format_billing as any) || undefined,
-          kds_print_mode: (d as any).kds_print_mode || 'DISPLAY_ONLY',
-          default_language: (d as any).default_language || ((d.operations_config as any)?.default_language) || 'en',
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-        };
-        this.businesses.set(b.id, b);
-        list.push(b);
+      if (dbBizs.length > 0) {
+        const list: Business[] = [];
+        for (const d of dbBizs) {
+          const b = this.mapBusiness(d);
+          this.businesses.set(b.id, b);
+          list.push(b);
+        }
+        return list;
       }
-      if (list.length > 0) return list;
     } catch (e: any) {
       console.warn('getAllBusinesses PostgreSQL notice:', e.message);
     }
@@ -475,49 +421,33 @@ class PostgresDatabaseStore {
   }
 
   async updateBusinessProfile(id: string, updates: Partial<Business>): Promise<Business | null> {
-    let business = this.businesses.get(id);
-    if (!business) {
-      business = await this.findBusinessById(id);
-    }
+    const business = this.businesses.get(id) || await this.findBusinessById(id);
     if (!business) return null;
 
-    if (updates.name !== undefined) business.name = updates.name.trim();
-    if (updates.business_type !== undefined) business.business_type = updates.business_type;
-    if (updates.tagline !== undefined) business.tagline = updates.tagline.trim();
-    if (updates.location !== undefined) business.location = updates.location.trim();
-    if (updates.address !== undefined) business.address = updates.address.trim();
-    if (updates.kitchen_hours !== undefined) business.kitchen_hours = updates.kitchen_hours.trim();
-    if (updates.phone !== undefined) business.phone = updates.phone.trim();
-    if (updates.show_menu_images !== undefined) business.show_menu_images = Boolean(updates.show_menu_images);
-    if (updates.menu_theme_config !== undefined) business.menu_theme_config = updates.menu_theme_config;
-    if (updates.date_format_nav !== undefined) business.date_format_nav = updates.date_format_nav;
-    if (updates.date_format_billing !== undefined) business.date_format_billing = updates.date_format_billing;
-    if (updates.kds_print_mode !== undefined) business.kds_print_mode = updates.kds_print_mode;
-    if (updates.default_language !== undefined) business.default_language = updates.default_language;
-    business.updated_at = new Date();
+    const data: Record<string, any> = { updated_at: new Date() };
+    const stringKeys: (keyof Business)[] = ['name', 'tagline', 'location', 'address', 'kitchen_hours', 'phone'];
+    for (const key of stringKeys) {
+      if (updates[key] !== undefined) {
+        const val = updates[key];
+        (business as any)[key] = typeof val === 'string' ? val.trim() : val;
+        data[key] = (business as any)[key];
+      }
+    }
+    if (updates.business_type !== undefined) data.business_type = business.business_type = updates.business_type;
+    if (updates.currency !== undefined) data.currency = business.currency = updates.currency;
+    if (updates.tax_rate !== undefined) data.tax_rate = business.tax_rate = updates.tax_rate;
+    if (updates.show_menu_images !== undefined) data.show_menu_images = business.show_menu_images = Boolean(updates.show_menu_images);
+    if (updates.menu_theme_config !== undefined) data.menu_theme_config = business.menu_theme_config = updates.menu_theme_config;
+    if (updates.date_format_nav !== undefined) data.date_format_nav = business.date_format_nav = updates.date_format_nav;
+    if (updates.date_format_billing !== undefined) data.date_format_billing = business.date_format_billing = updates.date_format_billing;
+    if (updates.kds_print_mode !== undefined) data.kds_print_mode = business.kds_print_mode = updates.kds_print_mode;
+    if (updates.default_language !== undefined) data.default_language = business.default_language = updates.default_language;
+    business.updated_at = data.updated_at;
 
     this.businesses.set(id, business);
 
     try {
-      await prisma.business.update({
-        where: { id },
-        data: {
-          ...(updates.name !== undefined ? { name: business.name } : {}),
-          ...(updates.business_type !== undefined ? { business_type: business.business_type } : {}),
-          ...(updates.tagline !== undefined ? { tagline: business.tagline } : {}),
-          ...(updates.location !== undefined ? { location: business.location } : {}),
-          ...(updates.address !== undefined ? { address: business.address } : {}),
-          ...(updates.kitchen_hours !== undefined ? { kitchen_hours: business.kitchen_hours } : {}),
-          ...(updates.phone !== undefined ? { phone: business.phone } : {}),
-          ...(updates.show_menu_images !== undefined ? { show_menu_images: business.show_menu_images } : {}),
-          ...(updates.menu_theme_config !== undefined ? { menu_theme_config: business.menu_theme_config as any } : {}),
-          ...(updates.date_format_nav !== undefined ? { date_format_nav: business.date_format_nav } : {}),
-          ...(updates.date_format_billing !== undefined ? { date_format_billing: business.date_format_billing } : {}),
-          ...(updates.kds_print_mode !== undefined ? { kds_print_mode: business.kds_print_mode } : {}),
-          ...(updates.default_language !== undefined ? { default_language: business.default_language } : {}),
-          updated_at: business.updated_at,
-        },
-      });
+      await prisma.business.update({ where: { id }, data });
     } catch (e: any) {
       console.error('PostgreSQL updateBusinessProfile ERROR:', e.message);
     }
@@ -526,10 +456,11 @@ class PostgresDatabaseStore {
   }
 
   async updateBusinessStatus(id: string, status: Business['status']): Promise<Business | null> {
-    const business = this.businesses.get(id);
+    const business = this.businesses.get(id) || await this.findBusinessById(id);
+    const now = new Date();
     if (business) {
       business.status = status;
-      business.updated_at = new Date();
+      business.updated_at = now;
       this.businesses.set(id, business);
     }
     try {
@@ -537,7 +468,7 @@ class PostgresDatabaseStore {
         where: { id },
         data: {
           status,
-          updated_at: new Date(),
+          updated_at: now,
         },
       });
     } catch (e: any) {
@@ -606,7 +537,7 @@ class PostgresDatabaseStore {
   async findUserByEmail(email: string): Promise<User | null> {
     const normalized = email.toLowerCase().trim();
     for (const user of this.users.values()) {
-      if (user.email.toLowerCase() === normalized) {
+      if (user.email?.toLowerCase() === normalized) {
         return user;
       }
     }
@@ -614,19 +545,7 @@ class PostgresDatabaseStore {
     try {
       const dbUser = await prisma.user.findUnique({ where: { email: normalized } });
       if (dbUser) {
-        const u: User = {
-          id: dbUser.id,
-          business_id: dbUser.business_id,
-          email: dbUser.email,
-          name: dbUser.name || undefined,
-          password_hash: dbUser.password_hash,
-          role: dbUser.role as UserRole,
-          status: dbUser.status as any,
-          allowed_tabs: Array.isArray(dbUser.allowed_tabs) ? sanitizeTabs(dbUser.allowed_tabs as any) : undefined,
-          last_login_at: dbUser.last_login_at,
-          created_at: dbUser.created_at,
-          updated_at: dbUser.updated_at,
-        };
+        const u = this.mapUser(dbUser);
         this.users.set(u.id, u);
         return u;
       }
@@ -697,25 +616,16 @@ class PostgresDatabaseStore {
   }
 
   async findUserById(id: string): Promise<User | null> {
+    if (!id || typeof id !== 'string') {
+      return null;
+    }
     if (this.users.has(id)) {
       return this.users.get(id)!;
     }
     try {
       const dbUser = await prisma.user.findUnique({ where: { id } });
       if (dbUser) {
-        const u: User = {
-          id: dbUser.id,
-          business_id: dbUser.business_id,
-          email: dbUser.email,
-          name: dbUser.name || undefined,
-          password_hash: dbUser.password_hash,
-          role: dbUser.role as UserRole,
-          status: dbUser.status as any,
-          allowed_tabs: Array.isArray(dbUser.allowed_tabs) ? sanitizeTabs(dbUser.allowed_tabs as any) : undefined,
-          last_login_at: dbUser.last_login_at,
-          created_at: dbUser.created_at,
-          updated_at: dbUser.updated_at,
-        };
+        const u = this.mapUser(dbUser);
         this.users.set(u.id, u);
         return u;
       }
@@ -736,19 +646,7 @@ class PostgresDatabaseStore {
     try {
       const dbUsers = await prisma.user.findMany({ where: { business_id: businessId } });
       for (const d of dbUsers) {
-        const u: User = {
-          id: d.id,
-          business_id: d.business_id,
-          email: d.email,
-          name: d.name || undefined,
-          password_hash: d.password_hash || '',
-          role: d.role as UserRole,
-          status: d.status as any,
-          allowed_tabs: Array.isArray(d.allowed_tabs) ? sanitizeTabs(d.allowed_tabs as any) : undefined,
-          last_login_at: d.last_login_at,
-          created_at: d.created_at,
-          updated_at: d.updated_at,
-        };
+        const u = this.mapUser(d);
         listMap.set(u.id, u);
         this.users.set(u.id, u);
       }
@@ -765,28 +663,15 @@ class PostgresDatabaseStore {
     custom_permissions?: any,
     allowed_tabs?: TabPermissionId[]
   ): Promise<User | null> {
-    const user = this.users.get(id);
     const cleanTabs = allowed_tabs !== undefined ? sanitizeTabs(allowed_tabs) : undefined;
-    if (user) {
-      user.role = role;
-      if (custom_permissions !== undefined) user.custom_permissions = custom_permissions;
-      if (cleanTabs !== undefined) user.allowed_tabs = cleanTabs;
-      user.updated_at = new Date();
-      this.users.set(id, user);
+    const user = await this.mutateUser(id, {
+      role,
+      ...(cleanTabs !== undefined ? { allowed_tabs: cleanTabs } : {}),
+    });
+    if (user && custom_permissions !== undefined) {
+      user.custom_permissions = custom_permissions;
     }
-    try {
-      await prisma.user.update({
-        where: { id },
-        data: {
-          role,
-          ...(cleanTabs !== undefined ? { allowed_tabs: cleanTabs } : {}),
-          updated_at: new Date(),
-        },
-      });
-    } catch (e: any) {
-      console.warn('updateUserRoleAndPermissions error:', e.message);
-    }
-    return user || null;
+    return user;
   }
 
   async updateUserName(id: string, name: string): Promise<User | null> {
@@ -839,8 +724,6 @@ class PostgresDatabaseStore {
     return user;
   }
 
-  private pinnedTabsGuard: Set<string> = new Set();
-
   async ensureAllowedTabsPersisted(user: User): Promise<TabPermissionId[]> {
     if (isBusinessOwnerRole(user.role)) return deriveAllowedTabs(user.role);
     if (Array.isArray(user.allowed_tabs)) return sanitizeTabs(user.allowed_tabs);
@@ -872,35 +755,11 @@ class PostgresDatabaseStore {
   }
 
   async updateUserStatus(id: string, status: User['status']): Promise<User | null> {
-    const user = this.users.get(id);
-    if (user) {
-      user.status = status;
-      user.updated_at = new Date();
-      this.users.set(id, user);
-    }
-    try {
-      await prisma.user.update({
-        where: { id },
-        data: { status, updated_at: new Date() },
-      });
-    } catch (e) {}
-    return user || null;
+    return this.mutateUser(id, { status });
   }
 
   async updateUserLastLogin(id: string): Promise<void> {
-    const user = this.users.get(id);
-    const now = new Date();
-    if (user) {
-      user.last_login_at = now;
-      user.updated_at = now;
-      this.users.set(id, user);
-    }
-    try {
-      await prisma.user.update({
-        where: { id },
-        data: { last_login_at: now, updated_at: now },
-      });
-    } catch (e) {}
+    await this.mutateUser(id, { last_login_at: new Date() });
   }
 
   async updateLastLogin(id: string): Promise<void> {
@@ -908,14 +767,10 @@ class PostgresDatabaseStore {
   }
 
   async findActivePasswordResetTokens(userId: string): Promise<PasswordResetToken[]> {
-    const tokens: PasswordResetToken[] = [];
     const now = new Date();
-    for (const prt of this.passwordResetTokens.values()) {
-      if (prt.user_id === userId && !prt.used_at && prt.expires_at > now) {
-        tokens.push(prt);
-      }
-    }
-    return tokens;
+    return Array.from(this.passwordResetTokens.values()).filter(
+      prt => prt.user_id === userId && !prt.used_at && prt.expires_at > now
+    );
   }
 
   async upsertAccountAuditLog(data: {
@@ -950,19 +805,7 @@ class PostgresDatabaseStore {
   }
 
   async updateUserPassword(id: string, password_hash: string): Promise<void> {
-    const user = this.users.get(id);
-    const now = new Date();
-    if (user) {
-      user.password_hash = password_hash;
-      user.updated_at = now;
-      this.users.set(id, user);
-    }
-    try {
-      await prisma.user.update({
-        where: { id },
-        data: { password_hash, updated_at: now },
-      });
-    } catch (e) {}
+    await this.mutateUser(id, { password_hash });
   }
 
   // --- Phone Verifications ---
@@ -1032,17 +875,7 @@ class PostgresDatabaseStore {
     try {
       const dbPv = await prisma.phoneVerification.findFirst({ where: { user_id: userId } });
       if (dbPv) {
-        const pv: PhoneVerification = {
-          id: dbPv.id,
-          user_id: dbPv.user_id,
-          phone_country_code: dbPv.phone_country_code,
-          phone_number: dbPv.phone_number,
-          phone_e164: dbPv.phone_e164,
-          is_verified: dbPv.is_verified,
-          verified_at: dbPv.verified_at,
-          created_at: dbPv.created_at,
-          updated_at: dbPv.updated_at,
-        };
+        const pv = this.mapPhoneVerification(dbPv);
         this.phoneVerifications.set(pv.id, pv);
         return pv;
       }
@@ -1057,17 +890,7 @@ class PostgresDatabaseStore {
     try {
       const dbPv = await prisma.phoneVerification.findFirst({ where: { phone_e164 } });
       if (dbPv) {
-        const pv: PhoneVerification = {
-          id: dbPv.id,
-          user_id: dbPv.user_id,
-          phone_country_code: dbPv.phone_country_code,
-          phone_number: dbPv.phone_number,
-          phone_e164: dbPv.phone_e164,
-          is_verified: dbPv.is_verified,
-          verified_at: dbPv.verified_at,
-          created_at: dbPv.created_at,
-          updated_at: dbPv.updated_at,
-        };
+        const pv = this.mapPhoneVerification(dbPv);
         this.phoneVerifications.set(pv.id, pv);
         return pv;
       }
@@ -1075,40 +898,29 @@ class PostgresDatabaseStore {
     return null;
   }
 
+  private async setPhoneVerified(pv: PhoneVerification, where: { user_id?: string; phone_e164?: string }): Promise<void> {
+    const now = new Date();
+    pv.is_verified = true;
+    pv.verified_at = now;
+    pv.updated_at = now;
+    this.phoneVerifications.set(pv.id, pv);
+
+    try {
+      await prisma.phoneVerification.updateMany({
+        where,
+        data: { is_verified: true, verified_at: now, updated_at: now },
+      });
+    } catch (e) {}
+  }
+
   async markPhoneVerified(userId: string): Promise<void> {
     const pv = await this.findPhoneByUserId(userId);
-    const now = new Date();
-    if (pv) {
-      pv.is_verified = true;
-      pv.verified_at = now;
-      pv.updated_at = now;
-      this.phoneVerifications.set(pv.id, pv);
-
-      try {
-        await prisma.phoneVerification.updateMany({
-          where: { user_id: userId },
-          data: { is_verified: true, verified_at: now, updated_at: now },
-        });
-      } catch (e) {}
-    }
+    if (pv) await this.setPhoneVerified(pv, { user_id: userId });
   }
 
   async verifyPhone(phone_e164: string): Promise<void> {
     const pv = await this.findPhoneByE164(phone_e164);
-    const now = new Date();
-    if (pv) {
-      pv.is_verified = true;
-      pv.verified_at = now;
-      pv.updated_at = now;
-      this.phoneVerifications.set(pv.id, pv);
-
-      try {
-        await prisma.phoneVerification.updateMany({
-          where: { phone_e164 },
-          data: { is_verified: true, verified_at: now, updated_at: now },
-        });
-      } catch (e) {}
-    }
+    if (pv) await this.setPhoneVerified(pv, { phone_e164 });
   }
 
   // --- OTP Verifications ---
@@ -1213,13 +1025,9 @@ class PostgresDatabaseStore {
 
   async getRecentOtpRequestsCount(phone_e164: string, windowMs: number): Promise<number> {
     const cutoff = Date.now() - windowMs;
-    let count = 0;
-    for (const otp of this.otpVerifications.values()) {
-      if (otp.phone_e164 === phone_e164 && otp.created_at.getTime() > cutoff) {
-        count++;
-      }
-    }
-    return count;
+    return Array.from(this.otpVerifications.values())
+      .filter(otp => otp.phone_e164 === phone_e164 && otp.created_at.getTime() > cutoff)
+      .length;
   }
 
   // --- Password Reset Tokens ---
@@ -1262,14 +1070,7 @@ class PostgresDatabaseStore {
     try {
       const dbPrt = await prisma.passwordResetToken.findUnique({ where: { token_hash } });
       if (dbPrt) {
-        const prt: PasswordResetToken = {
-          id: dbPrt.id,
-          user_id: dbPrt.user_id,
-          token_hash: dbPrt.token_hash,
-          expires_at: dbPrt.expires_at,
-          used_at: dbPrt.used_at,
-          created_at: dbPrt.created_at,
-        };
+        const prt = this.mapPasswordResetToken(dbPrt);
         this.passwordResetTokens.set(prt.id, prt);
         return prt;
       }
@@ -1307,7 +1108,7 @@ class PostgresDatabaseStore {
     for (const prt of this.passwordResetTokens.values()) {
       if (!prt.used_at && prt.expires_at > new Date()) {
         const user = this.users.get(prt.user_id);
-        if (user && user.email.toLowerCase() === normalized) {
+        if (user && user.email?.toLowerCase() === normalized) {
           return prt.token_hash;
         }
       }
@@ -1335,30 +1136,25 @@ class PostgresDatabaseStore {
   }
 
   async deleteAuditLogs(userId?: string, email?: string, businessId?: string, filterType?: string, date?: string): Promise<{ deletedCount: number }> {
-    let logsToDelete: string[] = [];
-    const targetDate = date ? new Date(date).toISOString().split('T')[0] : null;
+    let targetDate: string | null = null;
+    if (date) {
+      const parsed = new Date(date);
+      if (!isNaN(parsed.getTime())) {
+        targetDate = parsed.toISOString().split('T')[0];
+      }
+    }
+    const logsToDelete: string[] = [];
 
     for (const log of this.auditLogs.values()) {
-      let matchesUser = false;
-      if (businessId) {
-        if (log.business_id === businessId || log.account_name === businessId) matchesUser = true;
-      } else if (userId || email) {
-        if (userId && (log.user_id === userId || log.id === userId)) matchesUser = true;
-        if (email && log.email?.toLowerCase() === email.toLowerCase()) matchesUser = true;
-      } else {
-        matchesUser = true;
-      }
+      const matchesUser = businessId
+        ? (log.business_id === businessId || log.account_name === businessId)
+        : (userId || email)
+          ? ((userId && (log.user_id === userId || log.id === userId)) || (email && log.email?.toLowerCase() === email.toLowerCase()))
+          : true;
 
       if (matchesUser) {
-        let matchesDate = false;
-        if (filterType === 'ALL') {
-          matchesDate = true;
-        } else if ((filterType === 'DAY' || filterType === 'CUSTOM') && targetDate) {
-          const logDate = (log.last_active_at || log.created_at).toISOString().split('T')[0];
-          if (logDate === targetDate) {
-            matchesDate = true;
-          }
-        }
+        const matchesDate = filterType === 'ALL' ||
+          Boolean((filterType === 'DAY' || filterType === 'CUSTOM') && targetDate && (log.last_active_at || log.created_at).toISOString().split('T')[0] === targetDate);
 
         if (matchesDate) {
           logsToDelete.push(log.id);
@@ -1369,10 +1165,10 @@ class PostgresDatabaseStore {
     let deletedCount = 0;
     for (const id of logsToDelete) {
       this.auditLogs.delete(id);
+      deletedCount++;
       try {
         await prisma.auditLog.delete({ where: { id } });
-        deletedCount++;
-      } catch(e) {}
+      } catch (e) {}
     }
 
     return { deletedCount };
@@ -1406,7 +1202,6 @@ class PostgresDatabaseStore {
   }
 
   async updateUserActiveState(userId: string, isOnline: boolean): Promise<void> {
-    const user = this.users.get(userId);
     const now = new Date();
     const log = this.auditLogs.get(userId);
     if (log) {

@@ -39,7 +39,7 @@ export const StaffRoleLoginModal: React.FC<StaffRoleLoginModalProps> = ({
   businessId,
   businessOwnerEmail,
 }) => {
-  const [selectedRole, setSelectedRole] = useState<AppRole>('HOTEL_OWNER');
+  const [selectedRole, setSelectedRole] = useState<AppRole>('RESTAURANT_OWNER');
   const [email, setEmail] = useState('');
   const [pinOrPassword, setPinOrPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -50,10 +50,10 @@ export const StaffRoleLoginModal: React.FC<StaffRoleLoginModalProps> = ({
 
   const roleOptions: { role: AppRole; title: string; category: string; description: string; badge: string }[] = [
     {
-      role: 'HOTEL_OWNER',
-      title: 'Business Owner (Restaurant / Hotel / Resort)',
+      role: 'RESTAURANT_OWNER',
+      title: 'Restaurant Owner & Operator',
       category: 'Executive & Ownership',
-      description: 'Full ownership and administrative authority, role allocations, menu design, guest check-ins, financial controls, and staff management.',
+      description: 'Full ownership and administrative authority, role allocations, menu design, table management, financial controls, and staff management.',
       badge: 'Executive',
     },
     {
@@ -79,17 +79,10 @@ export const StaffRoleLoginModal: React.FC<StaffRoleLoginModalProps> = ({
     },
     {
       role: 'FRONT_DESK',
-      title: 'Front Desk & Reception',
+      title: 'Host & Dining Reception',
       category: 'Guest Services',
-      description: 'Process guest check-ins, room/table reservations, and guest hospitality requests.',
+      description: 'Process table seating, reservations, dining area host coordination, and guest hospitality requests.',
       badge: 'Front Desk',
-    },
-    {
-      role: 'HOUSEKEEPING',
-      title: 'Housekeeping Staff',
-      category: 'Facility & Cleanliness',
-      description: 'Monitor room cleanliness, update inspection logs, and room maintenance status.',
-      badge: 'Service',
     },
     {
       role: 'CASHIER',

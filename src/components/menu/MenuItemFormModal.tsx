@@ -464,10 +464,15 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                       step="any"
                       required
                       value={hasVariants && variants.length > 0 ? variants[0].price : price}
+                      onFocus={(e) => {
+                        const t = e.currentTarget;
+                        setTimeout(() => t.select(), 0);
+                      }}
                       onChange={(e) => {
-                        setPrice(e.target.value);
+                        const clean = e.target.value.replace(/^0+(?=\d)/, '');
+                        setPrice(clean);
                         if (hasVariants && variants.length > 0) {
-                          handleUpdateVariant(0, 'price', e.target.value);
+                          handleUpdateVariant(0, 'price', clean);
                         }
                       }}
                       placeholder="350"
@@ -637,7 +642,14 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                                 min="0"
                                 step="any"
                                 value={v.price}
-                                onChange={(e) => handleUpdateVariant(idx, 'price', e.target.value)}
+                                onFocus={(e) => {
+                                  const t = e.currentTarget;
+                                  setTimeout(() => t.select(), 0);
+                                }}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/^0+(?=\d)/, '');
+                                  handleUpdateVariant(idx, 'price', clean);
+                                }}
                                 placeholder="Price"
                                 className="w-full text-xs pl-7 pr-2 py-1.5 border border-zinc-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono font-bold"
                               />
