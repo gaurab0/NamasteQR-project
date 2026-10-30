@@ -102,6 +102,16 @@ function AppContent() {
     }
   }, [isAuthenticated, isLoading, currentPath]);
 
+  const isCustomerMenuRoute = currentPath.startsWith('/menu') || currentPath.startsWith('/menu-preview');
+  const isDashboardRoute = currentPath.startsWith('/dashboard');
+
+  // Prevent Google Translate from translating admin/staff routes
+  useEffect(() => {
+    if (!isCustomerMenuRoute) {
+      clearGoogleTranslateCookie();
+    }
+  }, [isCustomerMenuRoute]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 text-zinc-900">
@@ -194,16 +204,6 @@ function AppContent() {
         return <LandingPage onNavigate={navigate} onBookDemo={() => setIsDemoModalOpen(true)} />;
     }
   };
-
-  const isCustomerMenuRoute = currentPath.startsWith('/menu') || currentPath.startsWith('/menu-preview');
-  const isDashboardRoute = currentPath.startsWith('/dashboard');
-
-  // Prevent Google Translate from translating admin/staff routes
-  useEffect(() => {
-    if (!isCustomerMenuRoute) {
-      clearGoogleTranslateCookie();
-    }
-  }, [isCustomerMenuRoute]);
 
   return (
     <div className={`min-h-screen flex flex-col bg-zinc-50 ${!isCustomerMenuRoute ? 'notranslate' : ''}`}>
