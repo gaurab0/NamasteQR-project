@@ -200,7 +200,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     };
 
     fetchLiveOrders();
-    const pollInterval = setInterval(fetchLiveOrders, 20000);
+    const pollInterval = setInterval(fetchLiveOrders, 5000);
 
     const unsub = socketService.subscribeToOrders((updatedOrder: any) => {
       if (!isMounted || !updatedOrder?.id) return;

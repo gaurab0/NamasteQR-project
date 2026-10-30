@@ -257,6 +257,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     };
 
     loadData();
+    const pollInterval = setInterval(loadData, 5000);
 
     // 0. Tables Listener
     const unsubTables = socketService.subscribeToTables((updatedTable: any) => {
@@ -332,6 +333,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
     });
 
     return () => {
+      clearInterval(pollInterval);
       unsubTables();
       unsubOrders();
       unsubRequests();
@@ -372,14 +374,21 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   const loadFallbackOrders = async () => {
     try {
       setLoading(true);
-      const res = await rbacService.getTableOrdersApi();
-      setOrders(res.map((o) => ({
-        ...o,
-        items: o.items.map((it) => ({
-          ...it,
-          station: it.station || determineItemStation(it),
-        })),
-      })));
+      const res = await rbacService.getTableOrdersApi(undefined, businessId);
+      if (res && Array.isArray(res)) {
+        setOrders(res.filter((d) => d.status !== 'AWAITING_PAYMENT').map((o) => ({
+          ...o,
+          items: (o.items || []).map((it) => ({
+            ...it,
+            station: it.station || determineItemStation(it),
+          })),
+          created_at: o.created_at ? new Date(o.created_at) : new Date(),
+          updated_at: o.updated_at ? new Date(o.updated_at) : new Date(),
+          ready_at: o.ready_at ? new Date(o.ready_at) : null,
+          served_at: o.served_at ? new Date(o.served_at) : null,
+          bill_requested_at: o.bill_requested_at ? new Date(o.bill_requested_at) : null,
+        })));
+      }
     } catch (e) {
       console.error('Fallback orders failed:', e);
     } finally {

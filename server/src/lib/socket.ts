@@ -9,80 +9,83 @@ import { BusinessType, UserRole } from '../types';
 
 let io: SocketIOServer | null = null;
 
-function extractSocketToken(socket: Socket, payloadToken?: string): string | null {
-  if (payloadToken && typeof payloadToken === 'string') return payloadToken;
+function extractSocketTokens(socket: Socket, payloadToken?: string): string[] {
+  const candidates: string[] = [];
+  if (payloadToken && typeof payloadToken === 'string') candidates.push(payloadToken);
   if (socket.handshake?.auth?.token && typeof socket.handshake.auth.token === 'string') {
-    return socket.handshake.auth.token;
+    candidates.push(socket.handshake.auth.token);
   }
   const authHeader = socket.handshake?.headers?.authorization;
   if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    return authHeader.substring(7);
+    candidates.push(authHeader.substring(7));
   }
   const xAuthToken = socket.handshake?.headers?.['x-auth-token'];
   if (xAuthToken && typeof xAuthToken === 'string') {
-    return xAuthToken;
+    candidates.push(xAuthToken);
   }
   const cookieHeader = socket.handshake?.headers?.cookie;
   if (cookieHeader && typeof cookieHeader === 'string') {
     const cookies = cookieHeader.split(';').map((c: string) => c.trim());
     for (const c of cookies) {
       if (c.startsWith('auth_token=')) {
-        return c.substring('auth_token='.length);
+        candidates.push(c.substring('auth_token='.length));
       }
     }
   }
-  return null;
+  return candidates;
 }
 
 export async function authenticateSocket(socket: Socket, payloadToken?: string) {
-  const token = extractSocketToken(socket, payloadToken);
-  if (!token) return null;
+  const tokens = extractSocketTokens(socket, payloadToken);
+  if (tokens.length === 0) return null;
 
-  try {
-    const decoded = jwt.verify(token, config.jwtSecret) as {
-      userId: string;
-      role: UserRole;
-      email?: string;
-      businessId?: string;
-      businessName?: string;
-      businessType?: BusinessType;
-    };
-    let user = await db.findUserById(decoded.userId);
-    if (!user && decoded.email) {
-      user = await db.findUserByEmail(decoded.email);
-    }
-    if (!user) {
-      const targetBizId = decoded.businessId || 'maya-forest-resort';
-      const targetBizName = decoded.businessName;
-      const targetBizType = decoded.businessType;
-      const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
-      user = await db.ensureUser({
-        id: decoded.userId,
-        business_id: business.id,
-        email: decoded.email || `owner@${business.id}.app`,
-        role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
-      });
-    }
-
-    if (user && user.status !== 'SUSPENDED' && user.status !== 'DEACTIVATED') {
-      let business = await db.findBusinessById(user.business_id);
-      if (!business) {
-        business = await db.ensureBusiness(user.business_id);
-      }
-      return {
-        id: user.id,
-        email: user.email,
-        name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
-        created_at: user.created_at,
-        role: user.role,
-        status: user.status,
-        allowed_tabs: await db.ensureAllowedTabsPersisted(user),
-        custom_permissions: user.custom_permissions,
-        business: buildSessionBusiness(business, user.business_id),
+  for (const token of tokens) {
+    try {
+      const decoded = jwt.verify(token, config.jwtSecret) as {
+        userId: string;
+        role: UserRole;
+        email?: string;
+        businessId?: string;
+        businessName?: string;
+        businessType?: BusinessType;
       };
+      let user = await db.findUserById(decoded.userId);
+      if (!user && decoded.email) {
+        user = await db.findUserByEmail(decoded.email);
+      }
+      if (!user) {
+        const targetBizId = decoded.businessId || 'maya-forest-resort';
+        const targetBizName = decoded.businessName;
+        const targetBizType = decoded.businessType;
+        const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
+        user = await db.ensureUser({
+          id: decoded.userId,
+          business_id: business.id,
+          email: decoded.email || `owner@${business.id}.app`,
+          role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
+        });
+      }
+
+      if (user && user.status !== 'SUSPENDED' && user.status !== 'DEACTIVATED') {
+        let business = await db.findBusinessById(user.business_id);
+        if (!business) {
+          business = await db.ensureBusiness(user.business_id);
+        }
+        return {
+          id: user.id,
+          email: user.email,
+          name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
+          created_at: user.created_at,
+          role: user.role,
+          status: user.status,
+          allowed_tabs: await db.ensureAllowedTabsPersisted(user),
+          custom_permissions: user.custom_permissions,
+          business: buildSessionBusiness(business, user.business_id),
+        };
+      }
+    } catch (err) {
+      // Try next token candidate
     }
-  } catch (err) {
-    return null;
   }
   return null;
 }

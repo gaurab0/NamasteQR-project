@@ -52,8 +52,8 @@ export function setAuthCookie(res: Response, token: string, rememberMe = false) 
   const maxAge = (rememberMe ? 30 : config.sessionExpiryDays) * 24 * 60 * 60 * 1000;
   res.cookie('auth_token', token, {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
+    secure: config.isProduction,
+    sameSite: config.isProduction ? 'none' : 'lax',
     maxAge,
     path: '/',
   });
@@ -62,8 +62,8 @@ export function setAuthCookie(res: Response, token: string, rememberMe = false) 
 export function clearAuthCookie(res: Response) {
   res.clearCookie('auth_token', {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
+    secure: config.isProduction,
+    sameSite: config.isProduction ? 'none' : 'lax',
     path: '/',
   });
 }
@@ -103,12 +103,13 @@ async function resolveActingAs(
 
 export async function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
-    const token = 
-      (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined) ||
-      (req.headers['x-auth-token'] as string) ||
-      req.cookies?.auth_token;
+    const tokenCandidates = [
+      req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined,
+      req.headers['x-auth-token'] as string | undefined,
+      req.cookies?.auth_token,
+    ].filter(Boolean) as string[];
 
-    if (token) {
+    for (const token of tokenCandidates) {
       try {
         const decoded = jwt.verify(token, config.jwtSecret) as {
           userId: string;
@@ -203,11 +204,13 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
 
 export async function optionalAuthenticate(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   try {
-    const token = req.cookies?.auth_token || 
-      (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined) ||
-      (req.headers['x-auth-token'] as string);
+    const tokenCandidates = [
+      req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : undefined,
+      req.headers['x-auth-token'] as string | undefined,
+      req.cookies?.auth_token,
+    ].filter(Boolean) as string[];
 
-    if (token) {
+    for (const token of tokenCandidates) {
       try {
         const decoded = jwt.verify(token, config.jwtSecret) as {
           userId: string;
@@ -264,7 +267,7 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
           return next();
         }
       } catch {
-        // Fall through to unauthenticated next
+        // Fall through to next candidate token
       }
     }
 

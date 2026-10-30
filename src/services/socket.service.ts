@@ -86,6 +86,9 @@ class RealtimeSocketService {
     const token = typeof window !== 'undefined'
       ? (localStorage.getItem('serveflow_auth_token') || sessionStorage.getItem('serveflow_auth_token'))
       : null;
+    if (socket) {
+      (socket as any).auth = { token: token || undefined };
+    }
     if (socket.connected) {
       socket.emit('join:business', { businessId, token: token || undefined });
     }
