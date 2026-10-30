@@ -10,9 +10,11 @@ import {
   Activity,
   Sparkles,
   Layers,
-  Wine
+  Wine,
+  QrCode,
+  ChevronRight
 } from 'lucide-react';
-import { TableOrder } from '../../types/rbac';
+import { TableOrder, RestaurantTable } from '../../types/rbac';
 
 interface LiveStationOrdersModalProps {
   isOpen: boolean;
@@ -21,9 +23,12 @@ interface LiveStationOrdersModalProps {
   totalKitchenOrdersCount?: number;
   waiterOrders: TableOrder[];
   totalWaiterOrdersCount?: number;
-  initialTab?: 'kitchen' | 'waiter' | 'all';
+  activeTables?: RestaurantTable[];
+  liveOrders?: TableOrder[];
+  initialTab?: 'kitchen' | 'waiter' | 'tables' | 'all';
   onNavigateToKDS: () => void;
   onNavigateToWaiter: () => void;
+  onNavigateToTables?: () => void;
   currency?: string;
 }
 
@@ -34,12 +39,15 @@ export const LiveStationOrdersModal: React.FC<LiveStationOrdersModalProps> = ({
   totalKitchenOrdersCount,
   waiterOrders,
   totalWaiterOrdersCount,
+  activeTables = [],
+  liveOrders = [],
   initialTab = 'all',
   onNavigateToKDS,
   onNavigateToWaiter,
+  onNavigateToTables,
   currency = 'Rs.',
 }) => {
-  const [activeTab, setActiveTab] = useState<'all' | 'kitchen' | 'waiter'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'all' | 'kitchen' | 'waiter' | 'tables'>(initialTab);
   const [, setTick] = useState(0);
 
   const kitchenCount = totalKitchenOrdersCount ?? kitchenOrders.length;
@@ -194,6 +202,84 @@ export const LiveStationOrdersModal: React.FC<LiveStationOrdersModalProps> = ({
     );
   };
 
+  const renderTableCard = (table: RestaurantTable, idx: number) => {
+    const tableName = table.table_number ? `Table ${table.table_number}` : `Table ${table.id}`;
+    const scannedAt = table.last_scanned_at || table.updated_at;
+    const timeBrowsing = scannedAt ? formatTimeTaken(scannedAt) : 'Just now';
+
+    // Find any live unserved orders matching this table
+    const tableOrders = (liveOrders || []).filter(
+      (o) => o.table_id === table.id || o.table_number === table.table_number
+    );
+    const hasOrder = tableOrders.length > 0;
+
+    return (
+      <div 
+        key={table.id || idx}
+        className="p-3.5 bg-zinc-50 hover:bg-zinc-100/80 rounded-xl border border-zinc-200 transition-colors space-y-2.5"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-5 h-5 rounded-md bg-emerald-600 text-white text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
+              #{idx + 1}
+            </span>
+            <div className="font-extrabold text-xs text-zinc-900 truncate">
+              {tableName}
+            </div>
+            {table.floor && (
+              <span className="text-[10px] text-zinc-500 font-medium">
+                • {table.floor}
+              </span>
+            )}
+            {table.capacity && (
+              <span className="text-[10px] text-zinc-400 font-medium">
+                ({table.capacity} seats)
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {hasOrder ? (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                Order Placed ({tableOrders.length})
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 animate-pulse">
+                Browsing Menu
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-zinc-700 border border-zinc-200 shrink-0">
+              <Clock className="w-2.5 h-2.5 text-emerald-600" />
+              {timeBrowsing}
+            </span>
+          </div>
+        </div>
+
+        {/* Status note & action */}
+        <div className="pl-7 text-[11px] text-zinc-600 flex items-center justify-between gap-2">
+          <span>
+            {hasOrder
+              ? `Order in progress at kitchen/bar station.`
+              : `Diner scanned QR & opened digital menu. Currently browsing dishes.`}
+          </span>
+          {onNavigateToTables && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onNavigateToTables();
+              }}
+              className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 hover:underline flex items-center gap-0.5 shrink-0 cursor-pointer"
+            >
+              Manage in Space
+              <ChevronRight className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div 
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200"
@@ -233,7 +319,7 @@ export const LiveStationOrdersModal: React.FC<LiveStationOrdersModalProps> = ({
         </div>
 
         {/* Segmented Filter Control */}
-        <div className="flex items-center gap-2 p-1 bg-zinc-100 rounded-xl max-w-fit">
+        <div className="flex items-center gap-2 p-1 bg-zinc-100 rounded-xl max-w-fit flex-wrap">
           <button
             type="button"
             onClick={() => setActiveTab('all')}
@@ -244,7 +330,20 @@ export const LiveStationOrdersModal: React.FC<LiveStationOrdersModalProps> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>Both Stations</span>
+            <span>Stations</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('tables')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'tables'
+                ? 'bg-white text-emerald-800 shadow-2xs'
+                : 'text-zinc-600 hover:text-zinc-900'
+            }`}
+          >
+            <QrCode className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Active Tables ({activeTables.length})</span>
           </button>
 
           <button
@@ -274,8 +373,81 @@ export const LiveStationOrdersModal: React.FC<LiveStationOrdersModalProps> = ({
           </button>
         </div>
 
+        {/* Active Tables Banner on Stations Tab */}
+        {activeTab === 'all' && activeTables.length > 0 && (
+          <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="font-bold">
+                {activeTables.length} {activeTables.length === 1 ? 'table' : 'tables'} currently active (scanned menu & browsing)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('tables')}
+              className="text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>View Active Tables</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Active Tables Content */}
+        {activeTab === 'tables' && (
+          <div className="space-y-3 bg-white p-4 rounded-xl border border-zinc-200/90 shadow-2xs flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-100">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                    <QrCode className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-zinc-900">Current Active Tables (Scanned Menu)</h4>
+                    <p className="text-[10px] text-zinc-500">Live tables where guests scanned QR code and opened the digital menu</p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                  {activeTables.length} {activeTables.length === 1 ? 'table active' : 'tables active'}
+                </span>
+              </div>
+
+              <div className="space-y-2 mt-3 max-h-[50vh] overflow-y-auto pr-1">
+                {activeTables.length === 0 ? (
+                  <div className="py-8 text-center text-zinc-400 space-y-1">
+                    <CheckCircle2 className="w-6 h-6 text-zinc-300 mx-auto" />
+                    <p className="text-xs font-semibold text-zinc-700">No active scanned tables right now</p>
+                    <p className="text-[10px]">When guests scan a table QR code and open the digital menu, they appear here before and after ordering.</p>
+                  </div>
+                ) : (
+                  activeTables.map((table, idx) => renderTableCard(table, idx))
+                )}
+              </div>
+            </div>
+
+            {onNavigateToTables && (
+              <div className="pt-3 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onNavigateToTables();
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>Open Full Table & Space Management</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Station Orders Content */}
-        <div className={`grid gap-5 ${activeTab === 'all' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-5 ${activeTab === 'all' ? 'grid-cols-1 md:grid-cols-2' : activeTab === 'tables' ? 'hidden' : 'grid-cols-1'}`}>
           {/* Column 1: Kitchen / Bar */}
           {(activeTab === 'all' || activeTab === 'kitchen') && (
             <div className="space-y-3 bg-white p-4 rounded-xl border border-zinc-200/90 shadow-2xs flex flex-col justify-between">

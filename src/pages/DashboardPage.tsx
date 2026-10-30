@@ -11,7 +11,7 @@ import { WaiterStationDashboard } from '../components/waiter/WaiterStationDashbo
 import { DateTimeDisplay } from '../components/common/DateTimeDisplay';
 import { StaffRoleLoginModal } from '../components/team/StaffRoleLoginModal';
 import { BillingPOS } from '../components/billing/BillingPOS';
-import { StaffAccountSession, AppRole, TableOrder } from '../types/rbac';
+import { StaffAccountSession, AppRole, TableOrder, RestaurantTable } from '../types/rbac';
 import { Business, BusinessType } from '../types/auth';
 import { 
   Building2, 
@@ -94,10 +94,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   // Station Live Notifications State
   const [liveOrders, setLiveOrders] = useState<TableOrder[]>([]);
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [isStationModalOpen, setIsStationModalOpen] = useState(false);
-  const [stationModalTab, setStationModalTab] = useState<'kitchen' | 'waiter' | 'all'>('all');
+  const [stationModalTab, setStationModalTab] = useState<'kitchen' | 'waiter' | 'tables' | 'all'>('all');
 
-  const handleOpenStationModal = (tab: 'kitchen' | 'waiter' | 'all' = 'all') => {
+  const handleOpenStationModal = (tab: 'kitchen' | 'waiter' | 'tables' | 'all' = 'all') => {
     setStationModalTab(tab);
     setIsStationModalOpen(true);
   };
@@ -178,31 +179,39 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     }
   }, [activeTab, user?.business?.id]);
 
-  // Live real-time socket & polling subscription for station notifications
+  // Live real-time socket & polling subscription for station notifications and active tables
   useEffect(() => {
     if (!businessId) return;
 
     let isMounted = true;
     socketService.joinBusiness(businessId);
 
-    const fetchLiveOrders = async () => {
+    const fetchLiveOrdersAndTables = async () => {
       try {
-        const res = await rbacService.getTableOrdersApi(undefined, businessId);
-        if (isMounted && res && Array.isArray(res)) {
-          const active = res.filter(
-            (o) => o.status !== 'AWAITING_PAYMENT' && o.status !== 'SERVED' && o.status !== 'COMPLETED' && o.status !== 'CANCELLED'
-          );
-          setLiveOrders(active);
+        const [ordersRes, tablesRes] = await Promise.all([
+          rbacService.getTableOrdersApi(undefined, businessId).catch(() => []),
+          rbacService.getTablesApi(businessId).catch(() => []),
+        ]);
+        if (isMounted) {
+          if (ordersRes && Array.isArray(ordersRes)) {
+            const active = ordersRes.filter(
+              (o) => o.status !== 'AWAITING_PAYMENT' && o.status !== 'SERVED' && o.status !== 'COMPLETED' && o.status !== 'CANCELLED'
+            );
+            setLiveOrders(active);
+          }
+          if (tablesRes && Array.isArray(tablesRes)) {
+            setTables(tablesRes);
+          }
         }
       } catch (err) {
         // non-blocking
       }
     };
 
-    fetchLiveOrders();
-    const pollInterval = setInterval(fetchLiveOrders, 5000);
+    fetchLiveOrdersAndTables();
+    const pollInterval = setInterval(fetchLiveOrdersAndTables, 5000);
 
-    const unsub = socketService.subscribeToOrders((updatedOrder: any) => {
+    const unsubOrders = socketService.subscribeToOrders((updatedOrder: any) => {
       if (!isMounted || !updatedOrder?.id) return;
       if (
         updatedOrder.status === 'AWAITING_PAYMENT' ||
@@ -225,12 +234,39 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       });
     });
 
+    const unsubTables = socketService.subscribeToTables((updatedTable: any) => {
+      if (!isMounted || !updatedTable?.id) return;
+      setTables((prev) => {
+        const idx = prev.findIndex((t) => t.id === updatedTable.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...updatedTable };
+          return next;
+        }
+        return [updatedTable, ...prev];
+      });
+    });
+
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
-      unsub?.();
+      unsubOrders?.();
+      unsubTables?.();
     };
   }, [businessId]);
+
+  // Active tables that have scanned QR and opened menu (status === 'OCCUPIED')
+  const activeTables = React.useMemo(() => {
+    return tables.filter((t) => t.status === 'OCCUPIED');
+  }, [tables]);
+
+  const sortedActiveTables = React.useMemo(() => {
+    return [...activeTables].sort((a, b) => {
+      const tA = a.last_scanned_at ? new Date(a.last_scanned_at).getTime() : 0;
+      const tB = b.last_scanned_at ? new Date(b.last_scanned_at).getTime() : 0;
+      return tB - tA;
+    });
+  }, [activeTables]);
 
   // Active live queue calculations
   const allKitchenOrders = React.useMemo(() => {
@@ -588,6 +624,27 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                 </span>
                 <span className="hidden sm:inline">Station Monitor</span>
               </div>
+
+              {/* Active Tables Station Pill */}
+              <button
+                type="button"
+                id="btn-live-active-tables-notif"
+                onClick={() => handleOpenStationModal('tables')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-emerald-300 hover:bg-emerald-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+                title="Click to view tables currently scanning & browsing the digital menu"
+              >
+                <div className="w-5 h-5 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <QrCode className="w-3.5 h-3.5" />
+                </div>
+                <span>Active Tables</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  activeTables.length > 0
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                    : 'bg-zinc-100 text-zinc-500'
+                }`}>
+                  {activeTables.length} {activeTables.length === 1 ? 'table' : 'tables'}
+                </span>
+              </button>
 
               {/* Kitchen & Bar Station Pill */}
               <button
@@ -1133,6 +1190,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         totalKitchenOrdersCount={allKitchenOrders.length}
         waiterOrders={waiterOrders}
         totalWaiterOrdersCount={allWaiterOrders.length}
+        activeTables={sortedActiveTables}
+        liveOrders={liveOrders}
         initialTab={stationModalTab}
         onNavigateToKDS={() => {
           setIsStationModalOpen(false);
@@ -1141,6 +1200,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         onNavigateToWaiter={() => {
           setIsStationModalOpen(false);
           setActiveTab('waiter');
+        }}
+        onNavigateToTables={() => {
+          setIsStationModalOpen(false);
+          setActiveTab('checkins');
         }}
         currency={user?.business?.currency || 'Rs.'}
       />
