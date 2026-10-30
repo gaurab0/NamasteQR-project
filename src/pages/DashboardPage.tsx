@@ -577,71 +577,73 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
           </div>
         </header>
 
-        {/* Live Station Notifications Bar just below header */}
-        <div className="bg-zinc-50/95 border-b border-zinc-200/90 px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5 shrink-0 shadow-2xs z-10">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-500 uppercase tracking-wider pr-1">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="hidden sm:inline">Station Monitor</span>
+        {/* Live Station Notifications Bar - Only shown on Dashboard ('overview') tab */}
+        {activeTab === 'overview' && (
+          <div className="bg-zinc-50/95 border-b border-zinc-200/90 px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2.5 shrink-0 shadow-2xs z-10">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-500 uppercase tracking-wider pr-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="hidden sm:inline">Station Monitor</span>
+              </div>
+
+              {/* Kitchen & Bar Station Pill */}
+              <button
+                type="button"
+                id="btn-live-kitchen-bar-notif"
+                onClick={() => handleOpenStationModal('kitchen')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-amber-300 hover:bg-amber-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+                title="Click to view live Kitchen & Bar orders"
+              >
+                <div className="w-5 h-5 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <ChefHat className="w-3.5 h-3.5" />
+                </div>
+                <span>Kitchen & Bar</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  allKitchenOrders.length > 0
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                    : 'bg-zinc-100 text-zinc-500'
+                }`}>
+                  {allKitchenOrders.length} {allKitchenOrders.length === 1 ? 'order' : 'orders'}
+                </span>
+              </button>
+
+              {/* Waiter Service Station Pill */}
+              <button
+                type="button"
+                id="btn-live-waiter-notif"
+                onClick={() => handleOpenStationModal('waiter')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-blue-300 hover:bg-blue-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+                title="Click to view live Waiter Service Station orders"
+              >
+                <div className="w-5 h-5 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Bell className="w-3.5 h-3.5" />
+                </div>
+                <span>Waiter Station</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  allWaiterOrders.length > 0
+                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                    : 'bg-zinc-100 text-zinc-500'
+                }`}>
+                  {allWaiterOrders.length} {allWaiterOrders.length === 1 ? 'order' : 'orders'}
+                </span>
+              </button>
             </div>
 
-            {/* Kitchen & Bar Station Pill */}
             <button
               type="button"
-              id="btn-live-kitchen-bar-notif"
-              onClick={() => handleOpenStationModal('kitchen')}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-amber-300 hover:bg-amber-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
-              title="Click to view live Kitchen & Bar orders"
+              onClick={() => handleOpenStationModal('all')}
+              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-zinc-600 hover:text-zinc-900 transition cursor-pointer"
             >
-              <div className="w-5 h-5 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <ChefHat className="w-3.5 h-3.5" />
-              </div>
-              <span>Kitchen & Bar</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                allKitchenOrders.length > 0
-                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                  : 'bg-zinc-100 text-zinc-500'
-              }`}>
-                {allKitchenOrders.length} {allKitchenOrders.length === 1 ? 'order' : 'orders'}
-              </span>
-            </button>
-
-            {/* Waiter Service Station Pill */}
-            <button
-              type="button"
-              id="btn-live-waiter-notif"
-              onClick={() => handleOpenStationModal('waiter')}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-blue-300 hover:bg-blue-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
-              title="Click to view live Waiter Service Station orders"
-            >
-              <div className="w-5 h-5 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center group-hover:scale-105 transition-transform">
-                <Bell className="w-3.5 h-3.5" />
-              </div>
-              <span>Waiter Station</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                allWaiterOrders.length > 0
-                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                  : 'bg-zinc-100 text-zinc-500'
-              }`}>
-                {allWaiterOrders.length} {allWaiterOrders.length === 1 ? 'order' : 'orders'}
-              </span>
+              <Activity className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden sm:inline">Inspect Live Orders (Ascending)</span>
+              <span className="sm:hidden">Inspect</span>
+              <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
             </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => handleOpenStationModal('all')}
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-zinc-600 hover:text-zinc-900 transition cursor-pointer"
-          >
-            <Activity className="w-3.5 h-3.5 text-amber-600" />
-            <span className="hidden sm:inline">Inspect Live Orders (Ascending)</span>
-            <span className="sm:hidden">Inspect</span>
-            <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
-          </button>
-        </div>
+        )}
 
         {/* Main Workspace Body */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7 space-y-6">

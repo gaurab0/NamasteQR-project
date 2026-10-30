@@ -14,6 +14,7 @@ import { CustomerMenuPreviewPage } from './pages/CustomerMenuPreviewPage';
 import { BookDemoModal } from './components/landing/BookDemoModal';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import { Loader2 } from 'lucide-react';
+import { clearGoogleTranslateCookie } from './utils/googleTranslate';
 
 function AppContent() {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -197,8 +198,15 @@ function AppContent() {
   const isCustomerMenuRoute = currentPath.startsWith('/menu') || currentPath.startsWith('/menu-preview');
   const isDashboardRoute = currentPath.startsWith('/dashboard');
 
+  // Prevent Google Translate from translating admin/staff routes
+  useEffect(() => {
+    if (!isCustomerMenuRoute) {
+      clearGoogleTranslateCookie();
+    }
+  }, [isCustomerMenuRoute]);
+
   return (
-    <div className="min-h-screen flex flex-col bg-zinc-50">
+    <div className={`min-h-screen flex flex-col bg-zinc-50 ${!isCustomerMenuRoute ? 'notranslate' : ''}`}>
       {!isCustomerMenuRoute && !isDashboardRoute && (
         <Navbar
           onNavigate={navigate}

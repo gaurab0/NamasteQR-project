@@ -244,20 +244,22 @@ async function main() {
 
   const sheets = buildSalesWorkbookData(sampleSales, [...glAccounts, creditAcc], 'Rs.');
   check(
-    'Workbook preserves all 4 sheets and exact column counts (26, 14, 6, 22)',
-    sheets.length === 4 &&
+    'Workbook preserves all 5 sheets and exact column counts (26, 18, 14, 6, 22)',
+    sheets.length === 5 &&
       sheets[0].sheetName === 'Sales Register' &&
       sheets[0].headers.length === 26 &&
-      sheets[1].sheetName === 'GL Links & Mapping' &&
-      sheets[1].headers.length === 14 &&
-      sheets[2].sheetName === 'GL Journal Summary' &&
-      sheets[2].headers.length === 6 &&
-      sheets[3].sheetName === 'Credit Sales Register' &&
-      sheets[3].headers.length === 22,
+      sheets[1].sheetName === 'Item Sales Register' &&
+      sheets[1].headers.length === 18 &&
+      sheets[2].sheetName === 'GL Links & Mapping' &&
+      sheets[2].headers.length === 14 &&
+      sheets[3].sheetName === 'GL Journal Summary' &&
+      sheets[3].headers.length === 6 &&
+      sheets[4].sheetName === 'Credit Sales Register' &&
+      sheets[4].headers.length === 22,
     sheets.map((s) => ({ name: s.sheetName, cols: s.headers.length }))
   );
 
-  const journalSummaryRow = sheets[2].rows[sheets[2].rows.length - 1];
+  const journalSummaryRow = sheets[3].rows[sheets[3].rows.length - 1];
   check(
     'GL Journal Summary is strictly balanced (Debits === Credits) even when Service Charge + Inclusive/Exclusive VAT + Discounts are active',
     journalSummaryRow[0] === 'TOTAL' &&
@@ -266,7 +268,7 @@ async function main() {
     journalSummaryRow
   );
 
-  const bevRow = sheets[2].rows.find((r) => r[0] === '4020');
+  const bevRow = sheets[3].rows.find((r) => r[0] === '4020');
   check(
     'Bar item with station="BAR" is accurately classified into 4020 Beverage Sales Revenue',
     Boolean(bevRow) && Number(bevRow![4]) === 121.95,

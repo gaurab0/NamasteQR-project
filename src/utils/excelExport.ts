@@ -257,7 +257,149 @@ export function buildSalesWorkbookData(
   const salesColWidths = [6, 18, 14, 22, 16, 14, 16, 20, 16, 45, 14, 16, 14, 16, 30, 16, 10, 14, 25, 12, 14, 15, 14, 15, 20, 25];
 
   // -------------------------------------------------------------
-  // 2. SHEET 2: GL Links & Mapping
+  // 2. SHEET 2: Item Sales Register (Individual Line-Item Transactions)
+  // -------------------------------------------------------------
+  const itemHeaders = [
+    'S.N.',
+    'Invoice Number',
+    'Order Number',
+    'Date & Time',
+    'Date (YYYY-MM-DD)',
+    'Item Name',
+    'Variant / Size',
+    'Category',
+    'Station',
+    'Quantity',
+    'Unit Price',
+    'Total Amount',
+    'Payment Method',
+    'Sale Type',
+    'Table # / Room',
+    'Customer Name',
+    'Customer Phone',
+    'Cashier / Billed By',
+  ];
+
+  const itemRows: (string | number)[][] = [];
+  let itemSn = 1;
+  let totalItemUnits = 0;
+  let totalItemRevenue = 0;
+
+  for (const sale of sales || []) {
+    let formattedDate = sale.date_string || '';
+    if (sale.created_at) {
+      try {
+        formattedDate = new Date(sale.created_at).toLocaleString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+      } catch {
+        formattedDate = String(sale.created_at);
+      }
+    }
+    const dateYMD =
+      sale.date_string ||
+      (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : '');
+    const normalizedPayment = (sale.payment_method || 'CASH').toUpperCase();
+
+    if (Array.isArray(sale.items) && sale.items.length > 0) {
+      for (const item of sale.items) {
+        const rawName = (item.name || item.item_name || 'Item').trim();
+        const variantName = (
+          item.variant_name ||
+          item.variant?.name ||
+          item.selected_variant?.name ||
+          (rawName.includes('(') ? rawName.match(/\((.*?)\)/)?.[1] : '') ||
+          '-'
+        ).trim();
+
+        const cleanBase = rawName.replace(/\s*\([^)]*\)\s*/g, '').trim() || rawName;
+        const unifiedName =
+          variantName && variantName !== '-' ? `${cleanBase} (${variantName})` : cleanBase;
+
+        const qty = Number(item.quantity) || 1;
+        const unitPrice = Number(item.unit_price ?? item.price ?? 0);
+        const lineTotal = Number(item.total_price ?? item.subtotal ?? qty * unitPrice);
+
+        totalItemUnits += qty;
+        totalItemRevenue = Number((totalItemRevenue + lineTotal).toFixed(2));
+
+        itemRows.push([
+          itemSn++,
+          sale.invoice_number || sale.id || '-',
+          sale.order_number || '-',
+          formattedDate,
+          dateYMD,
+          unifiedName,
+          variantName,
+          item.category || 'General',
+          (item.station || 'KITCHEN').toUpperCase(),
+          qty,
+          Number(unitPrice.toFixed(2)),
+          Number(lineTotal.toFixed(2)),
+          normalizedPayment,
+          sale.sale_type || 'DINE_IN',
+          sale.table_number || 'Counter / N/A',
+          sale.customer_name || 'Walk-in Guest',
+          sale.customer_phone || '-',
+          sale.cashier_name || 'Staff',
+        ]);
+      }
+    }
+  }
+
+  if (itemRows.length === 0) {
+    itemRows.push([
+      1,
+      '-',
+      '-',
+      '-',
+      '-',
+      'No item sales recorded in this period',
+      '-',
+      '-',
+      '-',
+      0,
+      0,
+      0,
+      '-',
+      '-',
+      '-',
+      '-',
+      '-',
+      '-',
+    ]);
+  } else {
+    itemRows.push([
+      '',
+      '',
+      '',
+      '',
+      '',
+      'GRAND TOTAL',
+      '',
+      '',
+      '',
+      totalItemUnits,
+      '',
+      Number(totalItemRevenue.toFixed(2)),
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+    ]);
+  }
+
+  const itemColWidths = [8, 16, 14, 22, 16, 28, 18, 16, 12, 10, 14, 16, 16, 14, 16, 18, 16, 18];
+
+  // -------------------------------------------------------------
+  // 3. SHEET 3: GL Links & Mapping
   // -------------------------------------------------------------
   const glHeaders = [
     'S.N.', 'Account Number', 'Account Name', 'Category', 'ERP Mapping Function', 'Current Register Total', 'Status', 'Description',
@@ -397,6 +539,7 @@ export function buildSalesWorkbookData(
 
   return [
     { sheetName: 'Sales Register', headers: salesHeaders, rows: salesRows, colWidths: salesColWidths },
+    { sheetName: 'Item Sales Register', headers: itemHeaders, rows: itemRows, colWidths: itemColWidths },
     { sheetName: 'GL Links & Mapping', headers: glHeaders, rows: glRows, colWidths: glColWidths },
     { sheetName: 'GL Journal Summary', headers: journalHeaders, rows: journalRows, colWidths: journalColWidths },
     { sheetName: 'Credit Sales Register', headers: creditHeaders, rows: creditRows, colWidths: creditColWidths },
