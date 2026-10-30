@@ -1,14 +1,8 @@
 # NamasteQR - Restaurant & Hotel Management Portal
 
-> NamasteQR (https://namasteqr.com) is a modern all-in-one restaurant and hotel operations portal featuring contact-free digital QR menus, Kitchen Display Systems (KDS), waiter station monitors, billing & POS register, WhatsApp OTP table check-ins, and thermal receipt printing.
+> NamasteQR (https://namasteqr.com) is an all-in-one restaurant and hotel operations portal featuring contact-free digital QR menus, Kitchen Display Systems (KDS), waiter station monitors, billing & POS register, WhatsApp OTP table check-ins, and thermal receipt printing.
 
-## Core Services & Features
-- [Digital QR Code Ordering](https://namasteqr.com/menu-preview): Interactive multilingual digital menu for dine-in tables, takeaway, and room service.
-- [Kitchen Display System (KDS)](https://namasteqr.com): Real-time station monitor for kitchen and bar workflows with sub-second order dispatch.
-- [Billing & POS Management](https://namasteqr.com): Full cashier POS, sales register, VAT/tax reporting, Excel exports, and invoice printing.
-- [Staff Role-Based Access Control (RBAC)](https://namasteqr.com): Secure granular permissions for Managers, Cashiers, Waiters, and Kitchen Staff.
-
-## Contact & Links
-- Website: https://namasteqr.com
-- Get Started: https://namasteqr.com/signup
-- Staff & Owner Login: https://namasteqr.com/login
+## Core Features & Public Links
+- [NamasteQR Portal](https://namasteqr.com): Official portal homepage for hospitality businesses.
+- [Merchant Registration](https://namasteqr.com/signup): Onboard and configure your restaurant or hotel.
+- [Staff & Admin Login](https://namasteqr.com/login): Access POS, KDS, inventory, and restaurant operations.
