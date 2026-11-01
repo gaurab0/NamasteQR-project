@@ -2809,8 +2809,9 @@ export class RBACService {
     const code = (orderData?.promo_code || '').trim().toUpperCase();
     let pct = Number(orderData?.promo_discount_percent) || 0;
     if (!pct && code) {
-      if (
-        taxConfig?.active_promo_enabled !== false &&
+      if (taxConfig?.active_promo_enabled === false) {
+        pct = 0;
+      } else if (
         taxConfig?.active_promo_code &&
         code === taxConfig.active_promo_code.trim().toUpperCase()
       ) {
@@ -3576,11 +3577,13 @@ export class RBACService {
     try {
       const where: any = { business_id: businessId };
       if (filters?.date) {
-        where.date_string = filters.date;
+        where.date_string = filters.date.includes('T') ? filters.date.split('T')[0] : filters.date;
       } else if (filters?.startDate || filters?.endDate) {
+        const startDay = filters.startDate ? (filters.startDate.includes('T') ? filters.startDate.split('T')[0] : filters.startDate) : undefined;
+        const endDay = filters.endDate ? (filters.endDate.includes('T') ? filters.endDate.split('T')[0] : filters.endDate) : undefined;
         where.date_string = {};
-        if (filters.startDate) where.date_string.gte = filters.startDate;
-        if (filters.endDate) where.date_string.lte = filters.endDate;
+        if (startDay) where.date_string.gte = startDay;
+        if (endDay) where.date_string.lte = endDay;
       }
       if (filters?.paymentMethod && filters.paymentMethod !== 'ALL') {
         where.payment_method = filters.paymentMethod;

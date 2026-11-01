@@ -247,7 +247,7 @@ export const RESOURCE_TAB_MAP: Record<AppResource, ResourceTabRule> = {
   rooms: { read: ['checkins', 'waiter'], write: ['checkins'] },
   check_ins: { read: ['checkins', 'waiter', 'kds', 'billing'], write: ['checkins'] },
   orders: { read: ['kds', 'waiter', 'billing', 'checkins'], write: ['kds', 'waiter', 'billing', 'checkins'] },
-  billing: { read: ['billing'], write: ['billing'] },
+  billing: { read: ['billing', 'overview', 'operations'], write: ['billing'] },
   staff: { read: ['team'], write: ['team'] },
   settings: { read: ['configurations'], write: ['configurations'] },
   business_details: { read: ['account', 'configurations', 'menus'], write: ['account', 'configurations', 'menus'] },

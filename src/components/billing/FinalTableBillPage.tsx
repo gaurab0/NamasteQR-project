@@ -67,12 +67,19 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   }, [order]);
 
   // Restore saved promo code from liveOrder if present
+  const isPromoVisible = taxConfig?.active_promo_enabled !== false;
+
   useEffect(() => {
-    if (appliedPromo || promoRemovedByUser || !liveOrder?.promo_code) return;
+    if (!isPromoVisible && appliedPromo) {
+      setAppliedPromo(null);
+    }
+  }, [isPromoVisible, appliedPromo]);
+
+  useEffect(() => {
+    if (appliedPromo || promoRemovedByUser || !liveOrder?.promo_code || !isPromoVisible) return;
     const savedCode = liveOrder.promo_code.trim().toUpperCase();
     if (!savedCode) return;
     if (
-      taxConfig?.active_promo_enabled !== false &&
       taxConfig?.active_promo_code &&
       savedCode === taxConfig.active_promo_code.trim().toUpperCase()
     ) {
@@ -94,7 +101,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
         description: 'VIP Dining Club 20% Discount',
       });
     }
-  }, [liveOrder?.promo_code, taxConfig, appliedPromo, promoRemovedByUser]);
+  }, [liveOrder?.promo_code, taxConfig, appliedPromo, promoRemovedByUser, isPromoVisible]);
 
   const nonCancelledItems = useMemo(
     () => (liveOrder.items || []).filter((i) => i.status !== 'CANCELLED'),
@@ -151,6 +158,10 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
 
   // Promo Code Actions
   const handleApplyPromo = () => {
+    if (!isPromoVisible) {
+      setPromoError('Promotional codes are currently disabled by the restaurant.');
+      return;
+    }
     const cleanCode = promoInput.trim().toUpperCase();
     if (!cleanCode) {
       setPromoError('Please enter a voucher or promo code.');
@@ -472,86 +483,88 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
             </div>
 
             {/* Promo Code & Voucher Section */}
-            <div className="p-2.5 sm:p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-1.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
-                  <Tag className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Restaurant Promo Code & Voucher</span>
+            {isPromoVisible && (
+              <div className="p-2.5 sm:p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
+                    <Tag className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Restaurant Promo Code & Voucher</span>
+                  </div>
+                  {appliedPromo && (
+                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      Applied ({appliedPromo.discountPercent}% Off)
+                    </span>
+                  )}
                 </div>
-                {appliedPromo && (
-                  <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                    Applied ({appliedPromo.discountPercent}% Off)
-                  </span>
+
+                {!appliedPromo ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="input-bill-promo-code"
+                        type="text"
+                        value={promoInput}
+                        onChange={(e) => {
+                          setPromoInput(e.target.value.toUpperCase());
+                          if (promoError) setPromoError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleApplyPromo();
+                          }
+                        }}
+                        placeholder="ENTER PROMO CODE"
+                        className="flex-1 bg-white border border-amber-300/80 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase tracking-wider text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans focus:outline-hidden focus:ring-1.5 focus:ring-amber-500"
+                      />
+                      <Button
+                        id="btn-apply-bill-promo"
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        onClick={handleApplyPromo}
+                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shrink-0 cursor-pointer h-auto"
+                      >
+                        Apply
+                      </Button>
+                    </div>
+
+                    {promoError && (
+                      <div className="text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>{promoError}</span>
+                      </div>
+                    )}
+
+                    
+                  </div>
+                ) : (
+                  <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between gap-2.5 animate-in fade-in duration-150">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-black text-xs text-emerald-900 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-300">
+                          {appliedPromo.code}
+                        </span>
+                        <span className="text-xs font-extrabold text-emerald-700">
+                          -{appliedPromo.discountPercent}% Discount
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-emerald-800 font-medium">
+                        {appliedPromo.description} • Saved <span className="notranslate font-mono font-bold">{currencySymbol} {promoDiscountAmount.toFixed(2)}</span>
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemovePromo}
+                      className="p-1 text-zinc-400 hover:text-rose-600 hover:bg-white rounded transition cursor-pointer shrink-0"
+                      title="Remove promo code"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
-
-              {!appliedPromo ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="input-bill-promo-code"
-                      type="text"
-                      value={promoInput}
-                      onChange={(e) => {
-                        setPromoInput(e.target.value.toUpperCase());
-                        if (promoError) setPromoError(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleApplyPromo();
-                        }
-                      }}
-                      placeholder="ENTER PROMO CODE"
-                      className="flex-1 bg-white border border-amber-300/80 rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold uppercase tracking-wider text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans focus:outline-hidden focus:ring-1.5 focus:ring-amber-500"
-                    />
-                    <Button
-                      id="btn-apply-bill-promo"
-                      type="button"
-                      variant="primary"
-                      size="sm"
-                      onClick={handleApplyPromo}
-                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shrink-0 cursor-pointer h-auto"
-                    >
-                      Apply
-                    </Button>
-                  </div>
-
-                  {promoError && (
-                    <div className="text-[11px] font-semibold text-rose-600 flex items-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5" />
-                      <span>{promoError}</span>
-                    </div>
-                  )}
-
-                  
-                </div>
-              ) : (
-                <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between gap-2.5 animate-in fade-in duration-150">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-black text-xs text-emerald-900 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-300">
-                        {appliedPromo.code}
-                      </span>
-                      <span className="text-xs font-extrabold text-emerald-700">
-                        -{appliedPromo.discountPercent}% Discount
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-emerald-800 font-medium">
-                      {appliedPromo.description} • Saved <span className="notranslate font-mono font-bold">{currencySymbol} {promoDiscountAmount.toFixed(2)}</span>
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRemovePromo}
-                    className="p-1 text-zinc-400 hover:text-rose-600 hover:bg-white rounded transition cursor-pointer shrink-0"
-                    title="Remove promo code"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Itemized Table Bill */}
             <div>
@@ -607,12 +620,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
             {/* Tax & Total Calculation */}
             <div className="p-3 sm:p-3.5 bg-zinc-50 rounded-xl border border-zinc-200/80 space-y-1.5 text-xs notranslate">
               <div className="flex items-center justify-between text-zinc-600">
-                <span className="flex items-center gap-1.5">
-                  <span className="font-medium">Items Subtotal</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-zinc-200/80 text-zinc-700">
-                    {isInclusiveTax ? 'Inclusive of VAT%' : 'Exclusive of VAT%'}
-                  </span>
-                </span>
+                <span className="font-medium">Items Subtotal</span>
                 <span className="font-mono font-semibold text-zinc-800">
                   {currencySymbol} {itemsSubtotal.toFixed(2)}
                 </span>
@@ -622,7 +630,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                 taxesList.map((tax, tIdx) => (
                   <div key={tIdx} className="flex items-center justify-between text-zinc-600">
                     <span>
-                      {tax.name} ({tax.rate_percent}%{tax.is_inclusive ? ' incl.' : ''})
+                      {tax.name} ({tax.rate_percent}%)
                     </span>
                     <span className="font-mono text-zinc-700">
                       +{currencySymbol} {tax.amount.toFixed(2)}
@@ -655,13 +663,6 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
               <div className="pt-2 mt-1 border-t border-zinc-200 flex items-center justify-between">
                 <div>
                   <span className="text-xs sm:text-sm font-black text-zinc-900 block leading-tight">Total Amount Payable</span>
-                  <span className="text-[10px] text-zinc-500 leading-tight">
-                    {totalTax > 0
-                      ? isInclusiveTax
-                        ? 'Inclusive of configured VAT / taxes'
-                        : 'Calculated with configured taxes'
-                      : 'Standard table settlement'}
-                  </span>
                 </div>
                 <span className="text-xl sm:text-2xl font-black text-zinc-950 font-mono">
                   {currencySymbol} {totalAmount.toFixed(2)}

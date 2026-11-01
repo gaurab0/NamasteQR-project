@@ -45,8 +45,13 @@ import {
   Layers,
   Maximize2,
   Minimize2,
-  XCircle
+  XCircle,
+  ChefHat,
+  Bell,
+  Activity,
+  ChevronRight
 } from 'lucide-react';
+import { LiveStationOrdersModal } from '../dashboard/LiveStationOrdersModal';
 import { 
   exportSalesToExcel, 
   buildSalesWorkbookData, 
@@ -110,6 +115,14 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   // Time & search filters
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'records' | 'gl_accounts'>('pos');
   const [selectedOrderToSettle, setSelectedOrderToSettle] = useState<string | undefined>(undefined);
+  const [selectedTableIdToOrder, setSelectedTableIdToOrder] = useState<string | undefined>(undefined);
+  const [isStationModalOpen, setIsStationModalOpen] = useState(false);
+  const [stationModalTab, setStationModalTab] = useState<'kitchen' | 'waiter' | 'tables' | 'all'>('all');
+
+  const handleOpenStationModal = (tab: 'kitchen' | 'waiter' | 'tables' | 'all') => {
+    setStationModalTab(tab);
+    setIsStationModalOpen(true);
+  };
   const [saleModalMode, setSaleModalMode] = useState<'TABLE' | 'COUNTER' | 'SETTLE_TABLE'>('TABLE');
 
   const openSaleModal = (mode: 'TABLE' | 'COUNTER' | 'SETTLE_TABLE', orderId?: string) => {
@@ -369,10 +382,88 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       });
     });
 
+    // Real-time table updates (QR scans, status changes, session clears)
+    const unsubTables = socketService.subscribeToTables((updatedTable: any) => {
+      if (!updatedTable || !updatedTable.id) return;
+      setTables((prev) => {
+        const idx = prev.findIndex((t) => t.id === updatedTable.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], ...updatedTable };
+          return next;
+        }
+        return [updatedTable, ...prev];
+      });
+    });
+
+    // 5-second polling fallback to keep tables & scan check-in sessions fresh
+    const tablePollInterval = setInterval(() => {
+      rbacService.getTablesApi(business.id).then((fresh) => {
+        if (Array.isArray(fresh)) setTables(fresh);
+      }).catch(() => {});
+    }, 5000);
+
     return () => {
       unsubSocket();
+      unsubTables();
+      clearInterval(tablePollInterval);
     };
   }, [business.id]);
+
+  // Active occupied tables (customers scanned QR & opened menu)
+  const activeOccupiedTables = useMemo(() => {
+    return tables.filter((t) => t.status === 'OCCUPIED');
+  }, [tables]);
+
+  const sortedActiveTables = useMemo(() => {
+    return [...activeOccupiedTables].sort((a, b) => {
+      const timeA = new Date(a.last_scanned_at || a.updated_at).getTime();
+      const timeB = new Date(b.last_scanned_at || b.updated_at).getTime();
+      return timeB - timeA;
+    });
+  }, [activeOccupiedTables]);
+
+  const allKitchenOrders = useMemo(() => {
+    return pendingOrders.filter((o) =>
+      o.status === 'PENDING' || o.status === 'RECEIVED' || o.status === 'PREPARING'
+    );
+  }, [pendingOrders]);
+
+  const allWaiterOrders = useMemo(() => {
+    return pendingOrders.filter((o) =>
+      o.status === 'READY' || o.status === 'PREPARING' || o.status === 'PENDING' || o.status === 'RECEIVED'
+    );
+  }, [pendingOrders]);
+
+  const kitchenOrders = useMemo(() => {
+    return [...allKitchenOrders]
+      .sort((a, b) => {
+        const tA = Math.max(0, Date.now() - new Date(a.created_at).getTime());
+        const tB = Math.max(0, Date.now() - new Date(b.created_at).getTime());
+        return tA - tB;
+      })
+      .slice(0, 3);
+  }, [allKitchenOrders]);
+
+  const waiterOrders = useMemo(() => {
+    return [...allWaiterOrders]
+      .sort((a, b) => {
+        const tA = Math.max(0, Date.now() - new Date(a.created_at).getTime());
+        const tB = Math.max(0, Date.now() - new Date(b.created_at).getTime());
+        return tA - tB;
+      })
+      .slice(0, 3);
+  }, [allWaiterOrders]);
+
+  const formatTimeElapsed = (date: string | Date | null | undefined) => {
+    if (!date) return 'Active now';
+    const diffSec = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    return `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`;
+  };
+
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   const weekRange = useMemo(() => {
@@ -830,6 +921,92 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           )}
 
 
+          {/* Station Monitor: Active Tables & Live Orders */}
+          <div className="bg-zinc-50/95 border border-zinc-200/90 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-zinc-500 uppercase tracking-wider pr-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>Station Monitor</span>
+              </div>
+
+              {/* Active Tables Station Pill */}
+              <button
+                type="button"
+                id="btn-pos-active-tables"
+                onClick={() => handleOpenStationModal('tables')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-emerald-300 hover:bg-emerald-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+                title="Click to view live tables currently scanning & browsing the digital menu"
+              >
+                <div className="w-5 h-5 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <QrCode className="w-3.5 h-3.5" />
+                </div>
+                <span>Active Tables</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  sortedActiveTables.length > 0
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                    : 'bg-zinc-100 text-zinc-500'
+                }`}>
+                  {sortedActiveTables.length} {sortedActiveTables.length === 1 ? 'table' : 'tables'}
+                </span>
+              </button>
+
+              {/* Kitchen & Bar Station Pill */}
+              <button
+                type="button"
+                id="btn-pos-kitchen-bar"
+                onClick={() => handleOpenStationModal('kitchen')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-amber-300 hover:bg-amber-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+                title="Click to view live Kitchen & Bar orders"
+              >
+                <div className="w-5 h-5 rounded-lg bg-amber-50 text-amber-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <ChefHat className="w-3.5 h-3.5" />
+                </div>
+                <span>Kitchen & Bar</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  allKitchenOrders.length > 0
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                    : 'bg-zinc-100 text-zinc-500'
+                }`}>
+                  {allKitchenOrders.length} {allKitchenOrders.length === 1 ? 'order' : 'orders'}
+                </span>
+              </button>
+
+              {/* Waiter Service Station Pill */}
+              <button
+                type="button"
+                id="btn-pos-waiter"
+                onClick={() => handleOpenStationModal('waiter')}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-zinc-200/90 hover:border-blue-300 hover:bg-blue-50/50 text-xs font-bold text-zinc-800 transition-all shadow-2xs cursor-pointer group"
+                title="Click to view live Waiter Service Station orders"
+              >
+                <div className="w-5 h-5 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center group-hover:scale-105 transition-transform">
+                  <Bell className="w-3.5 h-3.5" />
+                </div>
+                <span>Waiter Station</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                  allWaiterOrders.length > 0
+                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                    : 'bg-zinc-100 text-zinc-500'
+                }`}>
+                  {allWaiterOrders.length} {allWaiterOrders.length === 1 ? 'order' : 'orders'}
+                </span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleOpenStationModal('all')}
+              className="inline-flex items-center gap-1.5 text-[11px] font-bold text-zinc-600 hover:text-zinc-900 transition cursor-pointer"
+            >
+              <Activity className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden sm:inline">Inspect Live Orders (Ascending)</span>
+              <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
+            </button>
+          </div>
+
           {/* Active Dine-In Table Orders Ready for Billing */}
           <div className="bg-white rounded-2xl border border-zinc-200/80 p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -870,6 +1047,9 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               <div className="p-8 text-center bg-zinc-50 rounded-xl border border-dashed border-zinc-200">
                 <p className="text-xs font-semibold text-zinc-600">
                   No pending table bills right now.
+                </p>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  When diners place table orders or request bill settlement, they will appear here live in real-time.
                 </p>
               </div>
             ) : (
@@ -1133,15 +1313,18 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           menuItems={menuItems}
           user={user}
           initialOrderId={selectedOrderToSettle}
+          initialTableId={selectedTableIdToOrder}
           onClose={() => {
             setShowNewSaleModal(false);
             setSelectedOrderToSettle(undefined);
+            setSelectedTableIdToOrder(undefined);
           }}
           onGlAccountCreated={(acc) => setGlAccounts(prev => { if (!prev.some(a => a.id === acc.id)) return [...prev, acc]; return prev; })}
           onSaleCreated={(newSale) => {
             setSales((prev) => [newSale, ...prev]);
             setShowNewSaleModal(false);
             setSelectedOrderToSettle(undefined);
+            setSelectedTableIdToOrder(undefined);
             setSelectedSaleForView(newSale); // Automatically preview the new receipt
             showStatus(`Invoice #${newSale.invoice_number} generated successfully!`);
           }}
@@ -1370,7 +1553,32 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         </div>
       )}
 
-          </div>
+      {/* Live Station Orders Modal */}
+      <LiveStationOrdersModal
+        isOpen={isStationModalOpen}
+        onClose={() => setIsStationModalOpen(false)}
+        kitchenOrders={kitchenOrders}
+        totalKitchenOrdersCount={allKitchenOrders.length}
+        waiterOrders={waiterOrders}
+        totalWaiterOrdersCount={allWaiterOrders.length}
+        activeTables={sortedActiveTables}
+        liveOrders={pendingOrders}
+        initialTab={stationModalTab}
+        onNavigateToKDS={() => {
+          setIsStationModalOpen(false);
+          onNavigateTab?.('kds');
+        }}
+        onNavigateToWaiter={() => {
+          setIsStationModalOpen(false);
+          onNavigateTab?.('waiter');
+        }}
+        onNavigateToTables={() => {
+          setIsStationModalOpen(false);
+          onNavigateTab?.('checkins');
+        }}
+        currency={currencySymbol}
+      />
+    </div>
   );
 };
 
@@ -1388,6 +1596,7 @@ interface NewSaleModalProps {
   menuItems?: MenuItem[];
   user?: any;
   initialOrderId?: string;
+  initialTableId?: string;
   onClose: () => void;
   onSaleCreated: (sale: SaleRecord) => void;
   onGlAccountCreated: (acc: any) => void;
@@ -1413,12 +1622,13 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   menuItems: propMenuItems,
   user,
   initialOrderId,
+  initialTableId,
   onClose,
   onSaleCreated,
   onGlAccountCreated,
 }) => {
   const [saleType, setSaleType] = useState<SaleType>('DINE_IN');
-  const [selectedTableId, setSelectedTableId] = useState<string>('');
+  const [selectedTableId, setSelectedTableId] = useState<string>(initialTableId || '');
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('Walk-in Guest');
   const [customerPhone, setCustomerPhone] = useState<string>('');

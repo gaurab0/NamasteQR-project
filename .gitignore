@@ -12,3 +12,6 @@ coverage/
 scratch/
 .vscode/
 graphify-out/
+.chrome_temp/
+.chrome_test*/
+.chrome*/

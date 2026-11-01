@@ -76,10 +76,14 @@ export function getEffectiveTabs(subject: AccessSubject): TabPermissionId[] {
 /**
  * Checks whether the subject has permission to access the requested tab.
  */
-export function canAccessTab(subject: AccessSubject, tab: TabPermissionId): boolean {
+export function canAccessTab(subject: AccessSubject, tab: TabPermissionId | 'analytics'): boolean {
   if (!subject) return false;
   if (isBusinessOwner(subject.role)) return true;
-  return getEffectiveTabs(subject).includes(tab);
+  if (tab === 'analytics') {
+    const eff = getEffectiveTabs(subject);
+    return eff.includes('operations') || eff.includes('billing') || eff.includes('overview');
+  }
+  return getEffectiveTabs(subject).includes(tab as TabPermissionId);
 }
 
 /**

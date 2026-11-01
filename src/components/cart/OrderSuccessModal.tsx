@@ -253,12 +253,19 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   const [promoRemovedByUser, setPromoRemovedByUser] = useState(false);
 
   // Restore saved promo code from liveOrder if present
+  const isPromoVisible = taxConfig?.active_promo_enabled !== false;
+
   useEffect(() => {
-    if (appliedPromo || promoRemovedByUser || !liveOrder?.promo_code) return;
+    if (!isPromoVisible && appliedPromo) {
+      setAppliedPromo(null);
+    }
+  }, [isPromoVisible, appliedPromo]);
+
+  useEffect(() => {
+    if (appliedPromo || promoRemovedByUser || !liveOrder?.promo_code || !isPromoVisible) return;
     const savedCode = liveOrder.promo_code.trim().toUpperCase();
     if (!savedCode) return;
     if (
-      taxConfig?.active_promo_enabled !== false &&
       taxConfig?.active_promo_code &&
       savedCode === taxConfig.active_promo_code.trim().toUpperCase()
     ) {
@@ -281,9 +288,13 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         description: 'VIP Dining Club 20% Discount',
       });
     }
-  }, [liveOrder?.promo_code, taxConfig, appliedPromo, promoRemovedByUser]);
+  }, [liveOrder?.promo_code, taxConfig, appliedPromo, promoRemovedByUser, isPromoVisible]);
 
   const handleApplyPromo = () => {
+    if (!isPromoVisible) {
+      setPromoError('Promotional voucher codes are currently disabled by the restaurant.');
+      return;
+    }
     const clean = promoInput.trim().toUpperCase();
     if (!clean) {
       setPromoError('Please enter a promo code.');
@@ -862,7 +873,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                     taxesList.map((tax, tIdx) => (
                       <div key={tIdx} className="flex items-center justify-between text-amber-800 text-xs">
                         <span className="font-medium">
-                          {tax.name} ({tax.rate_percent}%{tax.is_inclusive ? ' incl.' : ''})
+                          {tax.name} ({tax.rate_percent}%)
                         </span>
                         <span className="font-mono font-bold text-amber-950">
                           +{currencySymbol} {tax.amount.toFixed(2)}
@@ -883,7 +894,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                   <div>
                     <span className="text-xs font-black text-amber-950 block leading-tight">Current Table Total</span>
                     <span className="text-[10px] text-amber-700 leading-tight">
-                      All items sent to kitchen & bar {totalTax > 0 ? `(Incl. ${taxesList.map(t => t.name).join(' & ') || 'VAT'})` : ''}
+                      All items sent to kitchen & bar
                     </span>
                   </div>
                   <span className="text-lg font-black text-amber-950 font-mono">
@@ -1087,7 +1098,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                     </div>
                     {taxesList.map((t, idx) => (
                        <div key={idx} className="flex justify-between">
-                         <span>{t.name} ({t.rate_percent}%{t.is_inclusive ? ' incl.' : ''})</span>
+                         <span>{t.name} ({t.rate_percent}%)</span>
                          <span className="text-zinc-900">+{currencySymbol} {t.amount.toFixed(2)}</span>
                        </div>
                     ))}
@@ -1172,84 +1183,86 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               </div>
 
               {/* Promo Code & Voucher Section in Customer Final Bill */}
-              <div className="px-3 py-2.5 bg-amber-50/60 border border-amber-200/90 rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
-                    <Tag className="w-4 h-4 text-amber-600" />
-                    <span>Restaurant Promo Code & Voucher</span>
+              {isPromoVisible && (
+                <div className="px-3 py-2.5 bg-amber-50/60 border border-amber-200/90 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
+                      <Tag className="w-4 h-4 text-amber-600" />
+                      <span>Restaurant Promo Code & Voucher</span>
+                    </div>
+                    {appliedPromo && (
+                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        Applied ({appliedPromo.discountPercent}% Off)
+                      </span>
+                    )}
                   </div>
-                  {appliedPromo && (
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                      Applied ({appliedPromo.discountPercent}% Off)
-                    </span>
+
+                  {!appliedPromo ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={promoInput}
+                          onChange={(e) => {
+                            setPromoInput(e.target.value.toUpperCase());
+                            if (promoError) setPromoError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleApplyPromo();
+                            }
+                          }}
+                          placeholder="ENTER PROMO CODE"
+                          className="flex-1 bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                        />
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={handleApplyPromo}
+                          className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-2 shrink-0 cursor-pointer"
+                        >
+                          Apply
+                        </Button>
+                      </div>
+
+                      {promoError && (
+                        <div className="text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>{promoError}</span>
+                        </div>
+                      )}
+
+                      
+                    </div>
+                  ) : (
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 animate-in fade-in duration-150">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-black text-xs text-emerald-900 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300">
+                            {appliedPromo.code}
+                          </span>
+                          <span className="text-xs font-extrabold text-emerald-700">
+                            -{appliedPromo.discountPercent}% Discount
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-emerald-800 font-medium">
+                          {appliedPromo.description} • Saved <span className="notranslate font-mono font-bold">{currencySymbol} {promoDiscountAmount.toFixed(2)}</span>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemovePromo}
+                        className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-white rounded-lg transition cursor-pointer shrink-0"
+                        title="Remove promo code"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
                 </div>
-
-                {!appliedPromo ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={promoInput}
-                        onChange={(e) => {
-                          setPromoInput(e.target.value.toUpperCase());
-                          if (promoError) setPromoError(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleApplyPromo();
-                          }
-                        }}
-                        placeholder="ENTER PROMO CODE"
-                        className="flex-1 bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs font-mono font-bold uppercase tracking-wider text-zinc-900 placeholder:text-zinc-400 placeholder:font-sans focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                      />
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={handleApplyPromo}
-                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-2 shrink-0 cursor-pointer"
-                      >
-                        Apply
-                      </Button>
-                    </div>
-
-                    {promoError && (
-                      <div className="text-[11px] font-semibold text-rose-600 flex items-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>{promoError}</span>
-                      </div>
-                    )}
-
-                    
-                  </div>
-                ) : (
-                  <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 animate-in fade-in duration-150">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-black text-xs text-emerald-900 bg-emerald-100/80 px-2 py-0.5 rounded-md border border-emerald-300">
-                          {appliedPromo.code}
-                        </span>
-                        <span className="text-xs font-extrabold text-emerald-700">
-                          -{appliedPromo.discountPercent}% Discount
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-emerald-800 font-medium">
-                        {appliedPromo.description} • Saved <span className="notranslate font-mono font-bold">{currencySymbol} {promoDiscountAmount.toFixed(2)}</span>
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleRemovePromo}
-                      className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-white rounded-lg transition cursor-pointer shrink-0"
-                      title="Remove promo code"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Itemized Table Bill */}
               <div>
@@ -1297,12 +1310,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               {/* Tax & Total Calculation Configured From Tax System */}
               <div className="px-3 py-2.5 bg-zinc-50 rounded-xl border border-zinc-200/80 space-y-1 text-xs notranslate">
                 <div className="flex items-center justify-between text-zinc-600">
-                  <span className="flex items-center gap-1.5">
-                    <span>Items Subtotal</span>
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-200/80 text-zinc-700">
-                      {isInclusiveTax ? 'Inclusive of VAT%' : 'Exclusive of VAT%'}
-                    </span>
-                  </span>
+                  <span>Items Subtotal</span>
                   <span className="font-mono font-semibold text-zinc-800">
                     {currencySymbol} {itemsSubtotal.toFixed(2)}
                   </span>
@@ -1313,7 +1321,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                   taxesList.map((tax, tIdx) => (
                     <div key={tIdx} className="flex items-center justify-between text-zinc-600">
                       <span>
-                        {tax.name} ({tax.rate_percent}%{tax.is_inclusive ? ' incl.' : ''})
+                        {tax.name} ({tax.rate_percent}%)
                       </span>
                       <span className="font-mono text-zinc-700">
                         +{currencySymbol} {tax.amount.toFixed(2)}
@@ -1346,13 +1354,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                 <div className="pt-2 border-t border-zinc-200 flex items-center justify-between">
                   <div>
                     <span className="text-xs font-bold text-zinc-800 block">Total Amount Payable</span>
-                    <span className="text-[10px] text-zinc-400">
-                      {totalTax > 0
-                        ? isInclusiveTax
-                          ? 'Inclusive of configured VAT / taxes'
-                          : 'Calculated according to restaurant tax configuration'
-                        : 'Standard table settlement'}
-                    </span>
                   </div>
                   <span className="text-2xl font-black text-zinc-950 font-mono">
                     {currencySymbol} {totalAmount.toFixed(2)}

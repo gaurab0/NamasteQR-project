@@ -24,7 +24,8 @@ import {
   Store,
   ExternalLink,
   ChevronDown,
-  Lock
+  Lock,
+  TrendingUp
 } from 'lucide-react';
 import { StaffAccountSession } from '../../types/rbac';
 import { canAccessTab } from '../../utils/tabAccess';
@@ -38,6 +39,7 @@ export type DashboardTab =
   | 'checkins' 
   | 'team' 
   | 'billing' 
+  | 'analytics'
   | 'account' 
   | 'audit' 
   | 'configurations';
@@ -134,6 +136,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Receipt,
       badge: null,
       visible: canAccessTab(subject, 'billing'),
+    },
+    {
+      id: 'analytics' as DashboardTab,
+      label: 'Analytics',
+      icon: TrendingUp,
+      badge: null,
+      visible: canAccessTab(subject, 'analytics' as any),
     },
     {
       id: 'team' as DashboardTab,

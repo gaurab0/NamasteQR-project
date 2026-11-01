@@ -1362,7 +1362,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               </h2>
               <p className="text-base sm:text-lg font-semibold text-zinc-700 dark:text-zinc-200 max-w-md mx-auto leading-relaxed">
                 {settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0 ? (
-                  <>Payment received: {settledPaymentInfo.mode || 'Cash'} <span className="notranslate font-mono font-bold">{settledPaymentInfo.currency || 'Rs.'} {Number(settledPaymentInfo.amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span></>
+                  <>Payment received: {settledPaymentInfo.mode || 'Cash'} <span className="notranslate font-mono font-bold">{(settledPaymentInfo.currency || 'Rs.').trim()} {Number(settledPaymentInfo.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>
                 ) : settledPaymentInfo?.mode ? (
                   `Payment received via ${settledPaymentInfo.mode}`
                 ) : (

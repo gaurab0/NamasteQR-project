@@ -115,12 +115,6 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
     const takeawayAmount = filteredSales
       .filter((s) => s.sale_type === 'TAKEAWAY' || s.sale_type === 'QUICK_POS')
       .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
-    // Staff sales calculation
-    const staffSalesMap: Record<string, number> = {};
-    filteredSales.forEach((s) => {
-      const staffName = s.cashier_name || 'Counter Staff';
-      staffSalesMap[staffName] = (staffSalesMap[staffName] || 0) + (Number(s.total_amount) || 0);
-    });
 
     // Customer spend calculation
     const customerMap: Record<string, number> = {};
@@ -151,7 +145,6 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
       cardSales,
       qrSales,
       creditSales,
-      staffCount: Object.keys(staffSalesMap).length || 0,
       customerCount: Object.keys(customerMap).length || 0,
     };
   }, [sales]);
@@ -530,46 +523,9 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
         </div>
       </div>
 
-      {/* BOTTOM ROW: Staff Sales + Top Customers + Quick Launchpad */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Card 1: Sales By Staff */}
-        <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-2xs">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-sm">
-              <Users className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="font-extrabold text-sm text-zinc-900">Sales By Staff</h4>
-              <p className="text-[11px] text-zinc-400">Top Performing Staffs</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-zinc-50 border border-zinc-100">
-            <div>
-              <span className="text-[10px] font-bold text-zinc-400 uppercase">Total Revenue</span>
-              <div className="text-sm font-black text-zinc-900 mt-0.5">
-                {currency} {stats.totalSales.toLocaleString()}
-              </div>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-zinc-400 uppercase">Total Staffs</span>
-              <div className="text-sm font-black text-zinc-900 mt-0.5">
-                {stats.staffCount} Active
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onNavigateTab('team')}
-            className="w-full mt-4 py-1.5 text-xs font-bold text-amber-700 hover:text-amber-800 transition flex items-center justify-center gap-1 cursor-pointer"
-          >
-            <span>Manage Team Members</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        {/* Card 2: Top Customers */}
+      {/* BOTTOM ROW: Top Customers + Fast Operations Launchpad */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Card 1: Top Customers */}
         <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-2xs">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold text-sm">

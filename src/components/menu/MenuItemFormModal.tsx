@@ -49,9 +49,6 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const [foodType, setFoodType] = useState<FoodType>('none');
   const [status, setStatus] = useState<MenuStatus>('available');
   const [prepTime, setPrepTime] = useState<number | string>(15);
-  const [displayStyle, setDisplayStyle] = useState<'auto' | 'hero' | 'bento' | 'text_only'>('auto');
-  const [showImage, setShowImage] = useState<boolean>(true);
-  const [promoBadge, setPromoBadge] = useState<string>('');
 
   const [isCreatingInlineCat, setIsCreatingInlineCat] = useState(false);
   const [newCatInlineName, setNewCatInlineName] = useState('');
@@ -118,9 +115,6 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setFoodType(itemToEdit.food_type || 'none');
       setStatus(itemToEdit.status || (itemToEdit.is_available ? 'available' : 'unavailable'));
       setPrepTime(itemToEdit.preparation_time_mins || 15);
-      setDisplayStyle(itemToEdit.display_style || 'auto');
-      setShowImage(itemToEdit.show_image !== undefined ? itemToEdit.show_image : true);
-      setPromoBadge(itemToEdit.promo_badge || '');
     } else {
       setName('');
       setCategory(categories[0]?.name || 'Nepali');
@@ -135,9 +129,6 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setFoodType('none');
       setStatus('available');
       setPrepTime(15);
-      setDisplayStyle('auto');
-      setShowImage(true);
-      setPromoBadge('');
     }
     setCustomCatInput('');
     setFormError(null);
@@ -367,9 +358,9 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
         has_variants: hasVariants && validVariants.length > 0,
         variants: validVariants,
         variant_group_name: hasVariants && variantGroupName.trim() ? variantGroupName.trim() : undefined,
-        display_style: displayStyle,
-        show_image: showImage,
-        promo_badge: promoBadge.trim() || undefined,
+        display_style: itemToEdit?.display_style || 'auto',
+        show_image: itemToEdit?.show_image !== undefined ? itemToEdit.show_image : true,
+        promo_badge: itemToEdit?.promo_badge || undefined,
         preparation_time_mins: Number(prepTime) || 15,
       };
 
@@ -1147,111 +1138,6 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                 />
               </div>
 
-              {/* Menu Presentation & Layout Customization */}
-              <div className="p-3.5 bg-gradient-to-br from-amber-500/5 via-amber-500/10 to-orange-500/5 rounded-xl border border-amber-200/80 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-600" />
-                    <label className="text-xs font-bold text-zinc-800 uppercase tracking-wider">
-                      Presentation & Layout Style
-                    </label>
-                  </div>
-                  <span className="text-[10px] text-amber-800 bg-amber-100 font-semibold px-2 py-0.5 rounded-full">
-                    Dynamic Mixed Menu
-                  </span>
-                </div>
-
-                {/* Display Style options */}
-                <div className="space-y-1.5">
-                  <span className="text-[11px] font-semibold text-zinc-600 block">Dish Display Mode:</span>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {[
-                      { id: 'auto', label: 'Auto (Global Theme)', desc: 'Follows theme mode' },
-                      { id: 'hero', label: 'Hero Banner', desc: 'Featured wide card' },
-                      { id: 'bento', label: 'Bento Split', desc: 'Side-by-side photo' },
-                      { id: 'text_only', label: 'Text Only (No Photo)', desc: 'Classic luxury list' },
-                    ].map((mode) => (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        onClick={() => setDisplayStyle(mode.id as any)}
-                        className={`p-2 rounded-lg border text-left transition text-xs cursor-pointer ${
-                          displayStyle === mode.id
-                            ? 'bg-white border-amber-500 ring-2 ring-amber-400/30 text-amber-950 font-bold shadow-xs'
-                            : 'bg-white/60 border-zinc-200 text-zinc-600 hover:bg-white'
-                        }`}
-                      >
-                        <div className="font-semibold">{mode.label}</div>
-                        <div className="text-[9px] opacity-70 font-normal">{mode.desc}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Photo Visibility Toggle */}
-                <div className="flex items-center justify-between pt-1 border-t border-amber-200/50">
-                  <div>
-                    <span className="text-xs font-semibold text-zinc-800 block">Show Photo in Customer Menu</span>
-                    <span className="text-[10px] text-zinc-500">
-                      {showImage ? 'Photo will be shown to customers' : 'Photo hidden (sleek text mode to balance empty space)'}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowImage(!showImage)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                      showImage ? 'bg-amber-600' : 'bg-zinc-300'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                        showImage ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* Promo Badge */}
-                <div className="space-y-1.5 pt-1 border-t border-amber-200/50">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-zinc-800">Highlight / Promo Badge:</span>
-                    {promoBadge && (
-                      <button
-                        type="button"
-                        onClick={() => setPromoBadge('')}
-                        className="text-[10px] text-rose-500 hover:underline"
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    value={promoBadge}
-                    onChange={(e) => setPromoBadge(e.target.value)}
-                    placeholder="e.g. Chef's Special, Best Seller, Signature"
-                    className="w-full text-xs px-2.5 py-1.5 bg-white border border-zinc-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
-                  />
-                  {/* Quick Preset Chips */}
-                  <div className="flex flex-wrap gap-1 pt-0.5">
-                    {["Chef's Special", "Best Seller", "Signature", "Must Try", "Spicy 🔥", "New"].map((badge) => (
-                      <button
-                        key={badge}
-                        type="button"
-                        onClick={() => setPromoBadge(badge)}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-medium transition cursor-pointer ${
-                          promoBadge === badge
-                            ? 'bg-amber-600 text-white font-bold'
-                            : 'bg-white border border-zinc-200 text-zinc-600 hover:bg-amber-50'
-                        }`}
-                      >
-                        {badge}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
               {/* Availability Status */}
               <div className="space-y-1">
                 <label className="block text-xs font-bold text-zinc-700">Availability Status</label>
@@ -1334,105 +1220,78 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                     : 'border-zinc-200'
                 }`}
               >
-                {/* Image (hidden if displayStyle === 'text_only' or showImage === false) */}
-                {displayStyle !== 'text_only' && showImage && (
-                  <div className="relative w-full h-56 bg-zinc-900/5 overflow-hidden flex items-center justify-center">
-                    {previewImageUrl ? (
-                      <img
-                        src={previewImageUrl}
-                        alt={name || 'Menu preview'}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover object-center"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-100 text-zinc-400 p-4">
-                        <UtensilsCrossed className="w-12 h-12 mb-2 opacity-40 stroke-[1.5]" />
-                        <span className="text-xs font-medium">Add photo to see live dish image</span>
-                      </div>
-                    )}
-
-                    {/* Veg indicator & Category Badges */}
-                    <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 z-10 max-w-[70%]">
-                      {hasDietary && (
-                        <div
-                          className={`w-5 h-5 rounded-md flex items-center justify-center border bg-white shadow-xs shrink-0 ${
-                            isVeg ? 'border-emerald-600' : 'border-rose-600'
-                          }`}
-                        >
-                          <div
-                            className={`w-2.5 h-2.5 rounded-full ${
-                              isVeg ? 'bg-emerald-600' : 'bg-rose-600'
-                            }`}
-                          />
-                        </div>
-                      )}
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-zinc-900/80 backdrop-blur-xs text-white">
-                        {category || 'General'}
-                      </span>
-                      {promoBadge && (
-                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500 text-zinc-950 shadow-xs uppercase tracking-wider">
-                          ★ {promoBadge}
-                        </span>
-                      )}
-                      {additionalCategories.map((extra) => (
-                        <span
-                          key={extra}
-                          className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-500/90 backdrop-blur-xs text-white shadow-2xs"
-                        >
-                          {extra}
-                        </span>
-                      ))}
+                {/* Dish Photo / Visual Banner */}
+                <div className="relative w-full h-56 bg-zinc-900/5 overflow-hidden flex items-center justify-center">
+                  {previewImageUrl ? (
+                    <img
+                      src={previewImageUrl}
+                      alt={name || 'Menu preview'}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover object-center"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-100 text-zinc-400 p-4">
+                      <UtensilsCrossed className="w-12 h-12 mb-2 opacity-40 stroke-[1.5]" />
+                      <span className="text-xs font-medium">Add photo to see live dish image</span>
                     </div>
+                  )}
 
-                    {/* Prep time */}
-                    {prepTime && (
-                      <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-white/90 backdrop-blur-xs text-zinc-700 shadow-xs">
-                        <Clock className="w-3 h-3 text-zinc-500" />
-                        <span>{prepTime}m</span>
+                  {/* Veg indicator & Category Badges */}
+                  <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 z-10 max-w-[70%]">
+                    {hasDietary && (
+                      <div
+                        className={`w-5 h-5 rounded-md flex items-center justify-center border bg-white shadow-xs shrink-0 ${
+                          isVeg ? 'border-emerald-600' : 'border-rose-600'
+                        }`}
+                      >
+                        <div
+                          className={`w-2.5 h-2.5 rounded-full ${
+                            isVeg ? 'bg-emerald-600' : 'bg-rose-600'
+                          }`}
+                        />
                       </div>
                     )}
-
-                    {/* Status Overlay */}
-                    {status === 'out_of_stock' && (
-                      <div className="absolute inset-x-0 bottom-0 bg-amber-500 text-white text-xs font-bold text-center py-1 tracking-wider uppercase">
-                        Out of Stock
-                      </div>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-zinc-900/80 backdrop-blur-xs text-white">
+                      {category || 'General'}
+                    </span>
+                    {itemToEdit?.promo_badge && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500 text-zinc-950 shadow-xs uppercase tracking-wider">
+                        ★ {itemToEdit.promo_badge}
+                      </span>
                     )}
-                    {status === 'unavailable' && (
-                      <div className="absolute inset-x-0 bottom-0 bg-zinc-800 text-white text-xs font-bold text-center py-1 tracking-wider uppercase">
-                        Currently Unavailable
-                      </div>
-                    )}
+                    {additionalCategories.map((extra) => (
+                      <span
+                        key={extra}
+                        className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-amber-500/90 backdrop-blur-xs text-white shadow-2xs"
+                      >
+                        {extra}
+                      </span>
+                    ))}
                   </div>
-                )}
+
+                  {/* Prep time */}
+                  {prepTime && (
+                    <div className="absolute top-3 right-3 flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-white/90 backdrop-blur-xs text-zinc-700 shadow-xs">
+                      <Clock className="w-3 h-3 text-zinc-500" />
+                      <span>{prepTime}m</span>
+                    </div>
+                  )}
+
+                  {/* Status Overlay */}
+                  {status === 'out_of_stock' && (
+                    <div className="absolute inset-x-0 bottom-0 bg-amber-500 text-white text-xs font-bold text-center py-1 tracking-wider uppercase">
+                      Out of Stock
+                    </div>
+                  )}
+                  {status === 'unavailable' && (
+                    <div className="absolute inset-x-0 bottom-0 bg-zinc-800 text-white text-xs font-bold text-center py-1 tracking-wider uppercase">
+                      Currently Unavailable
+                    </div>
+                  )}
+                </div>
 
                 {/* Body */}
                 <div className="p-4 space-y-2">
-                  {/* Top line for text-only mode */}
-                  {(displayStyle === 'text_only' || !showImage) && (
-                    <div className="flex items-center justify-between gap-2 pb-2 border-b border-zinc-100">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {hasDietary && (
-                          <div
-                            className={`w-4 h-4 rounded-md flex items-center justify-center border bg-white shadow-xs shrink-0 ${
-                              isVeg ? 'border-emerald-600' : 'border-rose-600'
-                            }`}
-                          >
-                            <div className={`w-2 h-2 rounded-full ${isVeg ? 'bg-emerald-600' : 'bg-rose-600'}`} />
-                          </div>
-                        )}
-                        <span className="text-[11px] font-semibold text-zinc-500">{category || 'General'}</span>
-                        {promoBadge && (
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500 text-zinc-950 uppercase tracking-wider">
-                            ★ {promoBadge}
-                          </span>
-                        )}
-                      </div>
-                      {prepTime && (
-                        <span className="text-[10px] text-zinc-400 font-medium">{prepTime} mins</span>
-                      )}
-                    </div>
-                  )}
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-base font-bold text-zinc-900 leading-snug">
                       {name || 'Delicious Dish Name'}

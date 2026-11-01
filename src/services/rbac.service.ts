@@ -809,7 +809,7 @@ export class ClientRBACService {
 
     const queryString = params.toString() ? `?${params.toString()}` : '';
     const res = await fetch(`/api/rbac/sales${queryString}`, {
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(undefined, businessId),
       credentials: 'include',
     });
     const data = await res.json();

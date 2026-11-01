@@ -52,6 +52,7 @@ import { BusinessConfigurationCenter } from '../components/config/BusinessConfig
 import { Sidebar, DashboardTab } from '../components/layout/Sidebar';
 import { OperationsOverviewDashboard } from '../components/dashboard/OperationsOverviewDashboard';
 import { OperationsManagementTab } from '../components/operations/OperationsManagementTab';
+import { AnalyticsDashboard } from '../components/analytics/AnalyticsDashboard';
 import { LiveStationOrdersModal } from '../components/dashboard/LiveStationOrdersModal';
 import { socketService } from '../services/socket.service';
 
@@ -75,12 +76,15 @@ interface AuditLogItem {
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
-  const { user, logout, updateBusiness } = useAuth();
+  const { user, logout, updateBusiness, activeBusiness } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [operationsSubTab, setOperationsSubTab] = useState<'shift' | 'records' | 'gl_accounts'>('shift');
 
-  const handleNavigateTab = (tab: DashboardTab, subTab?: 'shift' | 'records' | 'gl_accounts') => {
-    setActiveTab(tab);
+  const handleNavigateTab = (tab: DashboardTab | string, subTab?: 'shift' | 'records' | 'gl_accounts') => {
+    let targetTab: DashboardTab = tab as DashboardTab;
+    if ((tab as string) === 'tables') targetTab = 'checkins';
+    if ((tab as string) === 'orders') targetTab = 'kds';
+    setActiveTab(targetTab);
     if (subTab) {
       setOperationsSubTab(subTab);
     }
@@ -115,32 +119,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   // Business Profile Configuration State
   const [isEditingBusiness, setIsEditingBusiness] = useState(false);
-  const businessName = user?.business?.name || 'NamasteQR Business';
-  const businessId = user?.business?.id || user?.id || 'default-business';
-  const businessType = user?.business?.type || 'RESTAURANT';
-  const phoneE164 = user?.business?.phone || user?.phone?.e164 || '';
-  const businessAddress = user?.business?.address || '';
+  const effectiveBusiness = activeBusiness || user?.business;
+  const businessName = effectiveBusiness?.name || 'NamasteQR Business';
+  const businessId = effectiveBusiness?.id || user?.id || 'default-business';
+  const businessType = effectiveBusiness?.type || 'RESTAURANT';
+  const phoneE164 = effectiveBusiness?.phone || user?.phone?.e164 || '';
+  const businessAddress = effectiveBusiness?.address || '';
 
   const [bizForm, setBizForm] = useState({
-    name: user?.business?.name || '',
-    type: (user?.business?.type || 'RESTAURANT') as BusinessType,
-    tagline: user?.business?.tagline || '',
-    location: user?.business?.location || '',
-    address: user?.business?.address || '',
-    kitchen_hours: user?.business?.kitchen_hours || '',
-    phone: user?.business?.phone || user?.phone?.e164 || '',
+    name: effectiveBusiness?.name || '',
+    type: (effectiveBusiness?.type || 'RESTAURANT') as BusinessType,
+    tagline: effectiveBusiness?.tagline || '',
+    location: effectiveBusiness?.location || '',
+    address: effectiveBusiness?.address || '',
+    kitchen_hours: effectiveBusiness?.kitchen_hours || '',
+    phone: effectiveBusiness?.phone || user?.phone?.e164 || '',
   });
   const [savingBusiness, setSavingBusiness] = useState(false);
   const [bizSaveSuccess, setBizSaveSuccess] = useState<string | null>(null);
   const [bizSaveError, setBizSaveError] = useState<string | null>(null);
 
-  const currentBusinessObj: Business = user?.business || {
+  const currentBusinessObj: Business = effectiveBusiness || {
     id: businessId,
     name: businessName,
     type: businessType as BusinessType,
     status: 'ACTIVE',
-    location: user?.business?.location || '',
-    address: user?.business?.address || '',
+    location: effectiveBusiness?.location || '',
+    address: effectiveBusiness?.address || '',
     phone: phoneE164,
   };
 
@@ -821,6 +826,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               currentUserId={user.id}
               isViewOnly={isViewOnly}
               onRequestRoleSignIn={() => setIsRoleModalOpen(true)}
+            />
+          )}
+
+          {/* Analytics & Sales Intelligence Tab */}
+          {activeTab === 'analytics' && canAccessTab(subject, 'analytics' as any) && (
+            <AnalyticsDashboard
+              business={currentBusinessObj}
+              user={user}
             />
           )}
 
