@@ -1632,6 +1632,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('Walk-in Guest');
   const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [customerPan, setCustomerPan] = useState<string>('');
   const [customInvoiceNumber, setCustomInvoiceNumber] = useState<string>('');
   const [customOrderNumber, setCustomOrderNumber] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<SalePaymentMethod>('CASH');
@@ -1672,6 +1673,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       if (found.table_id) setSelectedTableId(found.table_id);
       if (found.customer_name) setCustomerName(found.customer_name);
       if (found.customer_phone) setCustomerPhone(found.customer_phone);
+      if ((found as any).customer_pan) setCustomerPan((found as any).customer_pan);
       if (found.order_number) setCustomOrderNumber(found.order_number);
 
       const activeItems = (found.items || []).filter((i) => i.status !== 'CANCELLED');
@@ -2297,6 +2299,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       table_number: resolvedTableNumber,
       customer_name: customerName.trim() || 'Walk-in Guest',
       customer_phone: customerPhone.trim(),
+      customer_pan: customerPan.trim() || undefined,
       invoice_number: customInvoiceNumber.trim() || undefined,
       order_number: customOrderNumber.trim() || undefined,
       sale_type: saleType,
@@ -2470,6 +2473,20 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               value={customInvoiceNumber}
               onChange={(e) => setCustomInvoiceNumber(e.target.value)}
               placeholder="e.g. INV-100"
+              className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-zinc-700 block mb-1">
+              Customer PAN # (Opt)
+            </label>
+            <input
+              id="input-sale-customer-pan"
+              type="text"
+              value={customerPan}
+              onChange={(e) => setCustomerPan(e.target.value)}
+              placeholder="e.g. 600123456"
               className="w-full px-2.5 sm:px-3 py-2 rounded-xl border border-zinc-300 text-xs font-semibold focus:ring-2 focus:ring-amber-500"
             />
           </div>

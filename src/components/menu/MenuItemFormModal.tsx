@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MenuItem, MenuCategory, FoodType, MenuStatus, MenuItemVariant } from '../../types/rbac';
+import { MenuItem, MenuCategory, FoodType, MenuStatus, MenuItemVariant, KitchenStation } from '../../types/rbac';
 import {
   X,
   Upload,
@@ -16,6 +16,8 @@ import {
   Check,
   Layers,
   Copy,
+  ChefHat,
+  Wine,
 } from 'lucide-react';
 
 interface MenuItemFormModalProps {
@@ -49,6 +51,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const [foodType, setFoodType] = useState<FoodType>('none');
   const [status, setStatus] = useState<MenuStatus>('available');
   const [prepTime, setPrepTime] = useState<number | string>(15);
+  const [station, setStation] = useState<KitchenStation>('KITCHEN');
 
   const [isCreatingInlineCat, setIsCreatingInlineCat] = useState(false);
   const [newCatInlineName, setNewCatInlineName] = useState('');
@@ -113,6 +116,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setDescription(itemToEdit.description || '');
       setImageUrl(itemToEdit.image_url || '');
       setFoodType(itemToEdit.food_type || 'none');
+      setStation((itemToEdit.station as KitchenStation) || 'KITCHEN');
       setStatus(itemToEdit.status || (itemToEdit.is_available ? 'available' : 'unavailable'));
       setPrepTime(itemToEdit.preparation_time_mins || 15);
     } else {
@@ -127,6 +131,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setDescription('');
       setImageUrl('');
       setFoodType('none');
+      setStation('KITCHEN');
       setStatus('available');
       setPrepTime(15);
     }
@@ -353,6 +358,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
         description: description.trim(),
         image_url: imageUrl.trim(),
         food_type: foodType,
+        station,
         status,
         is_available: status === 'available',
         has_variants: hasVariants && validVariants.length > 0,
@@ -1138,6 +1144,57 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                 />
               </div>
 
+              {/* Order Routing Station (Kitchen / Bar / Both) */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-zinc-700">Order Routing Station</label>
+                  <span className="text-[10px] text-zinc-400 font-medium">Dispatched to KDS / Bar station</span>
+                </div>
+                <div className="inline-flex p-0.5 bg-zinc-100/90 rounded-lg border border-zinc-200/80 w-full">
+                  <button
+                    id="station-option-kitchen"
+                    type="button"
+                    onClick={() => setStation('KITCHEN')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      station === 'KITCHEN'
+                        ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200/90 font-bold'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    <ChefHat className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Kitchen</span>
+                  </button>
+
+                  <button
+                    id="station-option-bar"
+                    type="button"
+                    onClick={() => setStation('BAR')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      station === 'BAR'
+                        ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200/90 font-bold'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    <Wine className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Bar</span>
+                  </button>
+
+                  <button
+                    id="station-option-both"
+                    type="button"
+                    onClick={() => setStation('BOTH')}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      station === 'BOTH'
+                        ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200/90 font-bold'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Both</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Availability Status */}
               <div className="space-y-1">
                 <label className="block text-xs font-bold text-zinc-700">Availability Status</label>
@@ -1253,6 +1310,16 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                     )}
                     <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-zinc-900/80 backdrop-blur-xs text-white">
                       {category || 'General'}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold backdrop-blur-xs flex items-center gap-1 ${
+                      station === 'BAR'
+                        ? 'bg-purple-900/80 text-purple-100'
+                        : station === 'BOTH'
+                        ? 'bg-blue-900/80 text-blue-100'
+                        : 'bg-zinc-900/80 text-white'
+                    }`}>
+                      {station === 'BAR' ? <Wine className="w-2.5 h-2.5 text-purple-300" /> : station === 'BOTH' ? <Layers className="w-2.5 h-2.5 text-blue-300" /> : <ChefHat className="w-2.5 h-2.5 text-amber-300" />}
+                      {station === 'BAR' ? 'Bar' : station === 'BOTH' ? 'Kitchen & Bar' : 'Kitchen'}
                     </span>
                     {itemToEdit?.promo_badge && (
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500 text-zinc-950 shadow-xs uppercase tracking-wider">

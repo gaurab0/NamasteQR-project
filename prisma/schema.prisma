@@ -139,6 +139,7 @@ model MenuItem {
   display_style         String   @default("auto")
   show_image            Boolean  @default(true)
   promo_badge           String?
+  station               String   @default("KITCHEN")
   order_index           Int      @default(0)
   preparation_time_mins Int?
   created_by            String?
@@ -202,6 +203,7 @@ model TableOrder {
   currency                String    @default("Rs.")
   customer_name           String?
   customer_phone          String?
+  customer_pan            String?
   order_notes             String?
   status                  String    @default("PENDING") // PENDING, AWAITING_PAYMENT, RECEIVED, PREPARING, READY, SERVED, COMPLETED, CANCELLED
   pay_first               Boolean   @default(false)
@@ -248,6 +250,7 @@ model Sale {
   table_number             String?
   customer_name            String   @default("Walk-in Guest")
   customer_phone           String?
+  customer_pan             String?
   sale_type                String   @default("DINE_IN")
   items                    Json // Array of SaleItem objects
   subtotal                 Decimal  @db.Decimal(12, 2)

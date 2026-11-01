@@ -129,6 +129,12 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               <span className="text-zinc-500">Customer:</span>
               <span className="font-bold">{sale.customer_name}</span>
             </div>
+            {sale.customer_pan && (
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Customer PAN:</span>
+                <span className="font-bold">{sale.customer_pan}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-zinc-500">
                 {sale.table_number && /^table\s/i.test(sale.table_number) ? 'Table:' : 'Service:'}

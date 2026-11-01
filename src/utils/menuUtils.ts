@@ -50,58 +50,13 @@ export function itemMatchesCategory(item: MenuItem, filterCategory: string): boo
 }
 
 /**
- * Common beverage and bar keywords
- */
-const DRINK_KEYWORDS = [
-  'drink',
-  'beverage',
-  'beverages',
-  'bar',
-  'cocktail',
-  'cocktails',
-  'mocktail',
-  'mocktails',
-  'wine',
-  'beer',
-  'juice',
-  'juices',
-  'shake',
-  'shakes',
-  'smoothie',
-  'smoothies',
-  'soda',
-  'soft drink',
-  'tea',
-  'coffee',
-  'liquor',
-  'whiskey',
-  'vodka',
-  'rum',
-  'gin',
-  'champagne',
-  'cider',
-  'cooler',
-  'espresso',
-  'latte',
-  'brew'
-];
-
-/**
- * Categorizes an item as BAR (beverages, drinks, cocktails) or KITCHEN (food dishes)
+ * Resolves the station assignment of an item.
+ * Explicitly manual: returns item.station if set, or defaults to 'KITCHEN'.
  */
 export function determineItemStation(
-  item: { name?: string; category?: string; additional_categories?: string[]; station?: 'KITCHEN' | 'BAR' }
-): 'KITCHEN' | 'BAR' {
-  if (item.station) return item.station;
-
-  const categories = getAllItemCategories(item as any);
-  const combinedText = [
-    item.name || '',
-    item.category || '',
-    ...categories,
-  ].join(' ').toLowerCase();
-
-  const isDrink = DRINK_KEYWORDS.some((kw) => combinedText.includes(kw));
-  return isDrink ? 'BAR' : 'KITCHEN';
+  item: { name?: string; category?: string; additional_categories?: string[]; station?: 'KITCHEN' | 'BAR' | 'BOTH' }
+): 'KITCHEN' | 'BAR' | 'BOTH' {
+  if (item?.station) return item.station;
+  return 'KITCHEN';
 }
 

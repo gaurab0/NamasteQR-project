@@ -682,6 +682,7 @@ router.post('/menus', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (re
     display_style,
     show_image,
     promo_badge,
+    station,
     order_index,
     preparation_time_mins,
   } = req.body;
@@ -712,6 +713,7 @@ router.post('/menus', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (re
       display_style,
       show_image: show_image !== undefined ? Boolean(show_image) : undefined,
       promo_badge,
+      station: station || 'KITCHEN',
       order_index: order_index !== undefined ? Number(order_index) : undefined,
       preparation_time_mins 
     },

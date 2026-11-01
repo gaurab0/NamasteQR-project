@@ -93,6 +93,7 @@ export interface MenuItem {
   display_style?: 'auto' | 'hero' | 'bento' | 'text_only';
   show_image?: boolean;
   promo_badge?: string;
+  station?: KitchenStation;
   order_index?: number;
   preparation_time_mins?: number;
   created_by: string;
@@ -193,7 +194,7 @@ export interface CustomerTableSession {
 
 export type OrderStatus = 'PENDING' | 'AWAITING_PAYMENT' | 'RECEIVED' | 'PREPARING' | 'READY' | 'SERVED' | 'COMPLETED' | 'CANCELLED';
 
-export type KitchenStation = 'KITCHEN' | 'BAR';
+export type KitchenStation = 'KITCHEN' | 'BAR' | 'BOTH';
 
 export interface TableOrderItem {
   item_id: string;
@@ -232,6 +233,7 @@ export interface TableOrder {
   currency: string;
   customer_name?: string;
   customer_phone?: string;
+  customer_pan?: string;
   order_notes?: string;
   status: OrderStatus;
   pay_first?: boolean;
@@ -328,6 +330,7 @@ export interface SaleRecord {
   table_number?: string;
   customer_name: string;
   customer_phone?: string;
+  customer_pan?: string;
   sale_type: SaleType;
   items: SaleItem[];
   subtotal: number;
@@ -366,6 +369,7 @@ export interface ServiceRequest {
   order_number?: string;
   customer_name?: string;
   customer_phone?: string;
+  customer_pan?: string;
   floor?: string | null;
   building?: string | null;
   payment_method?: string;

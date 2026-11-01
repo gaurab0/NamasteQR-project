@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MenuItem, MenuStatus } from '../../types/rbac';
 import { AvailabilityStatusBadge } from './AvailabilityStatusBadge';
-import { Edit2, Trash2, Eye, UtensilsCrossed, Clock } from 'lucide-react';
+import { Edit2, Trash2, Eye, UtensilsCrossed, Clock, ChefHat, Wine, Layers } from 'lucide-react';
 
 interface MenuItemCardProps {
   item: MenuItem;
@@ -92,6 +92,22 @@ export const MenuItemCard: React.FC<MenuItemCardProps> = ({
             <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-zinc-900/80 backdrop-blur-xs text-white tracking-wide">
               {item.category || 'General'}
             </span>
+
+            {item.station && (
+              <span
+                className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold tracking-wide shadow-2xs backdrop-blur-xs flex items-center gap-1 ${
+                  item.station === 'BAR'
+                    ? 'bg-purple-900/80 text-purple-200'
+                    : item.station === 'BOTH'
+                    ? 'bg-blue-900/80 text-blue-200'
+                    : 'bg-zinc-800/80 text-zinc-200'
+                }`}
+                title={`Routing: ${item.station === 'BOTH' ? 'Kitchen & Bar' : item.station === 'BAR' ? 'Bar' : 'Kitchen'}`}
+              >
+                {item.station === 'BAR' ? <Wine className="w-2.5 h-2.5" /> : item.station === 'BOTH' ? <Layers className="w-2.5 h-2.5" /> : <ChefHat className="w-2.5 h-2.5" />}
+                {item.station === 'BOTH' ? 'Both' : item.station === 'BAR' ? 'Bar' : 'Kitchen'}
+              </span>
+            )}
 
             {Array.isArray(item.additional_categories) &&
               item.additional_categories.map((extra) => (

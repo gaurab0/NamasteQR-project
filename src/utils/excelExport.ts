@@ -156,7 +156,7 @@ export function buildSalesWorkbookData(
   // -------------------------------------------------------------
   const salesHeaders = [
     'S.N.', 'Invoice Number', 'Order Number', 'Date & Time', 'Date (YYYY-MM-DD)',
-    'Sale Type', 'Table # / Room', 'Customer Name', 'Customer Phone',
+    'Sale Type', 'Table # / Room', 'Customer Name', 'Customer Phone', 'Customer PAN',
     'Items Summary', 'Total Items', 'Payment Method', 'Payment Status',
     'GL Account No.', 'GL Account Name', 'GL Category', 'Currency',
     'Subtotal', 'Taxes Breakdown', 'Total Tax', 'Service Charge',
@@ -235,6 +235,7 @@ export function buildSalesWorkbookData(
       sale.table_number || 'Counter / N/A',
       sale.customer_name || 'Walk-in Guest',
       sale.customer_phone || '-',
+      sale.customer_pan || '-',
       itemsSummary,
       totalItemsCount,
       normalizedPayment,
@@ -254,7 +255,7 @@ export function buildSalesWorkbookData(
       sale.notes || '',
     ];
   });
-  const salesColWidths = [6, 18, 14, 22, 16, 14, 16, 20, 16, 45, 14, 16, 14, 16, 30, 16, 10, 14, 25, 12, 14, 15, 14, 15, 20, 25];
+  const salesColWidths = [6, 18, 14, 22, 16, 14, 16, 20, 16, 16, 45, 14, 16, 14, 16, 30, 16, 10, 14, 25, 12, 14, 15, 14, 15, 20, 25];
 
   // -------------------------------------------------------------
   // 2. SHEET 2: Item Sales Register (Individual Line-Item Transactions)
@@ -277,6 +278,7 @@ export function buildSalesWorkbookData(
     'Table # / Room',
     'Customer Name',
     'Customer Phone',
+    'Customer PAN',
     'Cashier / Billed By',
   ];
 
@@ -346,6 +348,7 @@ export function buildSalesWorkbookData(
           sale.table_number || 'Counter / N/A',
           sale.customer_name || 'Walk-in Guest',
           sale.customer_phone || '-',
+          sale.customer_pan || '-',
           sale.cashier_name || 'Staff',
         ]);
       }
@@ -355,6 +358,7 @@ export function buildSalesWorkbookData(
   if (itemRows.length === 0) {
     itemRows.push([
       1,
+      '-',
       '-',
       '-',
       '-',

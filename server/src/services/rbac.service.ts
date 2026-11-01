@@ -167,6 +167,7 @@ export class RBACService {
         show_image: d.show_image,
         promo_badge: d.promo_badge || undefined,
         display_style: (d.display_style as any) || undefined,
+        station: (d.station as any) || 'KITCHEN',
         status: (d.status as any) || (d.is_available ? 'available' : 'unavailable'),
         is_available: d.is_available,
         order_index: d.order_index,
@@ -415,6 +416,7 @@ export class RBACService {
           display_style: newItem.display_style || 'auto',
           show_image: newItem.show_image ?? true,
           promo_badge: newItem.promo_badge || null,
+          station: (newItem as any).station || 'KITCHEN',
           order_index: newItem.order_index ?? 0,
           preparation_time_mins: newItem.preparation_time_mins || 15,
           created_by: user.id,
@@ -475,6 +477,7 @@ export class RBACService {
       if (updates.display_style !== undefined) prismaData.display_style = updates.display_style;
       if (updates.show_image !== undefined) prismaData.show_image = updates.show_image;
       if (updates.promo_badge !== undefined) prismaData.promo_badge = updates.promo_badge;
+      if (updates.station !== undefined) prismaData.station = updates.station;
       if (updates.order_index !== undefined) prismaData.order_index = updates.order_index;
       if (updates.preparation_time_mins !== undefined) prismaData.preparation_time_mins = updates.preparation_time_mins;
 
@@ -1767,22 +1770,11 @@ export class RBACService {
   }
 
   /**
-   * Helper to categorize items as BAR or KITCHEN
+   * Helper to categorize items as BAR or KITCHEN or BOTH
    */
-  private determineItemStation(item: { name?: string; category?: string; additional_categories?: string[]; station?: 'KITCHEN' | 'BAR' }): 'KITCHEN' | 'BAR' {
-    if (item.station) return item.station;
-    const DRINK_KEYWORDS = [
-      'beverage', 'drink', 'beverages', 'drinks', 'bar', 'cocktail', 'cocktails',
-      'mocktail', 'mocktails', 'juice', 'juices', 'shake', 'shakes', 'smoothie',
-      'tea', 'coffee', 'espresso', 'cappuccino', 'latte', 'beer', 'wine', 'liquor',
-      'whiskey', 'vodka', 'rum', 'gin', 'soda', 'lassi', 'water', 'cold drink'
-    ];
-    const combined = [
-      item.name || '',
-      item.category || '',
-      ...(item.additional_categories || [])
-    ].join(' ').toLowerCase();
-    return DRINK_KEYWORDS.some((kw) => combined.includes(kw)) ? 'BAR' : 'KITCHEN';
+  private determineItemStation(item: { name?: string; category?: string; additional_categories?: string[]; station?: 'KITCHEN' | 'BAR' | 'BOTH' }): 'KITCHEN' | 'BAR' | 'BOTH' {
+    if (item?.station) return item.station;
+    return 'KITCHEN';
   }
 
   /**
@@ -2012,7 +2004,7 @@ export class RBACService {
         ...item,
         price: verifiedPrice,
         item_key: item.item_key || `${item.item_id || 'dish'}_${now.getTime()}_${idx}`,
-        station: item.station || this.determineItemStation(item),
+        station: item.station || dbItem?.station || this.determineItemStation(item),
         status: (tableDocData?.pay_first_enabled ? 'AWAITING_PAYMENT' : 'RECEIVED') as OrderStatus,
         ready_at: null,
         served_at: null,
@@ -2299,6 +2291,7 @@ export class RBACService {
         currency: d.currency || 'Rs.',
         customer_name: d.customer_name || 'Guest',
         customer_phone: d.customer_phone || '',
+        customer_pan: (d as any).customer_pan || '',
         order_notes: d.order_notes || '',
         status: (d.status as OrderStatus) || 'RECEIVED',
         pay_first: Boolean(d.pay_first),
@@ -3605,6 +3598,7 @@ export class RBACService {
         table_number: d.table_number || undefined,
         customer_name: d.customer_name || 'Guest',
         customer_phone: d.customer_phone || '',
+        customer_pan: (d as any).customer_pan || '',
         sale_type: (d.sale_type as any) || 'DINE_IN',
         items: (d.items as any) || [],
         subtotal: Number(d.subtotal) || 0,
@@ -3795,6 +3789,7 @@ export class RBACService {
         return saleData.customer_name || 'Walk-in Guest';
       })(),
       customer_phone: saleData.customer_phone || (saleData.payment_method === 'CREDIT' ? (resolvedCreditCustomer.phone || '') : ''),
+      customer_pan: saleData.customer_pan || (saleData.payment_method === 'CREDIT' ? (resolvedCreditCustomer.pan_number || (resolvedCreditCustomer as any).pan || '') : '') || null,
       sale_type: saleData.sale_type || 'DINE_IN',
       items: (saleData.items || []).filter((it: any) => it && (it.name || '').trim().length > 0),
       subtotal: Number(saleData.subtotal) || 0,
@@ -3834,6 +3829,7 @@ export class RBACService {
           table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : saleData.sale_type === 'ROOM_SERVICE' ? 'Room Service' : 'Dine-In Restaurant'),
           customer_name: newSale.customer_name,
           customer_phone: newSale.customer_phone || null,
+          customer_pan: newSale.customer_pan || null,
           sale_type: newSale.sale_type,
           items: newSale.items as any,
           subtotal: newSale.subtotal,

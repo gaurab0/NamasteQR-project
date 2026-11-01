@@ -504,8 +504,8 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         order.items
           .filter((it) => {
             const st = it.station || determineItemStation(it);
-            if (activeStation === 'KITCHEN') return st === 'KITCHEN';
-            if (activeStation === 'BAR') return st === 'BAR';
+            if (activeStation === 'KITCHEN') return st === 'KITCHEN' || st === 'BOTH';
+            if (activeStation === 'BAR') return st === 'BAR' || st === 'BOTH';
             return true;
           })
           .map((it, idx) => it.item_key || `${it.item_id}_${idx}`)
@@ -680,10 +680,10 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         if (item.status === 'CANCELLED') return false;
         const itemStation = (item.station || determineItemStation(item) || '').toUpperCase();
         if (activeStation === 'KITCHEN') {
-          return itemStation !== 'BAR';
+          return itemStation === 'KITCHEN' || itemStation === 'BOTH' || (itemStation !== 'BAR');
         }
         if (activeStation === 'BAR') {
-          return itemStation === 'BAR';
+          return itemStation === 'BAR' || itemStation === 'BOTH';
         }
         return true; // WAITER sees all
       });
@@ -1819,13 +1819,15 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                             {activeStation === 'WAITER' && (
                               <span
                                 className={`text-[10px] px-1.5 py-0.5 rounded font-semibold border flex items-center gap-1 ${
-                                  item.station === 'BAR'
+                                  item.station === 'BOTH'
+                                    ? isFullScreenMode ? 'bg-blue-950 text-blue-300 border-blue-800' : 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : item.station === 'BAR'
                                     ? isFullScreenMode ? 'bg-purple-950 text-purple-300 border-purple-800' : 'bg-purple-50 text-purple-700 border-purple-200'
                                     : isFullScreenMode ? 'bg-amber-950 text-amber-300 border-amber-800' : 'bg-amber-50 text-amber-800 border-amber-200'
                                 }`}
                               >
-                                {item.station === 'BAR' ? <Wine className="w-2.5 h-2.5" /> : <ChefHat className="w-2.5 h-2.5" />}
-                                {item.station === 'BAR' ? 'Bar' : 'Kitchen'}
+                                {item.station === 'BOTH' ? <Layers className="w-2.5 h-2.5" /> : item.station === 'BAR' ? <Wine className="w-2.5 h-2.5" /> : <ChefHat className="w-2.5 h-2.5" />}
+                                {item.station === 'BOTH' ? 'Kitchen & Bar' : item.station === 'BAR' ? 'Bar' : 'Kitchen'}
                               </span>
                             )}
 

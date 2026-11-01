@@ -320,6 +320,10 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     currency?: string;
   } | null>(() => {
     try {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('tableId') || urlParams.get('tableNumber')) {
+        return null;
+      }
       const cached = localStorage.getItem('serveflow_last_settled_payment');
       if (!cached) return null;
       const parsed = JSON.parse(cached);
@@ -514,12 +518,6 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       }
     }
 
-    if ((!resolvedAmount || resolvedAmount <= 0) && settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0) {
-      resolvedAmount = Number(settledPaymentInfo.amount);
-      if (settledPaymentInfo.currency) resolvedCurrency = settledPaymentInfo.currency;
-      if (settledPaymentInfo.mode) resolvedMode = settledPaymentInfo.mode;
-    }
-
     const info: { mode: string; amount?: number; currency: string } = {
       mode: resolvedMode,
       currency: resolvedCurrency,
@@ -666,8 +664,10 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       setSessionExpired(false);
       setSessionExpiredReason(null);
       setIsTableBillConcluded(false);
+      setSettledPaymentInfo(null);
       try {
         localStorage.removeItem('serveflow_table_bill_concluded');
+        localStorage.removeItem('serveflow_last_settled_payment');
       } catch {}
 
       // Check if this browser already had a host token for this table
@@ -892,9 +892,25 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         if (tableData.status === 'ACTIVE' && (!tableData.current_session_id || (tableParams.sessionId && tableData.current_session_id !== tableParams.sessionId))) {
           sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
           setSessionExpired(true);
-          setIsTableBillConcluded(true);
+          setSessionExpiredReason('This dining table session was reset by staff. Please re-scan table QR to start a new order.');
+          setIsTableBillConcluded(false);
           setIsFinalBillPageOpen(false);
-          handleOrderSettled(activeOrder?.id, tableParams.tableNumber, activeOrder);
+          setSettledPaymentInfo(null);
+          try {
+            localStorage.removeItem('serveflow_last_settled_payment');
+            localStorage.removeItem('serveflow_table_bill_concluded');
+          } catch {}
+
+          const isPaidOrder = activeOrder && (activeOrder.payment_status === 'PAID' || activeOrder.status === 'COMPLETED');
+          if (isPaidOrder) {
+            handleOrderSettled(activeOrder.id, tableParams.tableNumber, activeOrder);
+          } else {
+            setActiveOrder(null);
+            setIsTrackerOpen(false);
+            setIsCartOpen(false);
+            setCartItems([]);
+            setSuccessOrderData(null);
+          }
         }
       }
     });
@@ -1366,7 +1382,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                 ) : settledPaymentInfo?.mode ? (
                   `Payment received via ${settledPaymentInfo.mode}`
                 ) : (
-                  'Payment received successfully'
+                  'Dining Session Concluded'
                 )}
               </p>
             </div>
