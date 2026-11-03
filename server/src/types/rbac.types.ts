@@ -100,6 +100,7 @@ export interface MenuItem {
   show_image?: boolean;
   promo_badge?: string;
   station?: KitchenStation;
+  erp_item_code?: string;
   order_index?: number;
   preparation_time_mins?: number;
   created_by: string;
@@ -121,6 +122,13 @@ export interface RestaurantTable {
   capacity: number;
   status: TableStatus;
   pay_first_enabled?: boolean;
+  credit_only?: boolean;
+  credit_customer_name?: string | null;
+  credit_customer_phone?: string | null;
+  credit_pin?: string | null;
+  credit_gl_account_id?: string | null;
+  credit_gl_account_number?: string | null;
+  credit_gl_account_name?: string | null;
   qr_code_url?: string;
   last_scanned_at?: Date | null;
   current_session_id?: string | null;
@@ -147,6 +155,7 @@ export interface TableOrderItem {
   category?: string;
   additional_categories?: string[];
   station?: KitchenStation;
+  erp_item_code?: string;
   status?: OrderStatus;
   ready_at?: Date | string | null;
   served_at?: Date | string | null;
@@ -173,6 +182,12 @@ export interface TableOrder {
   order_notes?: string;
   status: OrderStatus;
   pay_first?: boolean;
+  credit_only?: boolean;
+  credit_pin_verified?: boolean;
+  pin_verified?: boolean;
+  credit_gl_account_id?: string | null;
+  credit_gl_account_number?: string | null;
+  credit_gl_account_name?: string | null;
   payment_confirmed_at?: string | Date | null;
   payment_confirmed_by?: string;
   sale_id?: string;
@@ -275,7 +290,7 @@ export interface SaleItem {
 }
 
 export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'ROOM_SERVICE' | 'QUICK_POS';
-export type SalePaymentMethod = 'CASH' | 'UPI_QR' | 'CARD' | 'ONLINE' | 'ROOM_BILL' | 'SPLIT' | 'QR_CODE' | 'CREDIT';
+export type SalePaymentMethod = 'CASH' | 'UPI_QR' | 'CARD' | 'ONLINE' | 'ROOM_BILL' | 'SPLIT' | 'QR_CODE' | 'CREDIT' | 'DEDUCT_FROM_DEPOSIT';
 export type SalePaymentStatus = 'PAID' | 'REFUNDED' | 'CANCELLED';
 
 export interface SaleRecord {
@@ -357,4 +372,18 @@ export interface GLAccountLink {
   is_active: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface CashierRegisterSession {
+  id: string;
+  business_id: string;
+  cashier_id: string;
+  cashier_name: string;
+  date_string: string;
+  status: 'OPEN' | 'CLOSED';
+  opening_float: number;
+  closing_cash?: number | null;
+  notes?: string | null;
+  opened_at: string | Date;
+  closed_at?: string | Date | null;
 }

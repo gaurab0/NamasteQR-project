@@ -19,6 +19,7 @@ import {
   SaleItem,
   GLAccountLink,
   GLAccountCategory,
+  CashierRegisterSession,
   TabPermissionId
 } from '../types/rbac';
 import { Business } from '../types/auth';
@@ -789,12 +790,75 @@ export class ClientRBACService {
     return data.data;
   }
 
+    public async getCurrentCashierSessionApi(
+    cashierId?: string,
+    businessId?: string
+  ): Promise<CashierRegisterSession | null> {
+    const params = new URLSearchParams();
+    if (businessId) params.append('businessId', businessId);
+    if (cashierId) params.append('cashierId', cashierId);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`/api/rbac/cashier-session/current${queryString}`, {
+      headers: this.getAuthHeaders(undefined, businessId),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    return data.data || null;
+  }
+
+  public async getAllCashierSessionsApi(
+    businessId?: string
+  ): Promise<CashierRegisterSession[]> {
+    const params = new URLSearchParams();
+    if (businessId) params.append('businessId', businessId);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetch(`/api/rbac/cashier-session/all${queryString}`, {
+      headers: this.getAuthHeaders(undefined, businessId),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    return data.data || [];
+  }
+
+  public async openCashierSessionApi(
+    openingFloat: number,
+    notes?: string,
+    businessId?: string
+  ): Promise<CashierRegisterSession> {
+    const res = await fetch('/api/rbac/cashier-session/open', {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }, businessId),
+      credentials: 'include',
+      body: JSON.stringify({ opening_float: openingFloat, notes, businessId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || data.error || 'Failed to open cashier session');
+    return data.data;
+  }
+
+  public async closeCashierSessionApi(
+    closingCash?: number,
+    notes?: string,
+    businessId?: string
+  ): Promise<CashierRegisterSession> {
+    const res = await fetch('/api/rbac/cashier-session/close', {
+      method: 'POST',
+      headers: this.getAuthHeaders({ 'Content-Type': 'application/json' }, businessId),
+      credentials: 'include',
+      body: JSON.stringify({ closing_cash: closingCash, notes, businessId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || data.error || 'Failed to close cashier session');
+    return data.data;
+  }
+
   public async getSalesApi(
     filters?: {
       date?: string;
       startDate?: string;
       endDate?: string;
       paymentMethod?: string;
+      cashierId?: string;
       limit?: number;
     },
     businessId?: string
@@ -805,6 +869,7 @@ export class ClientRBACService {
     if (filters?.startDate) params.append('startDate', filters.startDate);
     if (filters?.endDate) params.append('endDate', filters.endDate);
     if (filters?.paymentMethod) params.append('paymentMethod', filters.paymentMethod);
+    if (filters?.cashierId) params.append('cashierId', filters.cashierId);
     if (filters?.limit) params.append('limit', String(filters.limit));
 
     const queryString = params.toString() ? `?${params.toString()}` : '';
@@ -991,17 +1056,33 @@ export class ClientRBACService {
     return result;
   }
 
-  public async updateTableOrderPaymentMethodApi(orderId: string, businessId: string, paymentMethod: string): Promise<void> {
+  public async updateTableOrderPaymentMethodApi(orderId: string, businessId: string, paymentMethod: string, pin?: string): Promise<any> {
     const res = await fetch(`/api/rbac/orders/${orderId}/payment-method`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
       credentials: 'include',
-      body: JSON.stringify({ businessId, payment_method: paymentMethod }),
+      body: JSON.stringify({ businessId, payment_method: paymentMethod, pin }),
     });
     const result = await res.json();
     if (!res.ok || !result.success) {
       throw new Error(result.error?.message || 'Failed to update payment method');
     }
+    return result;
+  }
+
+  public async verifyTableOrderPinApi(orderId: string, businessId: string, pin: string, paymentMethod: string = 'CREDIT'): Promise<any> {
+    const res = await fetch(`/api/rbac/orders/${orderId}/verify-pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      credentials: 'include',
+      body: JSON.stringify({ businessId, pin, payment_method: paymentMethod }),
+    });
+    const result = await res.json();
+    if (!res.ok || !result.success) {
+      throw new Error(result.error?.message || 'Failed to verify PIN');
+    }
+    return result;
+
   }
 
   public async acknowledgeBillFolioApi(businessId: string, orderId?: string, requestId?: string): Promise<boolean> {

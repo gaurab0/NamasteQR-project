@@ -78,6 +78,7 @@ import {
 } from 'lucide-react';
 
 import { PrinterConfiguration } from './PrinterConfiguration';
+import { ErpIntegrationSettings } from './ErpIntegrationSettings';
 import { SUPPORTED_LANGUAGES } from '../../utils/googleTranslate';
 
 export type ConfigurationDomain =
@@ -1270,6 +1271,10 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
           {/* ========================================================== */}
           {activeDomain === 'gl_accounts' && (
             <div className="space-y-4 animate-in fade-in duration-200">
+
+              <div className="pt-2">
+                <ErpIntegrationSettings businessId={businessId} />
+              </div>
               <GLAccountsTable
                 businessId={businessId}
                 glAccounts={glAccounts}

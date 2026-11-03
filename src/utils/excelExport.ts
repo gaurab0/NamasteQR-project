@@ -22,6 +22,7 @@ export function buildSalesWorkbookData(
   // -------------------------------------------------------------
   const nonCreditSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() !== 'CREDIT');
   const creditSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() === 'CREDIT');
+  const depositSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() === 'DEDUCT_FROM_DEPOSIT');
 
   // Compute aggregated totals for GL mapping (excluding credit sales totals here, we handle credit separately per account)
   let totalCash = 0;
@@ -29,6 +30,7 @@ export function buildSalesWorkbookData(
   let totalQR = 0;
   let totalOnline = 0;
   let totalRoomBill = 0;
+  let totalDeposit = 0;
   let totalDiscounts = 0;
   let totalTax = 0;
   let totalServiceCharge = 0;
@@ -53,7 +55,8 @@ export function buildSalesWorkbookData(
     else if (pm === 'CARD') totalCard += tot;
     else if (pm === 'UPI_QR' || pm === 'QR_CODE') totalQR += tot;
     else if (pm === 'ONLINE') totalOnline += tot;
-    else if (pm === 'ROOM_BILL') totalRoomBill += tot;
+    else if (pm === 'ROOM_BILL' || pm === 'ROOM_CHARGE') totalRoomBill += tot;
+    else if (pm === 'DEDUCT_FROM_DEPOSIT') totalDeposit += tot;
     else totalCash += tot; // fallback
 
     let hasBeverage = false;
@@ -214,6 +217,11 @@ export function buildSalesWorkbookData(
       glAccNumber = match?.account_number || '1110';
       glAccName = match?.account_name || 'Guest Room Folio Receivable';
       glAccCategory = match?.category || 'ASSET';
+    } else if (normalizedPayment === 'DEDUCT_FROM_DEPOSIT') {
+      const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'DEPOSIT_CLEARING' || a.account_number === '2130');
+      glAccNumber = match?.account_number || '2130';
+      glAccName = match?.account_name || 'Customer Advance & Deposit Clearing';
+      glAccCategory = match?.category || 'LIABILITY';
     } else if (normalizedPayment === 'CREDIT') {
       let accId = sale.credit_gl_account_id;
       if (!accId || !creditAccountsMap[accId]) {
@@ -423,6 +431,7 @@ export function buildSalesWorkbookData(
     else if (key === 'QR_SETTLEMENT') mappedTotal = totalQR;
     else if (key === 'ONLINE_SETTLEMENT') mappedTotal = totalOnline;
     else if (key === 'ROOM_CHARGE') mappedTotal = totalRoomBill;
+    else if (key === 'DEPOSIT_CLEARING') mappedTotal = totalDeposit;
     else if (key === 'CREDIT_SETTLEMENT') {
       mappedTotal = creditAccountsMap[acc.id]?.total || 0;
     }
@@ -449,6 +458,7 @@ export function buildSalesWorkbookData(
   if (totalQR > 0) journalRows.push(['1030', 'QR Digital Payment Clearing', 'ASSET', Number(totalQR.toFixed(2)), 0, 'QR digital payments settled']);
   if (totalOnline > 0) journalRows.push(['1040', 'Online Payment Gateway Clearing', 'ASSET', Number(totalOnline.toFixed(2)), 0, 'Direct online checkout settlement']);
   if (totalRoomBill > 0) journalRows.push(['1110', 'Guest Room Folio Receivable', 'ASSET', Number(totalRoomBill.toFixed(2)), 0, 'Dining bills transferred to hotel guest folio']);
+  if (totalDeposit > 0) journalRows.push(['2130', 'Customer Advance & Deposit Clearing', 'LIABILITY', Number(totalDeposit.toFixed(2)), 0, 'Sales settled against pre-paid customer deposits']);
   if (totalDiscounts > 0) journalRows.push(['4090', 'Sales Discounts & Rebates', 'EXPENSE', Number(totalDiscounts.toFixed(2)), 0, 'Customer discounts allowed on billing']);
 
   // Add individual credit account debits
@@ -466,7 +476,7 @@ export function buildSalesWorkbookData(
   if (totalTax > 0) journalRows.push(['2110', 'Sales Tax / VAT Payable (13%)', 'TAX_LIABILITY', 0, Number(totalTax.toFixed(2)), 'Collected government tax liability']);
   if (totalServiceCharge > 0) journalRows.push(['2120', 'Hospitality Service Charge Payable', 'LIABILITY', 0, Number(totalServiceCharge.toFixed(2)), '10% Service charge pool for staff']);
 
-  const totalDebits = totalCash + totalCard + totalQR + totalOnline + totalRoomBill + journalCreditDebits + totalDiscounts;
+  const totalDebits = totalCash + totalCard + totalQR + totalOnline + totalRoomBill + totalDeposit + journalCreditDebits + totalDiscounts;
   const totalCredits = totalFoodSales + totalBeverageSales + totalTax + totalServiceCharge;
   const variance = Math.abs(totalDebits - totalCredits);
 
@@ -541,12 +551,86 @@ export function buildSalesWorkbookData(
 
   const creditColWidths = [10, 18, 14, 22, 22, 28, 24, 28, 16, 14, 24, 20, 16, 45, 14, 14, 14, 15, 18, 14, 20, 25];
 
+  // -------------------------------------------------------------
+  // 6. SHEET 6: Deduct from Deposit Sales (Tracked Separately)
+  // -------------------------------------------------------------
+  const depositHeaders = [
+    'S.N.', 'Invoice Number', 'Order Number', 'Date & Time', 'Date (YYYY-MM-DD)',
+    'GL Account No.', 'GL Account Name', 'Table # / Room', 'Customer Name', 'Customer Phone',
+    'Customer PAN', 'Items Summary', 'Total Items', 'Currency',
+    'Subtotal', 'Total Tax', 'Service Charge', 'Discount Amount', 'Grand Total (Deducted)',
+    'Payment Status', 'Cashier / Billed By', 'Notes'
+  ];
+
+  let totalDepositGrand = 0;
+  const depositRows: (string | number)[][] = depositSales.map((sale, idx) => {
+    let formattedDate = sale.date_string || '';
+    if (sale.created_at) {
+      try {
+        formattedDate = new Date(sale.created_at).toLocaleString('en-US', {
+          year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true,
+        });
+      } catch { formattedDate = String(sale.created_at); }
+    }
+
+    const itemsSummary = Array.isArray(sale.items)
+      ? sale.items.map((i: any) => `${i.name || i.item_name || 'Item'} (x${i.quantity || 1})`).join('; ')
+      : '';
+    const totalItemsCount = Array.isArray(sale.items)
+      ? sale.items.reduce((sum: number, i: any) => sum + (Number(i.quantity) || 1), 0)
+      : 0;
+
+    const tot = Number(sale.total_amount) || 0;
+    totalDepositGrand += tot;
+
+    const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'DEPOSIT_CLEARING' || a.account_number === '2130');
+    const glAccNumber = sale.credit_gl_account_number || match?.account_number || '2130';
+    const glAccName = sale.credit_gl_account_name || match?.account_name || 'Customer Advance & Deposit Clearing';
+
+    return [
+      idx + 1,
+      sale.invoice_number || sale.id,
+      sale.order_number || '-',
+      formattedDate,
+      sale.date_string || (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : ''),
+      glAccNumber,
+      glAccName,
+      sale.table_number || 'Counter / N/A',
+      sale.customer_name || 'Registered Customer',
+      sale.customer_phone || '-',
+      sale.customer_pan || '-',
+      itemsSummary,
+      totalItemsCount,
+      sale.currency || currency,
+      Number((sale.subtotal || 0).toFixed(2)),
+      Number((sale.total_tax || 0).toFixed(2)),
+      Number((sale.service_charge || 0).toFixed(2)),
+      Number((sale.discount_amount || 0).toFixed(2)),
+      Number(tot.toFixed(2)),
+      sale.payment_status || 'PAID',
+      sale.cashier_name || 'Staff',
+      sale.notes || '',
+    ];
+  });
+
+  if (depositRows.length === 0) {
+    depositRows.push(['No deduct-from-deposit transactions recorded in this period', ...Array(depositHeaders.length - 1).fill('')]);
+  } else {
+    const summaryRow = Array(depositHeaders.length).fill('');
+    summaryRow[depositHeaders.length - 4] = 'TOTAL DEPOSITS DEDUCTED';
+    summaryRow[depositHeaders.length - 3] = Number(totalDepositGrand.toFixed(2));
+    depositRows.push(summaryRow);
+  }
+
+  const depositColWidths = [6, 18, 14, 22, 16, 16, 32, 16, 22, 16, 16, 45, 12, 10, 14, 12, 14, 15, 18, 14, 20, 25];
+
   return [
     { sheetName: 'Sales Register', headers: salesHeaders, rows: salesRows, colWidths: salesColWidths },
     { sheetName: 'Item Sales Register', headers: itemHeaders, rows: itemRows, colWidths: itemColWidths },
     { sheetName: 'GL Links & Mapping', headers: glHeaders, rows: glRows, colWidths: glColWidths },
     { sheetName: 'GL Journal Summary', headers: journalHeaders, rows: journalRows, colWidths: journalColWidths },
     { sheetName: 'Credit Sales Register', headers: creditHeaders, rows: creditRows, colWidths: creditColWidths },
+    { sheetName: 'Deduct from Deposit Sales', headers: depositHeaders, rows: depositRows, colWidths: depositColWidths },
   ];
 }
 

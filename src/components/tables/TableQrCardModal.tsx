@@ -11,9 +11,19 @@ import {
   Building2, 
   Layers, 
   Users, 
-  Sparkles 
+  Sparkles,
+  CreditCard,
+  KeyRound,
+  ShieldCheck,
+  Lock,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { RestaurantTable } from '../../types/rbac';
+import { rbacService } from '../../services/rbac.service';
 import { Button } from '../ui/Button';
 
 interface TableQrCardModalProps {
@@ -21,6 +31,7 @@ interface TableQrCardModalProps {
   businessName: string;
   businessId: string;
   onClose: () => void;
+  onTableUpdated?: (table: RestaurantTable) => void;
 }
 
 export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
@@ -28,10 +39,148 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
   businessName,
   businessId,
   onClose,
+  onTableUpdated,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [copied, setCopied] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+
+  // Credit Configuration State
+  const [isCreditOnly, setIsCreditOnly] = useState<boolean>(Boolean(table.credit_only));
+  const [customerName, setCustomerName] = useState<string>(table.credit_customer_name || '');
+  const [customerPhone, setCustomerPhone] = useState<string>(table.credit_customer_phone || '');
+  const [pin, setPin] = useState<string>(table.credit_pin || '');
+  const [glAccountNumber, setGlAccountNumber] = useState<string>(table.credit_gl_account_number || '');
+  const [glAccountName, setGlAccountName] = useState<string>(table.credit_gl_account_name || '');
+  const [showPin, setShowPin] = useState<boolean>(false);
+  const [creditSaving, setCreditSaving] = useState<boolean>(false);
+  const [creditSuccessMsg, setCreditSuccessMsg] = useState<string | null>(null);
+  const [creditErrorMsg, setCreditErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!glAccountNumber) {
+      const rand5 = Math.floor(10000 + Math.random() * 90000).toString();
+      setGlAccountNumber(rand5);
+    }
+    if (!pin) {
+      const rand6 = Math.floor(100000 + Math.random() * 900000).toString();
+      setPin(rand6);
+    }
+  }, []);
+
+  const handleGeneratePin = () => {
+    const rand6 = Math.floor(100000 + Math.random() * 900000).toString();
+    setPin(rand6);
+  };
+
+  const handleGenerateGlNumber = () => {
+    const rand5 = Math.floor(10000 + Math.random() * 90000).toString();
+    setGlAccountNumber(rand5);
+  };
+
+  const handleSaveCreditConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreditErrorMsg(null);
+    setCreditSuccessMsg(null);
+
+    if (!isCreditOnly) {
+      setCreditSaving(true);
+      try {
+        await rbacService.updateTableApi(
+          table.id,
+          { credit_only: false },
+          businessId
+        );
+        setCreditSuccessMsg('Table credit-only mode turned off.');
+        if (onTableUpdated) onTableUpdated({ ...table, credit_only: false });
+        setTimeout(() => setCreditSuccessMsg(null), 3000);
+      } catch (err: any) {
+        setCreditErrorMsg(err?.message || 'Failed to update table settings.');
+      } finally {
+        setCreditSaving(false);
+      }
+      return;
+    }
+
+    if (!customerName.trim()) {
+      setCreditErrorMsg('Customer Name is compulsory for Credit-Only tables.');
+      return;
+    }
+    if (!customerPhone.trim()) {
+      setCreditErrorMsg('Customer Phone is compulsory for Credit-Only tables.');
+      return;
+    }
+    if (!pin.trim() || !/^\d{6}$/.test(pin.trim())) {
+      setCreditErrorMsg('A valid 6-digit numeric PIN is required for authorization.');
+      return;
+    }
+    if (!glAccountNumber.trim()) {
+      setCreditErrorMsg('5-digit GL Account Number is required.');
+      return;
+    }
+
+    setCreditSaving(true);
+    try {
+      let linkedGlId = table.credit_gl_account_id;
+      let linkedGlNumber = glAccountNumber.trim();
+      let linkedGlName = glAccountName.trim() || `Credit Settlement - Table ${table.table_number} (${customerName.trim()})`;
+
+      if (!linkedGlId) {
+        const createdGl = await rbacService.createGLAccountApi(
+          {
+            account_name: linkedGlName,
+            account_number: linkedGlNumber,
+            category: 'ASSET',
+            mapping_key: 'CREDIT_SETTLEMENT',
+            description: `Table ${table.table_number} dedicated credit ledger - ${customerName.trim()}`,
+            customer_name: customerName.trim(),
+            customer_phone: customerPhone.trim(),
+            is_active: true,
+          },
+          businessId
+        );
+        linkedGlId = createdGl.id;
+        linkedGlNumber = createdGl.account_number;
+        linkedGlName = createdGl.account_name;
+      } else {
+        try {
+          await rbacService.updateGLAccountApi(
+            linkedGlId,
+            {
+              account_name: linkedGlName,
+              account_number: linkedGlNumber,
+              customer_name: customerName.trim(),
+              customer_phone: customerPhone.trim(),
+            },
+            businessId
+          );
+        } catch (updateGlErr: any) {
+          console.warn('GL account update sync note:', updateGlErr);
+        }
+      }
+
+      const creditUpdates = {
+        credit_only: true,
+        pay_first_enabled: true,
+        credit_customer_name: customerName.trim(),
+        credit_customer_phone: customerPhone.trim(),
+        credit_pin: pin.trim(),
+        credit_gl_account_id: linkedGlId,
+        credit_gl_account_number: linkedGlNumber,
+        credit_gl_account_name: linkedGlName,
+      };
+
+      await rbacService.updateTableApi(table.id, creditUpdates, businessId);
+
+      setCreditSuccessMsg('Credit Account & GL Linked Successfully! Table is now locked to Credit Only.');
+      if (onTableUpdated) onTableUpdated({ ...table, ...creditUpdates });
+      setTimeout(() => setCreditSuccessMsg(null), 4000);
+    } catch (err: any) {
+      setCreditErrorMsg(err?.message || 'Failed to save credit configuration and link GL account.');
+    } finally {
+      setCreditSaving(false);
+    }
+  };
 
   // Target customer URL
   const origin = window.location.origin;
@@ -167,7 +316,7 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
         {/* Printable Area / Card Container */}
         <div 
           id="qr-stand-card-printable"
-          className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-zinc-200 flex flex-col max-h-[90vh] overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 my-auto"
+          className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-zinc-200 flex flex-col max-h-[90vh] overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 my-auto"
         >
           {/* Card Header (Sticky at top of card) */}
           <div className="p-4 sm:p-5 pb-3 border-b border-zinc-100 flex items-start justify-between gap-3 bg-white z-10 shrink-0">
@@ -249,6 +398,12 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
                   }`} />
                   Current Status: {table.status}
                 </span>
+                {table.credit_only && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
+                    <CreditCard className="w-3 h-3 text-purple-600" />
+                    Credit Only Table
+                  </span>
+                )}
               </div>
             </div>
 
@@ -281,6 +436,226 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
                 Open Live Customer View in New Tab
                 <ExternalLink className="w-3 h-3" />
               </a>
+            </div>
+
+            {/* Credit Account Configuration Section */}
+            <div className="pt-2 border-t border-zinc-200/80 space-y-3 print:hidden">
+              <div className="flex items-center justify-between bg-purple-50/70 p-3.5 rounded-2xl border border-purple-200/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <CreditCard className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-extrabold text-purple-950 flex items-center gap-1.5">
+                      Credit-Only Table Account
+                      {table.credit_only && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-purple-200/80 text-purple-900">
+                          Active
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-purple-700">
+                      Pre-filled customer info, 6-digit PIN & dedicated GL Account
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isCreditOnly}
+                    onChange={(e) => setIsCreditOnly(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-zinc-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                </label>
+              </div>
+
+              {!isCreditOnly && table.credit_only && (
+                <div className="p-4 bg-rose-50/80 rounded-2xl border border-rose-200 space-y-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-rose-900">Credit Only is currently enabled</h4>
+                      <p className="text-[11px] text-rose-700">Turn off credit-only requirement and revert table to standard dining mode.</p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={creditSaving}
+                      onClick={async () => {
+                        setCreditSaving(true);
+                        setCreditErrorMsg(null);
+                        try {
+                          await rbacService.updateTableApi(table.id, { credit_only: false }, businessId);
+                          setCreditSuccessMsg('Credit-only mode disabled successfully.');
+                          if (onTableUpdated) onTableUpdated({ ...table, credit_only: false });
+                          setTimeout(() => setCreditSuccessMsg(null), 3000);
+                        } catch (err: any) {
+                          setCreditErrorMsg(err?.message || 'Failed to update table settings.');
+                        } finally {
+                          setCreditSaving(false);
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      {creditSaving ? 'Disabling...' : 'Confirm Disable'}
+                    </button>
+                  </div>
+                  {creditErrorMsg && (
+                    <div className="p-2 bg-red-100 text-red-800 rounded-lg text-xs font-medium">
+                      {creditErrorMsg}
+                    </div>
+                  )}
+                  {creditSuccessMsg && (
+                    <div className="p-2 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-medium">
+                      {creditSuccessMsg}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isCreditOnly && (
+                <form onSubmit={handleSaveCreditConfig} className="p-4 bg-zinc-50 rounded-2xl border border-zinc-200 space-y-3.5">
+                  {/* Customer Name (Compulsory) */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-700 mb-1">
+                      Customer Name <span className="text-red-500">* (Compulsory)</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customerName}
+                      onChange={(e) => {
+                        setCustomerName(e.target.value);
+                        if (!glAccountName || glAccountName.startsWith('Credit Settlement - Table')) {
+                          setGlAccountName(`Credit Settlement - Table ${table.table_number} (${e.target.value})`);
+                        }
+                      }}
+                      placeholder="e.g. John Doe / Room 402"
+                      className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-xl text-xs font-semibold text-zinc-900 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
+                    />
+                    <p className="text-[10px] text-zinc-400 mt-0.5">Pre-filled and locked in customer cart view</p>
+                  </div>
+
+                  {/* Customer Phone (Compulsory) */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-zinc-700 mb-1">
+                      Customer Phone Number <span className="text-red-500">* (Compulsory)</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      placeholder="e.g. 9841234567"
+                      className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-xl text-xs font-semibold text-zinc-900 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* 6-Digit PIN */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-zinc-700 flex items-center gap-1">
+                        <KeyRound className="w-3 h-3 text-purple-600" />
+                        6-Digit Authorization PIN <span className="text-red-500">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleGeneratePin}
+                        className="text-[11px] font-bold text-purple-700 hover:text-purple-900 flex items-center gap-1 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Generate PIN
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPin ? 'text' : 'password'}
+                        maxLength={6}
+                        required
+                        value={pin}
+                        onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="6-digit PIN (e.g. 123456)"
+                        className="w-full px-3 py-2 pr-10 bg-white border border-zinc-300 rounded-xl text-xs font-mono font-bold tracking-widest text-zinc-900 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPin(!showPin)}
+                        className="absolute right-2.5 top-2.5 text-zinc-400 hover:text-zinc-600 cursor-pointer"
+                        title={showPin ? "Hide PIN" : "Show PIN"}
+                      >
+                        {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-zinc-400 mt-0.5">Customer enters this 6-digit PIN on phone to confirm Credit or Deposit</p>
+                  </div>
+
+                  {/* GL Account Number (Auto-generated 5-digit with editable field) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-bold text-zinc-700 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                        GL Account Number <span className="text-red-500">* (5-Digit)</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleGenerateGlNumber}
+                        className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Auto-generate
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={glAccountNumber}
+                      onChange={(e) => setGlAccountNumber(e.target.value.trim())}
+                      placeholder="e.g. 90909 or 51240"
+                      className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-xl text-xs font-mono font-bold text-zinc-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <div className="mt-1 flex items-center gap-2 text-[10px] text-zinc-500">
+                      <span className="px-1.5 py-0.5 rounded bg-zinc-200/80 font-mono font-semibold text-zinc-700">Category: ASSET</span>
+                      <span className="px-1.5 py-0.5 rounded bg-zinc-200/80 font-mono font-semibold text-zinc-700">Key: CREDIT_SETTLEMENT</span>
+                    </div>
+                  </div>
+
+                  {/* Feedback Banners */}
+                  {creditErrorMsg && (
+                    <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{creditErrorMsg}</span>
+                    </div>
+                  )}
+
+                  {creditSuccessMsg && (
+                    <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>{creditSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {/* Save button */}
+                  <div className="pt-1">
+                    <button
+                      type="submit"
+                      disabled={creditSaving}
+                      className="w-full py-2.5 px-4 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {creditSaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving & Linking GL Account...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>Save Credit Account & Link GL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
 

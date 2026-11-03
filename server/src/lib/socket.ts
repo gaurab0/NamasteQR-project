@@ -273,6 +273,12 @@ export const realtimeEmitter = {
   taxConfigUpdated(businessId: string, config: any) {
     emitToBusiness(businessId, 'tax_config:updated', config);
   },
+    saleCreated(businessId: string, sale: any) {
+    emitToBusiness(businessId, 'sale:created', sale);
+  },
+  cashierSessionUpdated(businessId: string, session: any) {
+    emitToBusiness(businessId, 'cashier_session:updated', session);
+  },
   businessProfileUpdated(businessId: string, business: any) {
     emitToBusiness(businessId, 'business:updated', business);
   },

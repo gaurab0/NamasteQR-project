@@ -13,7 +13,7 @@ import {
   CheckCircle2, 
   AlertCircle, 
   Download, 
-  Printer, 
+  Printer,
   Eye, 
   ExternalLink,
   ChevronDown,
@@ -143,6 +143,8 @@ export const TableManagementGrid: React.FC<TableManagementGridProps> = ({
     building: string | null;
     capacity: number;
     status: TableStatus;
+    pay_first_enabled?: boolean;
+    credit_only?: boolean;
   }) => {
     if (editingTable) {
       await rbacService.updateTableApi(editingTable.id, data, businessId);
@@ -584,11 +586,16 @@ export const TableManagementGrid: React.FC<TableManagementGridProps> = ({
                             {tbl.table_number.replace(/[^0-9A-Z]/gi, '').slice(0, 3) || 'T'}
                           </div>
                           <div>
-                            <div className="font-bold text-sm text-zinc-900 flex items-center gap-1.5">
+                            <div className="font-bold text-sm text-zinc-900 flex items-center gap-1.5 flex-wrap">
                               {tbl.table_number}
                               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-zinc-100 text-zinc-600">
                                 {tbl.capacity} Seats
                               </span>
+                              {tbl.credit_only && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
+                                  💳 Credit Only
+                                </span>
+                              )}
                             </div>
                             {tbl.last_scanned_at && (
                               <div className="text-[10px] text-zinc-400 mt-0.5">
@@ -651,9 +658,9 @@ export const TableManagementGrid: React.FC<TableManagementGridProps> = ({
                       <td className="px-5 py-4 text-center">
                         <button
                           type="button"
-                          disabled={!canManageTables || isOperating}
+                          disabled={!canManageTables || isOperating || tbl.credit_only}
                           onClick={async () => {
-                            if (!canManageTables) return;
+                            if (!canManageTables || tbl.credit_only) return;
                             try {
                               setActionLoadingId(tbl.id);
                               await rbacService.updateTableApi(tbl.id, { pay_first_enabled: !tbl.pay_first_enabled }, businessId);
@@ -664,8 +671,8 @@ export const TableManagementGrid: React.FC<TableManagementGridProps> = ({
                               setActionLoadingId(null);
                             }
                           }}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-hidden ${tbl.pay_first_enabled ? 'bg-amber-500' : 'bg-zinc-300'} ${!canManageTables || isOperating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                          title={tbl.pay_first_enabled ? "Pay First Enabled - Click to Disable" : "Pay First Disabled - Click to Enable"}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-hidden ${tbl.pay_first_enabled ? 'bg-amber-500' : 'bg-zinc-300'} ${!canManageTables || isOperating || tbl.credit_only ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                          title={tbl.credit_only ? "Pay First is mandatory for Credit Only tables" : tbl.pay_first_enabled ? "Pay First Enabled - Click to Disable" : "Pay First Disabled - Click to Enable"}
                         >
                           <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${tbl.pay_first_enabled ? 'translate-x-5' : 'translate-x-1'}`} />
                         </button>
@@ -768,6 +775,10 @@ export const TableManagementGrid: React.FC<TableManagementGridProps> = ({
           businessName={businessName}
           businessId={businessId}
           onClose={() => setQrModalTable(null)}
+          onTableUpdated={(updated) => {
+            setQrModalTable(updated);
+            setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+          }}
         />
       )}
 

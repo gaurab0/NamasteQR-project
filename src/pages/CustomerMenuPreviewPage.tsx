@@ -242,6 +242,13 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     floor?: string | null;
     building?: string | null;
     sessionId?: string | null;
+    creditOnly?: boolean;
+    creditCustomerName?: string | null;
+    creditCustomerPhone?: string | null;
+    creditPin?: string | null;
+    creditGlAccountId?: string | null;
+    creditGlAccountNumber?: string | null;
+    creditGlAccountName?: string | null;
   }>({});
 
   // Session Security & Expiration States (Option A)
@@ -710,6 +717,13 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             scannedAt: Date.now(),
             isHost: isUserHost,
             hostToken: token,
+            creditOnly: Boolean(res.table?.credit_only),
+            creditCustomerName: res.table?.credit_customer_name || null,
+            creditCustomerPhone: res.table?.credit_customer_phone || null,
+            creditPin: res.table?.credit_pin || null,
+            creditGlAccountId: res.table?.credit_gl_account_id || null,
+            creditGlAccountNumber: res.table?.credit_gl_account_number || null,
+            creditGlAccountName: res.table?.credit_gl_account_name || null,
           };
 
           try {
@@ -726,6 +740,13 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             floor: sessionPayload.floor,
             building: sessionPayload.building,
             sessionId: sessionPayload.sessionId,
+            creditOnly: sessionPayload.creditOnly,
+            creditCustomerName: sessionPayload.creditCustomerName,
+            creditCustomerPhone: sessionPayload.creditCustomerPhone,
+            creditPin: sessionPayload.creditPin,
+            creditGlAccountId: sessionPayload.creditGlAccountId,
+            creditGlAccountNumber: sessionPayload.creditGlAccountNumber,
+            creditGlAccountName: sessionPayload.creditGlAccountName,
           });
         }).catch((err) => {
           console.warn('Table check-in scan registration note:', err);
@@ -784,12 +805,31 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               floor: activeFloor,
               building: activeBuilding,
               sessionId: activeSessionId,
+              creditOnly: savedSession.creditOnly,
+              creditCustomerName: savedSession.creditCustomerName,
+              creditCustomerPhone: savedSession.creditCustomerPhone,
+              creditPin: savedSession.creditPin,
+              creditGlAccountId: savedSession.creditGlAccountId,
+              creditGlAccountNumber: savedSession.creditGlAccountNumber,
+              creditGlAccountName: savedSession.creditGlAccountName,
             });
 
             // Verify table session with backend in background
             if (activeBizId && activeTableId) {
               rbacService.getTablesApi(activeBizId).then((tables) => {
                 const table = tables.find((t) => t.id === activeTableId);
+                if (table) {
+                  setTableParams((prev) => ({
+                    ...prev,
+                    creditOnly: Boolean(table.credit_only),
+                    creditCustomerName: table.credit_customer_name || null,
+                    creditCustomerPhone: table.credit_customer_phone || null,
+                    creditPin: table.credit_pin || null,
+                    creditGlAccountId: table.credit_gl_account_id || null,
+                    creditGlAccountNumber: table.credit_gl_account_number || null,
+                    creditGlAccountName: table.credit_gl_account_name || null,
+                  }));
+                }
                 if (table && activeSessionId && table.current_session_id && table.current_session_id !== activeSessionId) {
                   sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
                   setSessionExpired(true);
@@ -2776,6 +2816,13 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           hostToken: hostToken,
           sessionId: tableParams.sessionId,
           existingOrderId: activeOrder?.id,
+          creditOnly: tableParams.creditOnly,
+          creditCustomerName: tableParams.creditCustomerName,
+          creditCustomerPhone: tableParams.creditCustomerPhone,
+          creditPin: tableParams.creditPin,
+          creditGlAccountId: tableParams.creditGlAccountId,
+          creditGlAccountNumber: tableParams.creditGlAccountNumber,
+          creditGlAccountName: tableParams.creditGlAccountName,
         }}
         isHost={isHost}
         hostToken={hostToken}

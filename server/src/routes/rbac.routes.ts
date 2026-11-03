@@ -21,6 +21,7 @@ import {
 } from '../services/tabAccess';
 import { prisma } from '../lib/prisma';
 import { realtimeEmitter } from '../lib/socket';
+import { erpService } from '../services/integrations/erpService';
 
 const router = Router();
 
@@ -713,7 +714,7 @@ router.post('/menus', authenticate, asyncHandler('RBAC_ACCESS_DENIED', async (re
       display_style,
       show_image: show_image !== undefined ? Boolean(show_image) : undefined,
       promo_badge,
-      station: station || 'KITCHEN',
+      station: (station || 'KITCHEN') as any,
       order_index: order_index !== undefined ? Number(order_index) : undefined,
       preparation_time_mins 
     },
@@ -876,7 +877,7 @@ router.post('/tables', authenticate, asyncHandler('TABLE_CREATION_FAILED', async
 
   const table = await rbacService.createTable(
     businessId,
-    { table_number: table_number.trim(), floor, building, capacity, status },
+    { ...req.body, table_number: table_number.trim() },
     user
   );
 
@@ -1000,6 +1001,32 @@ router.post('/orders', customerDiningLimiter, async (req: Request, res: Response
       order_notes: order_notes || '',
       existing_order_id: existing_order_id || existingOrderId,
       host_token: host_token || hostToken,
+    });
+
+    
+    // Auto-dispatch KOT to 3rd-party accounting software (eSafal, Swastik, IMS) asynchronously
+    erpService.dispatchKOTAsync({
+      businessId,
+      orderId: order.id,
+      orderNumber: (order as any).order_number || order.id,
+      tableNumber: table_number || (order as any).table_number || 'Table 1',
+      floor: floor || (order as any).floor,
+      building: building || (order as any).building,
+      customerName: customer_name,
+      customerPhone: customer_phone,
+      totalAmount: Number(order.total_amount || 0),
+      subtotal: Number(order.subtotal || 0),
+      createdAt: new Date().toISOString(),
+      items: (items || []).map((it: any) => ({
+        itemId: it.id || it.item_id,
+        erpItemCode: it.erp_item_code,
+        name: it.name,
+        quantity: Number(it.quantity || 1),
+        rate: Number(it.price || it.rate || 0),
+        station: it.station || 'KITCHEN',
+        total: Number((it.price || it.rate || 0) * (it.quantity || 1)),
+        notes: it.notes || it.special_instructions,
+      })),
     });
 
     return res.status(201).json({
@@ -1250,14 +1277,47 @@ router.post('/orders/:id/payment-method', customerDiningLimiter, optionalAuthent
     // This can be called unauthenticated by the guest via CustomerMenuPreviewPage/OrderSuccessModal
     const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
     const orderId = req.params.id;
-    const { payment_method } = req.body;
+    const { payment_method, pin } = req.body;
     
     if (!businessId) throw new Error("businessId required");
-    
+
+    const existingOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (!existingOrder) {
+      return res.status(404).json({ success: false, error: { code: 'ORDER_NOT_FOUND', message: 'Order not found' } });
+    }
+
+    let isPinVerified = false;
+    if (pin && (payment_method === 'CREDIT' || payment_method === 'DEDUCT_FROM_DEPOSIT')) {
+      let targetTable: any = null;
+      if (existingOrder.table_id) {
+        targetTable = await prisma.restaurantTable.findUnique({ where: { id: existingOrder.table_id } });
+      }
+      if (!targetTable && existingOrder.table_number) {
+        targetTable = await prisma.restaurantTable.findFirst({
+          where: { business_id: businessId, table_number: existingOrder.table_number },
+        });
+      }
+      const expectedPin = targetTable?.credit_pin?.trim();
+      if (!expectedPin) {
+        return res.status(400).json({ success: false, error: { message: 'No authorization PIN is configured for this table.' } });
+      }
+      if (pin.toString().trim() !== expectedPin) {
+        return res.status(400).json({ success: false, error: { message: 'Incorrect 6-digit PIN. Please enter the correct PIN for this table.' } });
+      }
+      isPinVerified = true;
+    } else if (!pin && (payment_method === 'CREDIT' || payment_method === 'DEDUCT_FROM_DEPOSIT')) {
+      isPinVerified = Boolean(existingOrder.credit_pin_verified);
+    } else {
+      isPinVerified = false;
+    }
+
     try {
       await prisma.tableOrder.updateMany({
         where: { id: orderId, business_id: businessId },
-        data: { payment_method },
+        data: {
+          payment_method,
+          credit_pin_verified: isPinVerified,
+        },
       });
     } catch (e: any) {
       console.warn('Prisma payment-method update note:', e.message);
@@ -1297,6 +1357,12 @@ router.post('/orders/:id/payment-method', customerDiningLimiter, optionalAuthent
         folio_delivered: Boolean(updated.folio_delivered),
         folio_delivered_at: updated.folio_delivered_at ? new Date(updated.folio_delivered_at) : null,
         payment_method: updated.payment_method || payment_method,
+        credit_only: Boolean(updated.credit_only),
+        credit_pin_verified: Boolean(updated.credit_pin_verified),
+        pin_verified: Boolean(updated.credit_pin_verified),
+        credit_gl_account_id: updated.credit_gl_account_id || null,
+        credit_gl_account_number: updated.credit_gl_account_number || null,
+        credit_gl_account_name: updated.credit_gl_account_name || null,
         payment_status: updated.payment_status || null,
         promo_code: updated.promo_code || null,
         promo_discount: Number(updated.promo_discount) || 0,
@@ -1317,6 +1383,90 @@ router.post('/orders/:id/payment-method', customerDiningLimiter, optionalAuthent
       success: false,
       error: { code: 'PAYMENT_METHOD_UPDATE_FAILED', message: err.message }
     });
+  }
+});
+
+router.post('/orders/:id/verify-pin', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
+  try {
+    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
+    const orderId = req.params.id;
+    const { pin, payment_method } = req.body;
+
+    if (!businessId) throw new Error('businessId required');
+    if (!pin || pin.toString().trim().length !== 6) {
+      return res.status(400).json({ success: false, error: { message: 'A 6-digit PIN is required.' } });
+    }
+
+    const order = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (!order) return res.status(404).json({ success: false, error: { message: 'Order not found.' } });
+
+    let targetTable: any = null;
+    if (order.table_id) {
+      targetTable = await prisma.restaurantTable.findUnique({ where: { id: order.table_id } });
+    }
+    if (!targetTable && order.table_number) {
+      targetTable = await prisma.restaurantTable.findFirst({
+        where: { business_id: businessId, table_number: order.table_number },
+      });
+    }
+
+    const expectedPin = targetTable?.credit_pin?.trim();
+    if (!expectedPin) {
+      return res.status(400).json({ success: false, error: { message: 'No authorization PIN is configured for this table. Please contact staff.' } });
+    }
+    if (pin.toString().trim() !== expectedPin) {
+      return res.status(400).json({ success: false, error: { message: 'Incorrect 6-digit PIN. Please enter the correct PIN for this table.' } });
+    }
+
+    const method = payment_method || order.payment_method || 'CREDIT';
+    await prisma.tableOrder.updateMany({
+      where: { id: orderId, business_id: businessId },
+      data: {
+        payment_method: method,
+        credit_pin_verified: true,
+      },
+    });
+
+    const updated = await prisma.tableOrder.findUnique({ where: { id: orderId } });
+    if (updated) {
+      const fullOrder = {
+        id: updated.id,
+        business_id: updated.business_id,
+        table_id: updated.table_id || '',
+        table_number: updated.table_number,
+        order_number: updated.order_number || undefined,
+        floor: updated.floor ?? null,
+        building: updated.building ?? null,
+        items: (updated.items as any) || [],
+        subtotal: Number(updated.subtotal) || 0,
+        tax_amount: Number(updated.tax_amount) || 0,
+        total_amount: Number(updated.total_amount) || 0,
+        currency: updated.currency || 'Rs.',
+        customer_name: updated.customer_name || 'Guest',
+        customer_phone: updated.customer_phone || '',
+        order_notes: updated.order_notes || '',
+        status: updated.status,
+        pay_first: Boolean(updated.pay_first),
+        credit_only: Boolean(updated.credit_only),
+        credit_pin_verified: true,
+        pin_verified: true,
+        credit_gl_account_id: updated.credit_gl_account_id || null,
+        credit_gl_account_number: updated.credit_gl_account_number || null,
+        credit_gl_account_name: updated.credit_gl_account_name || null,
+        payment_method: method,
+        payment_status: updated.payment_status || null,
+        session_id: updated.session_id || null,
+        created_at: new Date(updated.created_at),
+        updated_at: new Date(updated.updated_at),
+      };
+      realtimeEmitter.orderUpdated(businessId, fullOrder);
+      return res.json({ success: true, verified: true, message: 'PIN verified successfully', order: fullOrder });
+    }
+
+    realtimeEmitter.orderUpdated(businessId, { id: orderId, payment_method: method, credit_pin_verified: true, pin_verified: true });
+    return res.json({ success: true, verified: true, message: 'PIN verified successfully' });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: { message: err.message } });
   }
 });
 
@@ -1427,6 +1577,144 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
   }
 });
 
+
+// ============================================================================
+// CASHIER SHIFT SESSIONS & DRAWER FLOAT (Per-Cashier Multi-Register)
+// ============================================================================
+
+/**
+ * GET /api/rbac/cashier-session/current
+ * Fetch current cashier's register session for today (or all active sessions for manager/owner)
+ */
+router.get('/cashier-session/current', authenticate, requireResourceAccess('billing', 'read'), asyncHandler('CASHIER_SESSION_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isManagerOrOwner = (user.role as string) === 'OWNER' || (user.role as string) === 'MANAGER' || (user.role as string) === 'RESTAURANT_OWNER' || (user.role as string) === 'HOTEL_OWNER' || (user as any).isOwner;
+  const requestedCashierId = req.query.cashierId as string | undefined;
+
+  const targetCashierId = (isManagerOrOwner && requestedCashierId) ? requestedCashierId : user.id;
+
+  const session = await prisma.cashierRegisterSession.findFirst({
+    where: {
+      business_id: businessId,
+      cashier_id: targetCashierId,
+      date_string: todayStr,
+    },
+    orderBy: { opened_at: 'desc' },
+  });
+
+  return res.json({
+    success: true,
+    data: session,
+  });
+}));
+
+/**
+ * POST /api/rbac/cashier-session/open
+ * Open a cashier's individual shift drawer with an opening float
+ */
+/**
+ * GET /api/rbac/cashier-session/all
+ * Fetch all cashier shift register sessions for today
+ */
+router.get('/cashier-session/all', authenticate, requireResourceAccess('billing', 'read'), asyncHandler('CASHIER_ALL_SESSIONS_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const sessions = await prisma.cashierRegisterSession.findMany({
+    where: {
+      business_id: businessId,
+      date_string: todayStr,
+    },
+    orderBy: { opened_at: 'desc' },
+  });
+
+  return res.json({
+    success: true,
+    data: sessions,
+  });
+}));
+
+router.post('/cashier-session/open', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('CASHIER_SESSION_OPEN_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const { opening_float = 0, notes } = req.body;
+  const cashierName = (user as any).name || user.email?.split('@')[0] || 'Cashier';
+
+  const session = await prisma.cashierRegisterSession.upsert({
+    where: {
+      business_id_cashier_id_date_string: {
+        business_id: businessId,
+        cashier_id: user.id,
+        date_string: todayStr,
+      },
+    },
+    create: {
+      business_id: businessId,
+      cashier_id: user.id,
+      cashier_name: cashierName,
+      date_string: todayStr,
+      status: 'OPEN',
+      opening_float: Number(opening_float) || 0,
+      notes: notes || null,
+      opened_at: new Date(),
+    },
+    update: {
+      status: 'OPEN',
+      opening_float: Number(opening_float) || 0,
+      notes: notes || null,
+      closed_at: null,
+    },
+  });
+
+  realtimeEmitter.cashierSessionUpdated(businessId, session);
+
+  return res.json({
+    success: true,
+    data: session,
+    message: `Shift register opened with Rs. ${session.opening_float} drawer float`,
+  });
+}));
+
+/**
+ * POST /api/rbac/cashier-session/close
+ * Close a cashier's individual shift drawer
+ */
+router.post('/cashier-session/close', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('CASHIER_SESSION_CLOSE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const user = req.user!;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const { closing_cash, notes } = req.body;
+
+  const session = await prisma.cashierRegisterSession.findFirst({
+    where: {
+      business_id: businessId,
+      cashier_id: user.id,
+      date_string: todayStr,
+      status: 'OPEN',
+    },
+  });
+
+  if (!session) {
+    return res.status(404).json({ success: false, error: 'No active open shift session found for today' });
+  }
+
+  const updated = await prisma.cashierRegisterSession.update({
+    where: { id: session.id },
+    data: {
+      status: 'CLOSED',
+      closing_cash: closing_cash !== undefined ? Number(closing_cash) : null,
+      notes: notes || session.notes,
+      closed_at: new Date(),
+    },
+  });
+
+  realtimeEmitter.cashierSessionUpdated(businessId, updated);
+
+  return res.json({
+    success: true,
+    data: updated,
+    message: 'Shift register closed successfully',
+  });
+}));
+
 // ============================================================================
 // BILLING, POS SALES & TAX CONFIGURATION
 // ============================================================================
@@ -1451,6 +1739,66 @@ router.put('/tax-config', authenticate, requireResourceAccess(['settings', 'bill
     data: config,
     message: 'Tax configuration saved successfully'
   });
+}));
+
+
+// ============================================================================
+// 3RD-PARTY ACCOUNTING & ERP INTEGRATION (eSafal, Swastik, IMS, Webhooks)
+// ============================================================================
+
+/**
+ * GET /api/rbac/erp-integration
+ * Fetch configured accounting software settings (with masked API key)
+ */
+router.get('/erp-integration', authenticate, requireResourceAccess(['settings', 'billing'], 'read'), asyncHandler('ERP_CONFIG_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const config = await erpService.getIntegrationConfig(businessId);
+  const safeConfig = config ? {
+    ...config,
+    apiKey: config.apiKey ? '••••••••' + config.apiKey.slice(-4) : '',
+  } : {
+    provider: 'NONE',
+    syncKot: true,
+    syncSettlement: true,
+    isActive: false,
+  };
+  return res.json({ success: true, data: safeConfig });
+}));
+
+/**
+ * PUT /api/rbac/erp-integration
+ * Save / Update accounting integration settings
+ */
+router.put('/erp-integration', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('ERP_CONFIG_SAVE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const incoming = req.body || {};
+  if (incoming.apiKey && incoming.apiKey.startsWith('••••••••')) {
+    const existing = await erpService.getIntegrationConfig(businessId);
+    incoming.apiKey = existing?.apiKey || '';
+  }
+
+  const updated = await erpService.saveIntegrationConfig(businessId, incoming);
+  return res.json({
+    success: true,
+    data: {
+      ...updated,
+      apiKey: updated.apiKey ? '••••••••' + updated.apiKey.slice(-4) : '',
+    },
+    message: 'Accounting & ERP integration saved successfully',
+  });
+}));
+
+/**
+ * POST /api/rbac/erp-integration/test
+ * Test connection to target accounting software live
+ */
+router.post('/erp-integration/test', authenticate, requireResourceAccess(['settings', 'billing'], 'write'), asyncHandler('ERP_TEST_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+  const incoming = req.body || {};
+  if (incoming.apiKey && incoming.apiKey.startsWith('••••••••')) {
+    const existing = await erpService.getIntegrationConfig(businessId);
+    incoming.apiKey = existing?.apiKey || '';
+  }
+
+  const result = await erpService.testConnection(incoming);
+  return res.json(result);
 }));
 
 // ============================================================================
@@ -1528,6 +1876,8 @@ router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), asy
   const startDate = req.query.startDate as string | undefined;
   const endDate = req.query.endDate as string | undefined;
   const paymentMethod = req.query.paymentMethod as string | undefined;
+  const isManagerOrOwner = (req.user?.role as string) === 'OWNER' || (req.user?.role as string) === 'MANAGER' || (req.user?.role as string) === 'RESTAURANT_OWNER' || (req.user?.role as string) === 'HOTEL_OWNER' || (req.user as any)?.isOwner;
+  const cashierId = isManagerOrOwner ? (req.query.cashierId as string | undefined) : req.user?.id;
   const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
 
   const sales = await rbacService.getSales(businessId, {
@@ -1548,6 +1898,37 @@ router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), asy
 router.post('/sales', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('SALE_CREATION_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
   const saleData = req.body;
   const sale = await rbacService.createSale(businessId, saleData, req.user);
+
+  
+  // Sync official sale invoice to 3rd-party accounting software asynchronously
+  setImmediate(async () => {
+    try {
+      await erpService.syncInvoice({
+        businessId,
+        orderId: sale.id,
+        orderNumber: sale.invoice_number || sale.id,
+        tableNumber: sale.table_number || 'POS Counter',
+        customerName: sale.customer_name || 'Walk-in Guest',
+        customerPhone: sale.customer_phone || '',
+        customerPan: sale.customer_pan || (saleData as any).customer_pan || '',
+        totalAmount: Number(sale.total_amount || 0),
+        subtotal: Number(sale.subtotal || 0),
+        taxAmount: Number(sale.total_tax || (sale as any).tax_amount || 0),
+        paymentMethod: sale.payment_method || 'CASH',
+        createdAt: new Date().toISOString(),
+        items: ((saleData.items || []) as any[]).map((it: any) => ({
+          itemId: it.id || it.item_id,
+          erpItemCode: it.erp_item_code,
+          name: it.name,
+          quantity: Number(it.quantity || 1),
+          rate: Number(it.price || it.rate || 0),
+          total: Number((it.price || it.rate || 0) * (it.quantity || 1)),
+        })),
+      });
+    } catch (e) {
+      console.error('[ERP Invoice Sync] Failed:', e);
+    }
+  });
 
   return res.status(201).json({
     success: true,

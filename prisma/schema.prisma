@@ -37,6 +37,7 @@ model Business {
   current_operational_day Json?
   kds_print_mode      String   @default("DISPLAY_ONLY")
   default_language    String   @default("en")
+  erp_integration     Json?
   created_at          DateTime @default(now())
   updated_at          DateTime @updatedAt
 
@@ -52,6 +53,7 @@ model Business {
   tax_config       TaxConfig?
   operational_days OperationalDay[]
   check_ins        CheckIn[]
+  cashier_sessions CashierRegisterSession[]
 
   @@index([parent_business_id])
   @@map("businesses")
@@ -140,6 +142,7 @@ model MenuItem {
   show_image            Boolean  @default(true)
   promo_badge           String?
   station               String   @default("KITCHEN")
+  erp_item_code         String?
   order_index           Int      @default(0)
   preparation_time_mins Int?
   created_by            String?
@@ -167,6 +170,13 @@ model RestaurantTable {
   capacity           Int       @default(4)
   status             String    @default("ACTIVE") // ACTIVE, INACTIVE, OCCUPIED, RESERVED
   pay_first_enabled  Boolean   @default(false)
+  credit_only        Boolean   @default(false)
+  credit_customer_name String?
+  credit_customer_phone String?
+  credit_pin         String?
+  credit_gl_account_id String?
+  credit_gl_account_number String?
+  credit_gl_account_name String?
   qr_code_url        String?
   last_scanned_at    DateTime?
   current_session_id String?
@@ -207,6 +217,11 @@ model TableOrder {
   order_notes             String?
   status                  String    @default("PENDING") // PENDING, AWAITING_PAYMENT, RECEIVED, PREPARING, READY, SERVED, COMPLETED, CANCELLED
   pay_first               Boolean   @default(false)
+  credit_only             Boolean   @default(false)
+  credit_pin_verified     Boolean   @default(false)
+  credit_gl_account_id    String?
+  credit_gl_account_number String?
+  credit_gl_account_name  String?
   payment_confirmed_at    DateTime?
   payment_confirmed_by    String?
   sale_id                 String?
@@ -472,4 +487,30 @@ model CheckIn {
 
   @@index([business_id])
   @@map("check_ins")
+}
+
+
+// -------------------------------------------------------------
+// 10. Cashier Shifts & Drawer Float Sessions
+// -------------------------------------------------------------
+model CashierRegisterSession {
+  id            String    @id @default(cuid())
+  business_id   String
+  cashier_id    String
+  cashier_name  String
+  date_string   String    // YYYY-MM-DD
+  status        String    @default("OPEN") // OPEN, CLOSED
+  opening_float Decimal   @default(0) @db.Decimal(12, 2)
+  closing_cash  Decimal?  @db.Decimal(12, 2)
+  notes         String?
+  opened_at     DateTime  @default(now())
+  closed_at     DateTime?
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@unique([business_id, cashier_id, date_string])
+  @@index([business_id])
+  @@index([cashier_id])
+  @@index([date_string])
+  @@map("cashier_register_sessions")
 }

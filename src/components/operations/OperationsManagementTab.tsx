@@ -169,7 +169,7 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
         openedAt: new Date().toISOString(),
         openedBy: user?.id,
         openedByName: user?.name || user?.email || 'Store Staff',
-        openingFloat: parseFloat(openingFloat) || 0,
+        openingFloat: 0,
         updatedAt: new Date().toISOString(),
       };
 
@@ -617,10 +617,10 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
 
                     <div className="p-2.5 rounded-lg bg-white/90 border border-black/5 shadow-2xs">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">
-                        Starting Float
+                        Cashier Float
                       </span>
-                      <span className="font-bold text-slate-800 font-mono">
-                        Rs. {(currentDay?.openingFloat || 0).toLocaleString()}
+                      <span className="font-bold text-slate-800 text-xs">
+                        Per-Terminal (POS)
                       </span>
                     </div>
                   </div>
@@ -681,30 +681,15 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                          Opening Drawer Float
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">Rs.</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={openingFloat}
-                            onChange={(e) => setOpeningFloat(e.target.value)}
-                            placeholder="0.00"
-                            disabled={config.enabled || saving}
-                            className="w-full pl-9 pr-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-white"
-                          />
-                        </div>
-                      </div>
-
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
+                      <p className="text-[11px] text-slate-500">
+                        Cashier drawer floats are now managed individually by each cashier directly in the <strong className="text-slate-700">Finance & POS</strong> tab.
+                      </p>
                       <button
                         type="button"
                         onClick={handleDayStart}
                         disabled={config.enabled || saving}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-2 px-4 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 border border-emerald-700/30 text-xs sm:text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-2.5 px-6 rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 border border-emerald-700/30 text-xs sm:text-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                       >
                         <Play className="w-3.5 h-3.5 fill-white" />
                         <span>Start Business Day</span>

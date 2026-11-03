@@ -6,6 +6,12 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { usePrinter } from '../../contexts/PrinterContext';
 import {
   Receipt,
+  Wallet,
+  Lock,
+  Unlock,
+  Play,
+  Coins,
+  UserCheck,
   DollarSign,
   Calendar,
   Filter,
@@ -49,7 +55,8 @@ import {
   ChefHat,
   Bell,
   Activity,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck
 } from 'lucide-react';
 import { LiveStationOrdersModal } from '../dashboard/LiveStationOrdersModal';
 import { 
@@ -61,6 +68,7 @@ import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
 import {
   SaleRecord,
+  CashierRegisterSession,
   SaleItem,
   SaleTaxBreakdown,
   BusinessTaxConfig,
@@ -102,6 +110,17 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   onNavigateTab,
 }) => {
   const canSettleBill = !isViewOnly;
+  const isManagerOrOwner = activeRole === 'OWNER' || activeRole === 'MANAGER' || user?.role === 'OWNER' || user?.role === 'MANAGER' || user?.isOwner;
+
+  // Cashier Shift Register & Drawer Float States
+  const [cashierSession, setCashierSession] = useState<CashierRegisterSession | null>(null);
+  const [allCashierSessions, setAllCashierSessions] = useState<CashierRegisterSession[]>([]);
+  const [selectedCashierFilter, setSelectedCashierFilter] = useState<string>('ALL');
+  const [drawerFloatInput, setDrawerFloatInput] = useState<string>('0');
+  const [closingCashInput, setClosingCashInput] = useState<string>('');
+  const [closingNotesInput, setClosingNotesInput] = useState<string>('');
+  const [showCloseShiftModal, setShowCloseShiftModal] = useState<boolean>(false);
+  const [isSessionOperating, setIsSessionOperating] = useState<boolean>(false);
   // State
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -169,6 +188,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     loadBillingData();
   }, [business.id]);
 
+  // Reload session when cashier filter changes
+  useEffect(() => {
+    if (!business.id) return;
+    const targetCashierId = isManagerOrOwner && selectedCashierFilter !== 'ALL' ? selectedCashierFilter : user?.id;
+    if (targetCashierId) {
+      rbacService.getCurrentCashierSessionApi(targetCashierId, business.id).then(setCashierSession).catch(() => {});
+    }
+  }, [selectedCashierFilter, business.id, isManagerOrOwner, user?.id]);
+
   const showStatus = (text: string, type: 'success' | 'error' = 'success') => {
     setStatusMessage({ type, text });
     setTimeout(() => setStatusMessage(null), 4500);
@@ -215,6 +243,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       currency: d.currency || 'Rs.',
       customer_name: d.customer_name || 'Guest',
       customer_phone: d.customer_phone || '',
+      credit_only: Boolean(d.credit_only),
+      credit_pin_verified: Boolean(d.credit_pin_verified || d.pin_verified),
+      credit_gl_account_id: d.credit_gl_account_id || null,
+      credit_gl_account_number: d.credit_gl_account_number || null,
+      credit_gl_account_name: d.credit_gl_account_name || null,
       order_notes: d.order_notes || '',
       status: d.status || 'RECEIVED',
       pay_first: d.pay_first ?? false,
@@ -282,6 +315,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       setTables(tablesData || []);
       setGlAccounts(glData || []);
       if (menuData) setMenuItems(menuData || []);
+      // Load Cashier Session for Today
+      const targetCashierId = isManagerOrOwner && selectedCashierFilter !== 'ALL' ? selectedCashierFilter : user?.id;
+      if (targetCashierId) {
+        rbacService.getCurrentCashierSessionApi(targetCashierId, business.id).then(setCashierSession).catch(() => {});
+      }
+      if (isManagerOrOwner) {
+        rbacService.getAllCashierSessionsApi(business.id).then(setAllCashierSessions).catch(() => {});
+      }
+
       if (ordersData && Array.isArray(ordersData)) {
         processIncomingOrders(ordersData);
       }
@@ -504,6 +546,18 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         if (sale.payment_method !== paymentFilter) return false;
       }
 
+      // Cashier Scope: Cashiers only see their own; Owners/Managers can filter or see all
+      if (!isManagerOrOwner) {
+        const myId = user?.id;
+        const myName = (user?.name || '').toLowerCase();
+        const myEmailPrefix = (user?.email ? user.email.split('@')[0] : '').toLowerCase();
+        const saleCashierName = (sale.cashier_name || '').toLowerCase();
+        const matchesCashier = sale.cashier_id === myId || (saleCashierName && (saleCashierName === myName || saleCashierName === myEmailPrefix));
+        if (!matchesCashier) return false;
+      } else if (selectedCashierFilter !== 'ALL') {
+        if (sale.cashier_id !== selectedCashierFilter) return false;
+      }
+
       // Search Query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
@@ -519,7 +573,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
       return true;
     });
-  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery]);
+  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery, isManagerOrOwner, user, selectedCashierFilter]);
 
   // Earnings and Key Metrics Calculations
   const metrics = useMemo(() => {
@@ -570,19 +624,99 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     };
   }, [filteredSales]);
 
-  // Today's summary for POS Register View
+  // Today's summary for POS Register View (Cashier-scoped or Manager-selected)
   const todaySales = useMemo(() => {
     return sales.filter((sale) => {
       const saleDate =
         sale.date_string ||
         (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : '');
-      return saleDate === todayStr;
+      if (saleDate !== todayStr) return false;
+
+      // Cashier scope: Cashiers only see their own settled bills
+      if (!isManagerOrOwner) {
+        const myId = user?.id;
+        const myName = (user?.name || '').toLowerCase();
+        const myEmailPrefix = (user?.email ? user.email.split('@')[0] : '').toLowerCase();
+        const saleCashierName = (sale.cashier_name || '').toLowerCase();
+        const matchesCashier = sale.cashier_id === myId || (saleCashierName && (saleCashierName === myName || saleCashierName === myEmailPrefix));
+        if (!matchesCashier) return false;
+      } else if (selectedCashierFilter !== 'ALL') {
+        if (sale.cashier_id !== selectedCashierFilter) return false;
+      }
+
+      return true;
     });
-  }, [sales, todayStr]);
+  }, [sales, todayStr, isManagerOrOwner, user, selectedCashierFilter]);
 
   const todayGross = useMemo(() => {
     return todaySales.reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
   }, [todaySales]);
+
+  
+  // Dynamic list of cashiers for Manager/Owner filter
+  const availableCashiers = useMemo(() => {
+    const map = new Map<string, string>();
+    allCashierSessions.forEach((sess) => {
+      if (sess.cashier_id) map.set(sess.cashier_id, sess.cashier_name || 'Cashier');
+    });
+    sales.forEach((s) => {
+      if (s.cashier_id) {
+        map.set(s.cashier_id, s.cashier_name || 'Cashier');
+      }
+    });
+    if (user?.id) {
+      map.set(user.id, user.name || (user.email ? user.email.split('@')[0] : 'Me'));
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [allCashierSessions, sales, user]);
+
+  const isShiftOpen = cashierSession?.status === 'OPEN';
+  const currentOpeningFloat = Number(cashierSession?.opening_float) || 0;
+
+  const cashierCashCollected = useMemo(() => {
+    return todaySales
+      .filter((s) => s.payment_method === 'CASH')
+      .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
+  }, [todaySales]);
+
+  const cashierNonCashCollected = useMemo(() => {
+    return todaySales
+      .filter((s) => s.payment_method !== 'CASH')
+      .reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
+  }, [todaySales]);
+
+  const expectedDrawerBalance = currentOpeningFloat + cashierCashCollected;
+
+  const handleOpenShiftDrawer = async () => {
+    const floatNum = parseFloat(drawerFloatInput) || 0;
+    try {
+      setIsSessionOperating(true);
+      const sess = await rbacService.openCashierSessionApi(floatNum, 'Shift drawer opened', business.id);
+      setCashierSession(sess);
+      showStatus(`Shift register opened with Rs. ${sess.opening_float.toLocaleString()} drawer float!`);
+    } catch (err: any) {
+      showStatus(err.message || 'Failed to open register', 'error');
+    } finally {
+      setIsSessionOperating(false);
+    }
+  };
+
+  const handleCloseShiftDrawer = async () => {
+    const closeNum = closingCashInput ? parseFloat(closingCashInput) : undefined;
+    try {
+      setIsSessionOperating(true);
+      const sess = await rbacService.closeCashierSessionApi(closeNum, closingNotesInput, business.id);
+      setCashierSession(sess);
+      setShowCloseShiftModal(false);
+      setClosingCashInput('');
+      setClosingNotesInput('');
+      showStatus(`Shift register closed successfully! Reconciled cash: Rs. ${(sess.closing_cash || 0).toLocaleString()}`);
+    } catch (err: any) {
+      showStatus(err.message || 'Failed to close register', 'error');
+    } finally {
+      setIsSessionOperating(false);
+    }
+  };
 
   // Excel (.xlsx) Export Handler
   const handleExportToExcel = (scope: 'filtered' | 'all') => {
@@ -832,15 +966,36 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   <div key={order.id} className="bg-white p-3 rounded-xl border border-amber-200 flex flex-col gap-3 shadow-xs">
                     <div className="flex justify-between items-start">
                        <div>
-                          <div className="font-bold text-sm text-zinc-900">
-                            {order.table_number ? (order.table_number.toString().trim().toLowerCase().startsWith('table') ? order.table_number : `Table #${order.table_number}`) : 'Table'}
+                          <div className="font-bold text-sm text-zinc-900 flex items-center gap-1.5 flex-wrap">
+                            <span>{order.table_number ? (order.table_number.toString().trim().toLowerCase().startsWith('table') ? order.table_number : `Table #${order.table_number}`) : 'Table'}</span>
+                            {order.credit_only && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                                💳 Credit Only
+                              </span>
+                            )}
                           </div>
                           <div className="text-[11px] text-zinc-500 font-mono">{order.order_number || order.id.slice(0,8).toUpperCase()}</div>
+                          {(order.customer_name || order.customer_phone) && (
+                            <div className="text-xs text-zinc-700 font-semibold mt-1 flex items-center gap-1.5 flex-wrap">
+                              <span>👤 {order.customer_name || 'Guest'}</span>
+                              {order.customer_phone && <span className="text-[11px] text-zinc-400 font-mono">({order.customer_phone})</span>}
+                            </div>
+                          )}
                        </div>
                        <div className="text-right">
                           <div className="font-black text-amber-600 text-sm">{order.currency || 'Rs.'} {pfBill.grandTotal.toFixed(2)}</div>
-                          <div className="mt-0.5">
-                            {order.payment_method === 'QR_CODE' || order.payment_method === 'UPI_QR' ? (
+                          <div className="mt-1 flex flex-col items-end gap-1">
+                            {order.payment_method === 'CREDIT' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                                <CreditCard className="w-2.5 h-2.5" />
+                                Credit
+                              </span>
+                            ) : order.payment_method === 'DEDUCT_FROM_DEPOSIT' ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <Wallet className="w-2.5 h-2.5" />
+                                Deduct Deposit
+                              </span>
+                            ) : order.payment_method === 'QR_CODE' || order.payment_method === 'UPI_QR' ? (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
                                 <QrCode className="w-2.5 h-2.5" />
                                 QR Code
@@ -858,6 +1013,13 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                             ) : (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500 border border-zinc-200">
                                 Selecting...
+                              </span>
+                            )}
+
+                            {(order.credit_pin_verified || (order as any).pin_verified) && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                                <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                                PIN Verified
                               </span>
                             )}
                           </div>
@@ -880,7 +1042,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                            const cleanTableName = order.table_number ? (order.table_number.toString().trim().toLowerCase().startsWith('table') ? order.table_number : `Table #${order.table_number}`) : 'Table';
                            let method = order.payment_method;
                            if (!method || method === 'PENDING') {
-                             method = prompt(`Confirm payment for ${cleanTableName}\nEnter payment method (CASH, QR_CODE, CARD):`, 'CASH');
+                             method = prompt(`Confirm payment for ${cleanTableName}\nEnter payment method (CASH, QR_CODE, CARD, CREDIT, DEDUCT_FROM_DEPOSIT):`, 'CASH');
                              if (!method) return;
                            } else {
                              const isConfirmed = window.confirm(`Confirm ${method} payment of ${order.currency || 'Rs.'} ${pfBill.grandTotal.toFixed(2)} for ${cleanTableName}?`);
@@ -1203,6 +1365,171 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
             )}
           </div>
 
+          {/* ========================================================================= */}
+          {/* CASHIER SHIFT REGISTER & CASH DRAWER FLOAT (Per-Cashier Multi-Register)   */}
+          {/* ========================================================================= */}
+          <div className="bg-white rounded-2xl border border-zinc-200/80 p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className={`p-2.5 rounded-xl ${isShiftOpen ? 'bg-emerald-100 text-emerald-700' : 'bg-zinc-100 text-zinc-500'}`}>
+                  <Wallet className="w-5 h-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-zinc-900">
+                      {isManagerOrOwner ? 'Cashier Register & Drawer Floats' : 'My Shift Register & Cash Drawer'}
+                    </h3>
+                    {isShiftOpen ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Shift Open
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-300">
+                        <Lock className="w-3 h-3 text-zinc-400" />
+                        Register Closed
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {isManagerOrOwner
+                      ? 'Per-cashier drawer float tracking, cash collection reconciliation, and multi-terminal monitoring.'
+                      : `Live drawer float and physical cash reconciliation for ${user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier')}`}
+                  </p>
+                </div>
+              </div>
+
+              {/* Owner / Manager Cashier Filter Dropdown */}
+              {isManagerOrOwner && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-zinc-500">Filter Cashier:</label>
+                  <select
+                    value={selectedCashierFilter}
+                    onChange={(e) => setSelectedCashierFilter(e.target.value)}
+                    className="text-xs font-semibold bg-zinc-50 border border-zinc-300 rounded-xl px-3 py-1.5 text-zinc-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  >
+                    <option value="ALL">All Cashiers (Combined View)</option>
+                    {availableCashiers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.id === user?.id ? '(You)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Shift Drawer Body */}
+            {!isShiftOpen ? (
+              /* REGISTER CLOSED: PROMPT FOR OPENING FLOAT */
+              <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Unlock className="w-3.5 h-3.5 text-amber-600" />
+                    Open Shift Register for Trading
+                  </h4>
+                  <p className="text-[11px] text-amber-700">
+                    Enter your starting cash drawer float for {todayStr} to begin processing counter sales and bill settlements.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-xs font-bold text-zinc-400">Rs.</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={drawerFloatInput}
+                      onChange={(e) => setDrawerFloatInput(e.target.value)}
+                      placeholder="0.00"
+                      disabled={isSessionOperating}
+                      className="w-32 pl-9 pr-3 py-1.5 text-xs font-bold border border-amber-300 rounded-xl focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none bg-white text-zinc-800"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenShiftDrawer}
+                    disabled={isSessionOperating}
+                    className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-1.5 px-4 rounded-xl shadow-xs transition-all flex items-center gap-1.5 border border-emerald-700/30 text-xs cursor-pointer disabled:opacity-50 shrink-0"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-white" />
+                    <span>{isSessionOperating ? 'Opening...' : 'Open Shift Register'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* REGISTER OPEN: 4 METRICS TILES & CLOSE BUTTON */
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200/70">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                      Opening Drawer Float
+                    </span>
+                    <p className="text-base sm:text-lg font-black text-zinc-800 mt-0.5">
+                      {currencySymbol} {currentOpeningFloat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <span className="text-[10px] text-zinc-400">Starting cash at shift open</span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200/70">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                      Cash Collected Today
+                    </span>
+                    <p className="text-base sm:text-lg font-black text-emerald-600 mt-0.5">
+                      + {currencySymbol} {cashierCashCollected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <span className="text-[10px] text-zinc-400">From settled cash bills</span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-emerald-50/80 border border-emerald-200/90">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">
+                      Expected Drawer Cash
+                    </span>
+                    <p className="text-base sm:text-lg font-black text-emerald-900 mt-0.5">
+                      {currencySymbol} {expectedDrawerBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <span className="text-[10px] text-emerald-700">Float + Cash sales to date</span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-zinc-50 border border-zinc-200/70">
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
+                      Digital / Card Sales
+                    </span>
+                    <p className="text-base sm:text-lg font-black text-zinc-800 mt-0.5">
+                      {currencySymbol} {cashierNonCashCollected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                    <span className="text-[10px] text-zinc-400">Bank / QR / Online settlements</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-zinc-100">
+                  <div className="text-[11px] text-zinc-500">
+                    <span>Shift Opened: </span>
+                    <strong className="text-zinc-700">
+                      {cashierSession?.opened_at ? new Date(cashierSession.opened_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today'}
+                    </strong>
+                    {cashierSession?.cashier_name && (
+                      <span className="ml-2 text-zinc-400">({cashierSession.cashier_name})</span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClosingCashInput(expectedDrawerBalance.toString());
+                      setShowCloseShiftModal(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-xl transition border border-rose-200 cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Close Shift & Reconcile Drawer</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Today's POS Register Snapshot */}
           <div className="bg-white rounded-2xl border border-zinc-200/80 p-5 shadow-xs space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -1329,6 +1656,116 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
             showStatus(`Invoice #${newSale.invoice_number} generated successfully!`);
           }}
         />
+      )}
+
+      
+      {/* ========================================================================= */}
+      {/* MODAL 2.5: RECONCILE & CLOSE CASHIER SHIFT REGISTER                       */}
+      {/* ========================================================================= */}
+      {showCloseShiftModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 border border-zinc-200">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-rose-100 text-rose-700">
+                  <Lock className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm text-zinc-900">Close Cashier Shift Register</h3>
+                  <p className="text-xs text-zinc-500">Reconcile cash drawer float and settlement</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCloseShiftModal(false)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-zinc-50 rounded-xl p-3 space-y-2 text-xs border border-zinc-200/60">
+              <div className="flex justify-between text-zinc-600">
+                <span>Opening Drawer Float:</span>
+                <span className="font-bold font-mono">Rs. {currentOpeningFloat.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-zinc-600">
+                <span>Total Cash Sales Today:</span>
+                <span className="font-bold font-mono text-emerald-600">+ Rs. {cashierCashCollected.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between text-zinc-900 font-bold pt-2 border-t border-zinc-200">
+                <span>Expected Drawer Balance:</span>
+                <span className="font-mono text-emerald-700">Rs. {expectedDrawerBalance.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-700 mb-1">
+                Actual Physical Cash Counted in Drawer (Rs.)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3 top-2 text-xs font-bold text-zinc-400">Rs.</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={closingCashInput}
+                  onChange={(e) => setClosingCashInput(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full pl-9 pr-3 py-2 text-sm font-bold border border-zinc-300 rounded-xl focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                />
+              </div>
+              {closingCashInput && (
+                <div className="mt-1.5 text-xs font-bold">
+                  {parseFloat(closingCashInput) === expectedDrawerBalance ? (
+                    <span className="text-emerald-600 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" /> Drawer is perfectly balanced (0 variance)
+                    </span>
+                  ) : parseFloat(closingCashInput) > expectedDrawerBalance ? (
+                    <span className="text-amber-600">
+                      Over by Rs. {(parseFloat(closingCashInput) - expectedDrawerBalance).toLocaleString()}
+                    </span>
+                  ) : (
+                    <span className="text-rose-600">
+                      Short by Rs. {(expectedDrawerBalance - parseFloat(closingCashInput)).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-700 mb-1">
+                Closing Notes / Handover Remarks (Optional)
+              </label>
+              <textarea
+                rows={2}
+                value={closingNotesInput}
+                onChange={(e) => setClosingNotesInput(e.target.value)}
+                placeholder="Notes for handover or variance explanations..."
+                className="w-full px-3 py-2 text-xs border border-zinc-300 rounded-xl focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none resize-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+              <button
+                type="button"
+                onClick={() => setShowCloseShiftModal(false)}
+                className="px-4 py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-100 rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCloseShiftDrawer}
+                disabled={isSessionOperating}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-5 rounded-xl shadow-xs transition text-xs flex items-center gap-1.5"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>{isSessionOperating ? 'Closing...' : 'Confirm & Close Register'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ========================================================================= */}
@@ -2319,7 +2756,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       credit_gl_account_name: paymentMethod === 'CREDIT' ? creditGlAccount?.name : undefined,
       credit_gl_account_number: paymentMethod === 'CREDIT' ? creditGlAccount?.number : undefined,
       payment_status: 'PAID',
-      cashier_name: user?.email ? user.email.split('@')[0] : 'Staff',
+      cashier_name: user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier'),
+      cashier_id: user?.id,
       notes,
     };
 
@@ -2335,6 +2773,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       onSaleCreated(created);
     } catch (err: any) {
       alert(err.message || 'Failed to record sale');
+      if (err.message && err.message.includes('already been settled')) {
+        onClose();
+      }
     } finally {
       setIsSubmitting(false);
     }

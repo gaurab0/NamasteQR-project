@@ -12,7 +12,9 @@ interface TableFormModalProps {
     floor: string | null;
     building: string | null;
     capacity: number;
-    status: TableStatus; pay_first_enabled?: boolean;
+    status: TableStatus;
+    pay_first_enabled?: boolean;
+    credit_only?: boolean;
   }) => Promise<void>;
   existingFloors?: string[];
   existingBuildings?: string[];
@@ -38,6 +40,7 @@ export const TableFormModal: React.FC<TableFormModalProps> = ({
   const [capacity, setCapacity] = useState<number>(4);
   const [status, setStatus] = useState<TableStatus>('ACTIVE');
   const [payFirstEnabled, setPayFirstEnabled] = useState<boolean>(false);
+  const [creditOnly, setCreditOnly] = useState<boolean>(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -73,6 +76,8 @@ export const TableFormModal: React.FC<TableFormModalProps> = ({
 
       setCapacity(table.capacity || 4);
       setStatus(table.status || 'ACTIVE');
+      setPayFirstEnabled(Boolean(table.pay_first_enabled || table.credit_only));
+      setCreditOnly(Boolean(table.credit_only));
     } else {
       setTableNumber(`Table ${nextSuggestedNumber}`);
       setFloorOption('none');
@@ -81,6 +86,8 @@ export const TableFormModal: React.FC<TableFormModalProps> = ({
       setCustomBuilding('');
       setCapacity(4);
       setStatus('ACTIVE');
+      setPayFirstEnabled(false);
+      setCreditOnly(false);
     }
     setErrorMsg(null);
   }, [table, isOpen, nextSuggestedNumber]);
@@ -128,7 +135,8 @@ export const TableFormModal: React.FC<TableFormModalProps> = ({
         building: finalBuilding,
         capacity: Number(capacity) || 4,
         status,
-      pay_first_enabled: payFirstEnabled,
+        pay_first_enabled: creditOnly ? true : payFirstEnabled,
+        credit_only: creditOnly,
     });
       onClose();
     } catch (err: any) {
@@ -304,22 +312,62 @@ export const TableFormModal: React.FC<TableFormModalProps> = ({
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-zinc-700 mb-1.5 flex items-center gap-1.5">
-                <span className="text-zinc-500">💳</span>
-                Pay First Policy
+                <span className="text-zinc-500">📑</span>
+                Credit Only Table
               </label>
               <label className="flex items-center justify-between p-3 bg-zinc-50 border border-zinc-200 rounded-xl cursor-pointer hover:bg-zinc-100 transition">
                 <div>
-                  <div className="text-sm font-bold text-zinc-900">Require Payment First</div>
-                  <div className="text-xs text-zinc-500 mt-0.5">Orders won't go to the kitchen until the cashier confirms payment.</div>
+                  <div className="text-sm font-bold text-zinc-900">Credit Only Table</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">Orders on this table are strictly credit/deposit sales. Auto-enforces Pay First.</div>
                 </div>
-                <div className="relative inline-block w-10 shrink-0 select-none transition duration-200 ease-in">
+                <div className="relative inline-block w-10 shrink-0 select-none transition duration-200 ease-in ml-2">
                   <input
+                    id="toggle-credit-only-table"
                     type="checkbox"
-                    checked={payFirstEnabled}
-                    onChange={(e) => setPayFirstEnabled(e.target.checked)}
+                    checked={creditOnly}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setCreditOnly(next);
+                      if (next) setPayFirstEnabled(true);
+                    }}
                     className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"
                   />
-                  <label className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer ${payFirstEnabled ? 'bg-amber-500' : 'bg-zinc-300'}`}></label>
+                  <label className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer ${creditOnly ? 'bg-amber-500' : 'bg-zinc-300'}`}></label>
+                </div>
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-zinc-700 mb-1.5 flex items-center gap-1.5">
+                <span className="text-zinc-500">💳</span>
+                Pay First Policy
+              </label>
+              <label className={`flex items-center justify-between p-3 bg-zinc-50 border border-zinc-200 rounded-xl transition ${creditOnly ? 'opacity-80 cursor-not-allowed' : 'cursor-pointer hover:bg-zinc-100'}`}>
+                <div>
+                  <div className="text-sm font-bold text-zinc-900 flex items-center gap-1.5">
+                    Require Payment First
+                    {creditOnly && (
+                      <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800">
+                        Enforced
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    {creditOnly ? 'Compulsory for credit-only dining tables.' : "Orders won't go to kitchen until cashier confirms payment."}
+                  </div>
+                </div>
+                <div className="relative inline-block w-10 shrink-0 select-none transition duration-200 ease-in ml-2">
+                  <input
+                    id="toggle-pay-first-table"
+                    type="checkbox"
+                    checked={payFirstEnabled || creditOnly}
+                    disabled={creditOnly}
+                    onChange={(e) => {
+                      if (!creditOnly) setPayFirstEnabled(e.target.checked);
+                    }}
+                    className="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer"
+                  />
+                  <label className={`toggle-label block overflow-hidden h-5 rounded-full cursor-pointer ${payFirstEnabled || creditOnly ? 'bg-amber-500' : 'bg-zinc-300'}`}></label>
                 </div>
               </label>
             </div>

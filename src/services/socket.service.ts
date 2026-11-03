@@ -10,6 +10,8 @@ class RealtimeSocketService {
   private requestListeners: Set<(request: any) => void> = new Set();
   private menuListeners: Set<(data: any) => void> = new Set();
   private businessProfileListeners: Set<(data: any) => void> = new Set();
+  private salesListeners: Set<(sale: any) => void> = new Set();
+  private cashierSessionListeners: Set<(session: any) => void> = new Set();
 
   public connect(): Socket {
     if (this.socket && this.socket.connected) {
@@ -71,6 +73,14 @@ class RealtimeSocketService {
 
     this.socket.on('menu:updated', (data: any) => {
       this.menuListeners.forEach((listener) => listener(data));
+    });
+
+    this.socket.on('sale:created', (sale: any) => {
+      this.salesListeners.forEach((listener) => listener(sale));
+    });
+
+    this.socket.on('cashier_session:updated', (session: any) => {
+      this.cashierSessionListeners.forEach((listener) => listener(session));
     });
 
     this.socket.on('business:updated', (data: any) => {
@@ -167,6 +177,23 @@ class RealtimeSocketService {
     this.connect();
     return () => {
       this.menuListeners.delete(callback);
+    };
+  }
+
+  
+  public subscribeToSales(callback: (sale: any) => void): () => void {
+    this.salesListeners.add(callback);
+    this.connect();
+    return () => {
+      this.salesListeners.delete(callback);
+    };
+  }
+
+  public subscribeToCashierSessions(callback: (session: any) => void): () => void {
+    this.cashierSessionListeners.add(callback);
+    this.connect();
+    return () => {
+      this.cashierSessionListeners.delete(callback);
     };
   }
 

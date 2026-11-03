@@ -28,8 +28,11 @@ import {
   AlertCircle,
   Tag,
   AlertTriangle,
-  Trash2
-, RefreshCw } from 'lucide-react';
+  Trash2,
+  KeyRound,
+  Wallet,
+  Lock,
+  RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 
 interface OrderSuccessModalProps {
@@ -127,6 +130,37 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     description: string;
   } | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
+
+  // Credit & Deposit PIN verification state
+  const [pinInput, setPinInput] = useState('');
+  const [pinSubmitting, setPinSubmitting] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinSuccess, setPinSuccess] = useState<string | null>(null);
+
+  const handleAuthorizePin = async () => {
+    if (!liveOrder) return;
+    if (!pinInput.trim() || !/^\d{6}$/.test(pinInput.trim())) {
+      setPinError('Please enter a valid 6-digit numeric PIN.');
+      return;
+    }
+    setPinSubmitting(true);
+    setPinError(null);
+    try {
+      const currentMethod = (liveOrder.payment_method as any) || 'CREDIT';
+      await rbacService.verifyTableOrderPinApi(
+        liveOrder.id,
+        liveOrder.business_id,
+        pinInput.trim(),
+        currentMethod
+      );
+      setLiveOrder((prev) => prev ? { ...prev, payment_method: currentMethod, credit_pin_verified: true, pin_verified: true } : prev);
+      setPinSuccess('PIN verified successfully! Staff notified at cashier station.');
+    } catch (err: any) {
+      setPinError(err?.message || 'Incorrect PIN. Please check and re-enter your 6-digit authorization PIN.');
+    } finally {
+      setPinSubmitting(false);
+    }
+  };
 
   // Track previous order ID to only reset tab views when switching to a completely new order
   const prevOrderIdRef = useRef<string | null>(null);
@@ -600,7 +634,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         return {
           bg: 'bg-blue-600',
           text: 'Dishes Prepared! Waiter Notified',
-          sub: `Your order is hot and ready. The service staff is bringing it to Table #${liveOrder?.table_number || ''}`,
+          sub: '',
         };
       case 'SERVED':
       case 'COMPLETED':
@@ -663,9 +697,11 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                         {badgeInfo.text}
                       </span>
                     </div>
-                    <p className="text-[11px] text-white/90 truncate leading-tight">
-                      {badgeInfo.sub}
-                    </p>
+                    {badgeInfo.sub ? (
+                      <p className="text-[11px] text-white/90 truncate leading-tight">
+                        {badgeInfo.sub}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -778,7 +814,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                         {liveOrder.items.filter((it) => it.status === 'READY').length} of {liveOrder.items.length} items prepared & ready!
                       </div>
                       <div className="text-blue-800 text-[11px] leading-tight">
-                        The kitchen & bar have finished preparing these dishes. Waiter is bringing them to your table.
+                        The kitchen & bar have finished preparing these dishes. Waiter is assigned for delivery.
                       </div>
                     </div>
                   </div>
@@ -1019,7 +1055,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
                   <h4 className="font-bold text-zinc-900 border-b border-zinc-100 pb-2">How are you paying?</h4>
                   
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     <button 
                        onClick={() => {
                          if (!liveOrder) return;
@@ -1061,7 +1097,113 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                        </div>
                        <div className="text-[10px] sm:text-xs text-zinc-500 mt-1">Swipe at counter</div>
                     </button>
+
+                    <button 
+                       onClick={() => {
+                         if (!liveOrder) return;
+                         setPinError(null);
+                         setPinSuccess(null);
+                         setLiveOrder(prev => prev ? {...prev, payment_method: 'CREDIT'} : prev);
+                         rbacService.updateTableOrderPaymentMethodApi(liveOrder.id, liveOrder.business_id, 'CREDIT').catch(()=>{});
+                       }}
+                       className={`p-2.5 sm:p-3 rounded-xl border-2 text-left transition-all ${liveOrder?.payment_method === 'CREDIT' ? 'border-purple-600 bg-purple-50' : 'border-zinc-200 hover:border-zinc-300'}`}>
+                       <div className="font-bold text-[13px] sm:text-sm text-zinc-900 flex justify-between items-center">
+                          Credit
+                          {liveOrder?.payment_method === 'CREDIT' && <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0 ml-1" />}
+                       </div>
+                       <div className="text-[10px] sm:text-xs text-purple-700 mt-1">Table credit ledger</div>
+                    </button>
+
+                    <button 
+                       onClick={() => {
+                         if (!liveOrder) return;
+                         setPinError(null);
+                         setPinSuccess(null);
+                         setLiveOrder(prev => prev ? {...prev, payment_method: 'DEDUCT_FROM_DEPOSIT'} : prev);
+                         rbacService.updateTableOrderPaymentMethodApi(liveOrder.id, liveOrder.business_id, 'DEDUCT_FROM_DEPOSIT').catch(()=>{});
+                       }}
+                       className={`p-2.5 sm:p-3 rounded-xl border-2 text-left transition-all ${liveOrder?.payment_method === 'DEDUCT_FROM_DEPOSIT' ? 'border-emerald-600 bg-emerald-50' : 'border-zinc-200 hover:border-zinc-300'}`}>
+                       <div className="font-bold text-[13px] sm:text-sm text-zinc-900 flex justify-between items-center">
+                          Deduct Deposit
+                          {liveOrder?.payment_method === 'DEDUCT_FROM_DEPOSIT' && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 ml-1" />}
+                       </div>
+                       <div className="text-[10px] sm:text-xs text-emerald-700 mt-1">Advance deposit pool</div>
+                    </button>
                   </div>
+
+                  {(liveOrder?.payment_method === 'CREDIT' || liveOrder?.payment_method === 'DEDUCT_FROM_DEPOSIT') && (
+                    <div className="bg-purple-50/80 p-3.5 rounded-xl border border-purple-200 space-y-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center shrink-0">
+                          <KeyRound className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <h5 className="font-bold text-xs text-purple-950">
+                            {liveOrder.payment_method === 'CREDIT' ? 'Table Credit Authorization' : 'Advance Deposit Authorization'}
+                          </h5>
+                          <p className="text-[10px] text-purple-700">
+                            Enter the 6-digit PIN assigned to your table to verify this order with cashier staff.
+                          </p>
+                        </div>
+                      </div>
+
+                      {liveOrder.credit_pin_verified || (liveOrder as any).pin_verified ? (
+                        <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs text-emerald-800 font-bold">
+                          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <div>
+                            <div>🛡️ PIN Verified & Authorized</div>
+                            <div className="text-[10px] font-normal text-emerald-700">Staff POS station has received your verified badge.</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="password"
+                              maxLength={6}
+                              inputMode="numeric"
+                              value={pinInput}
+                              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              placeholder="6-digit PIN"
+                              className="w-32 px-3 py-1.5 bg-white border border-purple-300 rounded-xl text-center text-xs font-mono font-bold tracking-widest text-zinc-900 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAuthorizePin}
+                              disabled={pinSubmitting || pinInput.length !== 6}
+                              className="px-3.5 py-1.5 bg-purple-700 hover:bg-purple-800 text-white rounded-xl text-xs font-bold transition shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0 flex items-center gap-1.5"
+                            >
+                              {pinSubmitting ? (
+                                <>
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  <span>Verifying...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ShieldCheck className="w-3 h-3" />
+                                  <span>Authorize & Confirm</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {pinError && (
+                            <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center gap-1.5">
+                              <AlertCircle className="w-3 h-3 shrink-0" />
+                              <span>{pinError}</span>
+                            </div>
+                          )}
+
+                          {pinSuccess && (
+                            <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3 h-3 shrink-0" />
+                              <span>{pinSuccess}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   
                   
                   

@@ -489,6 +489,8 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
       promo_badge,
       order_index,
       preparation_time_mins,
+      station,
+      erp_item_code,
     } = req.body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -550,6 +552,8 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
         promo_badge: promo_badge ? String(promo_badge).trim() : null,
         order_index: order_index !== undefined ? Number(order_index) : 0,
         preparation_time_mins: Number(preparation_time_mins) || 15,
+        station: station || 'KITCHEN',
+        erp_item_code: erp_item_code ? String(erp_item_code).trim() : null,
         created_by: userId,
       },
     });
@@ -611,6 +615,8 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
       promo_badge,
       order_index,
       preparation_time_mins,
+      station,
+      erp_item_code,
     } = req.body;
 
     const updates: any = {};
@@ -642,6 +648,8 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
     if (show_image !== undefined) updates.show_image = Boolean(show_image);
     if (promo_badge !== undefined) updates.promo_badge = promo_badge ? String(promo_badge).trim() : null;
     if (order_index !== undefined) updates.order_index = Number(order_index);
+    if (station !== undefined) updates.station = station;
+    if (erp_item_code !== undefined) updates.erp_item_code = erp_item_code ? String(erp_item_code).trim() : null;
 
     if (status !== undefined) {
       updates.status = status;
@@ -733,6 +741,170 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
  * DELETE /api/menus/:id
  * Delete menu item from database
  */
+
+/**
+ * POST /api/menus/bulk-import
+ * Bulk import or update menu items from Excel / CSV
+ * Supports:
+ * - 'merge': Updates existing dishes by erp_item_code or name (preserves images & descriptions), creates new dishes
+ * - 'replace': Wipes existing dishes and replaces them
+ */
+router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const businessId = await resolveBusinessId(req);
+    const userId = req.user?.id || 'admin-user';
+    const { items, mode = 'merge', pricingMode = 'inclusive', taxRate = 13 } = req.body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'EMPTY_PAYLOAD', message: 'No items provided for import.' },
+      });
+    }
+
+    // 1. Fetch existing categories and items for this business
+    const existingCategories = await prisma.menuCategory.findMany({
+      where: { business_id: businessId },
+    });
+    const categoryMap = new Map<string, string>();
+    existingCategories.forEach((cat) => {
+      categoryMap.set(cat.name.trim().toLowerCase(), cat.id);
+    });
+
+    const existingItems = await prisma.menuItem.findMany({
+      where: { business_id: businessId },
+    });
+
+    // Map existing items by ERP code and lowercase trimmed name
+    const itemByErpCode = new Map<string, any>();
+    const itemByName = new Map<string, any>();
+    existingItems.forEach((it) => {
+      if (it.erp_item_code) {
+        itemByErpCode.set(String(it.erp_item_code).trim().toLowerCase(), it);
+      }
+      itemByName.set(it.name.trim().toLowerCase(), it);
+    });
+
+    // If replace mode is requested, remove existing items
+    if (mode === 'replace') {
+      await prisma.menuItem.deleteMany({ where: { business_id: businessId } });
+      itemByErpCode.clear();
+      itemByName.clear();
+    }
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    const rateMultiplier = pricingMode === 'exclusive' ? (1 + (Number(taxRate) || 0) / 100) : 1;
+
+    for (const raw of items) {
+      const rawName = String(raw.name || raw['Item Name'] || raw.ProductName || '').trim();
+      if (!rawName) continue;
+
+      const rawCode = raw.erp_item_code !== undefined && raw.erp_item_code !== null
+        ? String(raw.erp_item_code).trim()
+        : (raw.code ? String(raw.code).trim() : null);
+
+      const rawCategory = String(raw.category || raw.Group || raw.Category || 'General').trim();
+      const catKey = rawCategory.toLowerCase();
+
+      // Ensure category exists (with plural/singular tolerance)
+      let categoryId = categoryMap.get(catKey);
+      if (!categoryId && catKey.endsWith('s')) {
+        categoryId = categoryMap.get(catKey.slice(0, -1));
+      }
+      if (!categoryId && !catKey.endsWith('s')) {
+        categoryId = categoryMap.get(catKey + 's');
+      }
+      if (!categoryId && rawCategory) {
+        try {
+          const newCat = await prisma.menuCategory.create({
+            data: {
+              business_id: businessId,
+              name: rawCategory,
+              order: categoryMap.size,
+            },
+          });
+          categoryId = newCat.id;
+          categoryMap.set(catKey, newCat.id);
+        } catch (e) {
+          // In case of concurrent insert
+          const found = await prisma.menuCategory.findFirst({
+            where: { business_id: businessId, name: rawCategory },
+          });
+          if (found) {
+            categoryId = found.id;
+            categoryMap.set(catKey, found.id);
+          }
+        }
+      }
+
+      // Calculate final menu price
+      const rawPrice = Number(raw.price || raw.rate || raw.Rate || raw.BasePrice || 0);
+      const finalPrice = Math.round(rawPrice * rateMultiplier * 100) / 100;
+
+      // Routing station
+      let station = 'KITCHEN';
+      const rawStation = String(raw.station || '').toUpperCase();
+      if (rawStation.includes('BAR') && rawStation.includes('KITCHEN')) station = 'BOTH';
+      else if (rawStation.includes('BAR') || catKey.includes('beverage') || catKey.includes('drink')) station = 'BAR';
+
+      // Check if item already exists (by ERP Code first, then by exact name)
+      const existing = (rawCode ? itemByErpCode.get(rawCode.toLowerCase()) : null) || itemByName.get(rawName.toLowerCase());
+
+      if (existing && mode === 'merge') {
+        // Surgically update price and ERP code while preserving image, description, variants, etc.
+        await prisma.menuItem.update({
+          where: { id: existing.id },
+          data: {
+            price: finalPrice,
+            erp_item_code: rawCode || existing.erp_item_code,
+            station: raw.station ? station : existing.station,
+            category_id: categoryId || existing.category_id,
+            category: rawCategory || existing.category,
+          },
+        });
+        updatedCount++;
+      } else {
+        // Create new menu item
+        const docId = generateMenuDocId(rawName, businessId);
+        await prisma.menuItem.create({
+          data: {
+            id: docId,
+            business_id: businessId,
+            name: rawName,
+            category: rawCategory,
+            category_id: categoryId || null,
+            price: finalPrice,
+            currency: 'Rs.',
+            description: raw.description ? String(raw.description).trim() : '',
+            image_url: raw.image_url ? String(raw.image_url).trim() : '',
+            food_type: raw.food_type === 'veg' || raw.food_type === 'non-veg' ? raw.food_type : (catKey.includes('veg') ? 'veg' : 'none'),
+            status: 'available',
+            is_available: true,
+            has_variants: false,
+            station,
+            erp_item_code: rawCode || null,
+            created_by: userId,
+          },
+        });
+        createdCount++;
+      }
+    }
+
+    return res.json({
+      success: true,
+      data: { createdCount, updatedCount, totalProcessed: createdCount + updatedCount },
+      message: `Menu import complete: ${createdCount} created, ${updatedCount} updated.`,
+    });
+  } catch (err: any) {
+    console.error('Error during menu bulk import:', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'BULK_IMPORT_ERROR', message: err.message || 'Failed to bulk import menu' },
+    });
+  }
+});
+
 router.delete('/:id', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const itemId = req.params.id;

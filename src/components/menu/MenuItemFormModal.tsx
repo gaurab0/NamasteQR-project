@@ -52,6 +52,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const [status, setStatus] = useState<MenuStatus>('available');
   const [prepTime, setPrepTime] = useState<number | string>(15);
   const [station, setStation] = useState<KitchenStation>('KITCHEN');
+  const [erpItemCode, setErpItemCode] = useState('');
 
   const [isCreatingInlineCat, setIsCreatingInlineCat] = useState(false);
   const [newCatInlineName, setNewCatInlineName] = useState('');
@@ -117,6 +118,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setImageUrl(itemToEdit.image_url || '');
       setFoodType(itemToEdit.food_type || 'none');
       setStation((itemToEdit.station as KitchenStation) || 'KITCHEN');
+      setErpItemCode(itemToEdit.erp_item_code || '');
       setStatus(itemToEdit.status || (itemToEdit.is_available ? 'available' : 'unavailable'));
       setPrepTime(itemToEdit.preparation_time_mins || 15);
     } else {
@@ -132,6 +134,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setImageUrl('');
       setFoodType('none');
       setStation('KITCHEN');
+      setErpItemCode('');
       setStatus('available');
       setPrepTime(15);
     }
@@ -1193,6 +1196,22 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                     <span>Both</span>
                   </button>
                 </div>
+              </div>
+
+              
+              {/* Accounting & POS / ERP Item Code Mapping */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-zinc-700">Accounting / ERP Item Code</label>
+                  <span className="text-[10px] text-zinc-400 font-medium">Item ID or SKU from your accounting software</span>
+                </div>
+                <input
+                  type="text"
+                  value={erpItemCode}
+                  onChange={(e) => setErpItemCode(e.target.value)}
+                  placeholder="e.g. 101, SKU-024"
+                  className="w-full text-xs px-3 py-2 border border-zinc-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-zinc-900 bg-white font-mono"
+                />
               </div>
 
               {/* Availability Status */}

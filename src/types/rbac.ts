@@ -94,6 +94,7 @@ export interface MenuItem {
   show_image?: boolean;
   promo_badge?: string;
   station?: KitchenStation;
+  erp_item_code?: string;
   order_index?: number;
   preparation_time_mins?: number;
   created_by: string;
@@ -160,6 +161,13 @@ export interface RestaurantTable {
   capacity: number;
   status: TableStatus;
   pay_first_enabled?: boolean;
+  credit_only?: boolean;
+  credit_customer_name?: string | null;
+  credit_customer_phone?: string | null;
+  credit_pin?: string | null;
+  credit_gl_account_id?: string | null;
+  credit_gl_account_number?: string | null;
+  credit_gl_account_name?: string | null;
   assigned_waiter_ids?: string[];
   waiter_ping?: {
     active: boolean;
@@ -190,6 +198,13 @@ export interface CustomerTableSession {
   scannedAt: number;
   isHost?: boolean;
   hostToken?: string | null;
+  creditOnly?: boolean;
+  creditCustomerName?: string | null;
+  creditCustomerPhone?: string | null;
+  creditPin?: string | null;
+  creditGlAccountId?: string | null;
+  creditGlAccountNumber?: string | null;
+  creditGlAccountName?: string | null;
 }
 
 export type OrderStatus = 'PENDING' | 'AWAITING_PAYMENT' | 'RECEIVED' | 'PREPARING' | 'READY' | 'SERVED' | 'COMPLETED' | 'CANCELLED';
@@ -210,6 +225,7 @@ export interface TableOrderItem {
   category?: string;
   additional_categories?: string[];
   station?: KitchenStation;
+  erp_item_code?: string;
   status?: OrderStatus;
   ready_at?: string | Date | null;
   served_at?: string | Date | null;
@@ -237,6 +253,12 @@ export interface TableOrder {
   order_notes?: string;
   status: OrderStatus;
   pay_first?: boolean;
+  credit_only?: boolean;
+  credit_pin_verified?: boolean;
+  pin_verified?: boolean;
+  credit_gl_account_id?: string | null;
+  credit_gl_account_number?: string | null;
+  credit_gl_account_name?: string | null;
   payment_confirmed_at?: string | Date | null;
   payment_confirmed_by?: string;
   sale_id?: string;
@@ -317,7 +339,7 @@ export interface SaleItem {
 }
 
 export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'ROOM_SERVICE' | 'QUICK_POS';
-export type SalePaymentMethod = 'CASH' | 'UPI_QR' | 'CARD' | 'ONLINE' | 'ROOM_BILL' | 'SPLIT' | 'QR_CODE' | 'CREDIT';
+export type SalePaymentMethod = 'CASH' | 'UPI_QR' | 'CARD' | 'ONLINE' | 'ROOM_BILL' | 'SPLIT' | 'QR_CODE' | 'CREDIT' | 'DEDUCT_FROM_DEPOSIT';
 export type SalePaymentStatus = 'PAID' | 'REFUNDED' | 'CANCELLED';
 
 export interface SaleRecord {
@@ -355,6 +377,21 @@ export interface SaleRecord {
   date_string: string; // YYYY-MM-DD
   source?: 'POS_MANUAL' | 'QR' | string;
   dispatch_kitchen?: boolean;
+}
+
+
+export interface CashierRegisterSession {
+  id: string;
+  business_id: string;
+  cashier_id: string;
+  cashier_name: string;
+  date_string: string;
+  status: 'OPEN' | 'CLOSED';
+  opening_float: number;
+  closing_cash?: number | null;
+  notes?: string | null;
+  opened_at: string | Date;
+  closed_at?: string | Date | null;
 }
 
 export type SalesTimeFilter = 'DAY' | 'WEEK' | 'MONTH' | 'ALL' | 'CUSTOM' | 'today' | 'week' | 'month' | 'all';

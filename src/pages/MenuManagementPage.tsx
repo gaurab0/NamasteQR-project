@@ -9,10 +9,12 @@ import { CategoryManager } from '../components/menu/CategoryManager';
 import { MenuItemCard } from '../components/menu/MenuItemCard';
 import { MenuItemFormModal } from '../components/menu/MenuItemFormModal';
 import { MenuItemPreviewModal } from '../components/menu/MenuItemPreviewModal';
+import { MenuBulkImportModal } from '../components/menu/MenuBulkImportModal';
 import { DeleteConfirmationModal } from '../components/menu/DeleteConfirmationModal';
 import {
   Plus,
   Eye,
+  FileSpreadsheet,
   Search,
   UtensilsCrossed,
   Filter,
@@ -53,6 +55,7 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
 
   // Modals
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [itemToEdit, setItemToEdit] = useState<MenuItem | null>(null);
   const [previewItem, setPreviewItem] = useState<MenuItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<MenuItem | null>(null);
@@ -364,6 +367,20 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
               <span>Theme</span>
             </button>
           )}
+          
+          {canCreateMenu && (
+            <button
+              id="btn-bulk-import-excel"
+              type="button"
+              onClick={() => setIsBulkImportOpen(true)}
+              className="px-4 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold transition shadow-2xs flex items-center gap-2 cursor-pointer"
+              title="Bulk import dishes from Excel or CSV"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-purple-600" />
+              <span>Import Excel / CSV</span>
+            </button>
+          )}
+
           {canCreateMenu && (
             <button
               id="btn-add-menu-item-primary"
@@ -582,6 +599,17 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
       )}
 
       {/* Add / Edit Form Modal with Live Preview */}
+
+      <MenuBulkImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        businessId={businessId || 'maya-forest-resort'}
+        onSuccess={() => {
+          setSuccessMessage('Menu successfully updated from spreadsheet!');
+          loadData(true);
+        }}
+      />
+
       <MenuItemFormModal
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}

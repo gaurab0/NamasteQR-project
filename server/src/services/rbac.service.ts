@@ -346,6 +346,7 @@ export class RBACService {
       promo_badge?: string;
       order_index?: number;
       preparation_time_mins?: number;
+      station?: 'KITCHEN' | 'BAR' | 'BOTH' | string;
     },
     user: { id: string; role?: string; email?: string }
   ): Promise<MenuItem> {
@@ -1228,7 +1229,14 @@ export class RBACService {
         building: d.building ?? null,
         capacity: d.capacity || 4,
         status: (d.status as TableStatus) || 'ACTIVE',
-        pay_first_enabled: Boolean(d.pay_first_enabled),
+        pay_first_enabled: Boolean(d.pay_first_enabled || d.credit_only),
+        credit_only: Boolean(d.credit_only),
+        credit_customer_name: d.credit_customer_name || null,
+        credit_customer_phone: d.credit_customer_phone || null,
+        credit_pin: d.credit_pin || null,
+        credit_gl_account_id: d.credit_gl_account_id || null,
+        credit_gl_account_number: d.credit_gl_account_number || null,
+        credit_gl_account_name: d.credit_gl_account_name || null,
         qr_code_url: d.qr_code_url || '',
         last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : null,
         current_session_id: d.current_session_id || null,
@@ -1257,6 +1265,13 @@ export class RBACService {
       capacity?: number;
       status?: TableStatus;
       pay_first_enabled?: boolean;
+      credit_only?: boolean;
+      credit_customer_name?: string | null;
+      credit_customer_phone?: string | null;
+      credit_pin?: string | null;
+      credit_gl_account_id?: string | null;
+      credit_gl_account_number?: string | null;
+      credit_gl_account_name?: string | null;
     },
     user: { id: string; role?: string; email?: string }
   ): Promise<RestaurantTable> {
@@ -1265,6 +1280,7 @@ export class RBACService {
       throw new Error(access.reason || 'Permission denied: Cannot create tables');
     }
 
+    const isCreditOnly = Boolean(tableData.credit_only);
     const tableId = `tbl-${slugify(tableData.table_number)}-${crypto.randomBytes(2).toString('hex')}`;
     const newTable: RestaurantTable = {
       id: tableId,
@@ -1274,7 +1290,14 @@ export class RBACService {
       building: tableData.building?.trim() || null,
       capacity: Number(tableData.capacity) || 4,
       status: tableData.status || 'ACTIVE',
-      pay_first_enabled: Boolean(tableData.pay_first_enabled),
+      pay_first_enabled: isCreditOnly ? true : Boolean(tableData.pay_first_enabled),
+      credit_only: isCreditOnly,
+      credit_customer_name: tableData.credit_customer_name?.trim() || null,
+      credit_customer_phone: tableData.credit_customer_phone?.trim() || null,
+      credit_pin: tableData.credit_pin?.trim() || null,
+      credit_gl_account_id: tableData.credit_gl_account_id?.trim() || null,
+      credit_gl_account_number: tableData.credit_gl_account_number?.trim() || null,
+      credit_gl_account_name: tableData.credit_gl_account_name?.trim() || null,
       qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent(tableData.table_number.trim())}`,
       last_scanned_at: null,
       current_session_id: null,
@@ -1295,6 +1318,13 @@ export class RBACService {
           capacity: newTable.capacity,
           status: newTable.status,
           pay_first_enabled: newTable.pay_first_enabled,
+          credit_only: newTable.credit_only || false,
+          credit_customer_name: newTable.credit_customer_name || null,
+          credit_customer_phone: newTable.credit_customer_phone || null,
+          credit_pin: newTable.credit_pin || null,
+          credit_gl_account_id: newTable.credit_gl_account_id || null,
+          credit_gl_account_number: newTable.credit_gl_account_number || null,
+          credit_gl_account_name: newTable.credit_gl_account_name || null,
           qr_code_url: newTable.qr_code_url,
         },
         update: {
@@ -1304,6 +1334,13 @@ export class RBACService {
           capacity: newTable.capacity,
           status: newTable.status,
           pay_first_enabled: newTable.pay_first_enabled,
+          credit_only: newTable.credit_only || false,
+          credit_customer_name: newTable.credit_customer_name || null,
+          credit_customer_phone: newTable.credit_customer_phone || null,
+          credit_pin: newTable.credit_pin || null,
+          credit_gl_account_id: newTable.credit_gl_account_id || null,
+          credit_gl_account_number: newTable.credit_gl_account_number || null,
+          credit_gl_account_name: newTable.credit_gl_account_name || null,
         },
       });
     } catch (e: any) {
@@ -1353,6 +1390,18 @@ export class RBACService {
       if (updates.capacity !== undefined) tableUpdates.capacity = Number(updates.capacity);
       if (updates.status !== undefined) tableUpdates.status = updates.status;
       if (updates.pay_first_enabled !== undefined) tableUpdates.pay_first_enabled = Boolean(updates.pay_first_enabled);
+      if (updates.credit_only !== undefined) {
+        tableUpdates.credit_only = Boolean(updates.credit_only);
+        if (updates.credit_only) {
+          tableUpdates.pay_first_enabled = true;
+        }
+      }
+      if (updates.credit_customer_name !== undefined) tableUpdates.credit_customer_name = updates.credit_customer_name ? updates.credit_customer_name.trim() : null;
+      if (updates.credit_customer_phone !== undefined) tableUpdates.credit_customer_phone = updates.credit_customer_phone ? updates.credit_customer_phone.trim() : null;
+      if (updates.credit_pin !== undefined) tableUpdates.credit_pin = updates.credit_pin ? updates.credit_pin.trim() : null;
+      if (updates.credit_gl_account_id !== undefined) tableUpdates.credit_gl_account_id = updates.credit_gl_account_id ? updates.credit_gl_account_id.trim() : null;
+      if (updates.credit_gl_account_number !== undefined) tableUpdates.credit_gl_account_number = updates.credit_gl_account_number ? updates.credit_gl_account_number.trim() : null;
+      if (updates.credit_gl_account_name !== undefined) tableUpdates.credit_gl_account_name = updates.credit_gl_account_name ? updates.credit_gl_account_name.trim() : null;
 
       await prisma.restaurantTable.upsert({
         where: { id: tableId },
@@ -1364,7 +1413,14 @@ export class RBACService {
           building: updates.building ? updates.building.trim() : null,
           capacity: updates.capacity ? Number(updates.capacity) : 4,
           status: updates.status || 'ACTIVE',
-          pay_first_enabled: Boolean(updates.pay_first_enabled),
+          pay_first_enabled: updates.credit_only ? true : Boolean(updates.pay_first_enabled),
+          credit_only: Boolean(updates.credit_only),
+          credit_customer_name: updates.credit_customer_name ? updates.credit_customer_name.trim() : null,
+          credit_customer_phone: updates.credit_customer_phone ? updates.credit_customer_phone.trim() : null,
+          credit_pin: updates.credit_pin ? updates.credit_pin.trim() : null,
+          credit_gl_account_id: updates.credit_gl_account_id ? updates.credit_gl_account_id.trim() : null,
+          credit_gl_account_number: updates.credit_gl_account_number ? updates.credit_gl_account_number.trim() : null,
+          credit_gl_account_name: updates.credit_gl_account_name ? updates.credit_gl_account_name.trim() : null,
           qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent((updates.table_number || tableId).trim())}`,
         },
         update: tableUpdates,
@@ -1653,6 +1709,14 @@ export class RBACService {
           building: existingTable.building ?? null,
           capacity: existingTable.capacity || 4,
           status: 'OCCUPIED',
+          pay_first_enabled: Boolean(existingTable.pay_first_enabled || existingTable.credit_only),
+          credit_only: Boolean(existingTable.credit_only),
+          credit_customer_name: existingTable.credit_customer_name || null,
+          credit_customer_phone: existingTable.credit_customer_phone || null,
+          credit_pin: existingTable.credit_pin || null,
+          credit_gl_account_id: existingTable.credit_gl_account_id || null,
+          credit_gl_account_number: existingTable.credit_gl_account_number || null,
+          credit_gl_account_name: existingTable.credit_gl_account_name || null,
           qr_code_url: existingTable.qr_code_url || '',
           last_scanned_at: existingTable.last_scanned_at ? new Date(existingTable.last_scanned_at) : now,
           current_session_id: sessionId,
@@ -1692,6 +1756,14 @@ export class RBACService {
           building: existingTable.building ?? null,
           capacity: existingTable.capacity || 4,
           status: 'OCCUPIED',
+          pay_first_enabled: Boolean(existingTable.pay_first_enabled || existingTable.credit_only),
+          credit_only: Boolean(existingTable.credit_only),
+          credit_customer_name: existingTable.credit_customer_name || null,
+          credit_customer_phone: existingTable.credit_customer_phone || null,
+          credit_pin: existingTable.credit_pin || null,
+          credit_gl_account_id: existingTable.credit_gl_account_id || null,
+          credit_gl_account_number: existingTable.credit_gl_account_number || null,
+          credit_gl_account_name: existingTable.credit_gl_account_name || null,
           qr_code_url: existingTable.qr_code_url || '',
           last_scanned_at: now,
           current_session_id: sessionId,
@@ -2064,10 +2136,18 @@ export class RBACService {
         promo_discount: promoDiscount,
         total_amount: newTotalAmount,
         currency: existingData.currency || orderData.currency || 'Rs.',
-        customer_name: existingData.customer_name || orderData.customer_name || 'Guest',
-        customer_phone: existingData.customer_phone || orderData.customer_phone || '',
+        customer_name: existingData.customer_name || orderData.customer_name || tableDocData?.credit_customer_name || 'Guest',
+        customer_phone: existingData.customer_phone || orderData.customer_phone || tableDocData?.credit_customer_phone || '',
         order_notes: combinedNotes,
         status: updatedStatus,
+        pay_first: existingData.pay_first ?? Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only),
+        payment_status: existingData.payment_status || ((tableDocData?.pay_first_enabled || tableDocData?.credit_only) ? 'UNPAID' : null),
+        credit_only: existingData.credit_only ?? Boolean(tableDocData?.credit_only),
+        credit_pin_verified: existingData.credit_pin_verified ?? false,
+        pin_verified: existingData.pin_verified ?? false,
+        credit_gl_account_id: existingData.credit_gl_account_id || tableDocData?.credit_gl_account_id || null,
+        credit_gl_account_number: existingData.credit_gl_account_number || tableDocData?.credit_gl_account_number || null,
+        credit_gl_account_name: existingData.credit_gl_account_name || tableDocData?.credit_gl_account_name || null,
         bill_requested: false,
         ready_at: null,
         served_at: null,
@@ -2107,6 +2187,11 @@ export class RBACService {
             tax_amount: updatedOrder.tax_amount || 0,
             total_amount: updatedOrder.total_amount,
             status: updatedOrder.status,
+            pay_first: updatedOrder.pay_first || false,
+            credit_only: updatedOrder.credit_only || false,
+            credit_gl_account_id: updatedOrder.credit_gl_account_id || null,
+            credit_gl_account_number: updatedOrder.credit_gl_account_number || null,
+            credit_gl_account_name: updatedOrder.credit_gl_account_name || null,
             ready_at: null,
             served_at: null,
             bill_requested: false,
@@ -2173,12 +2258,18 @@ export class RBACService {
       taxes: computedTaxes,
       total_amount: totalAmount,
       currency: orderData.currency || 'Rs.',
-      customer_name: orderData.customer_name || 'Guest',
-      customer_phone: orderData.customer_phone || '',
+      customer_name: orderData.customer_name || tableDocData?.credit_customer_name || 'Guest',
+      customer_phone: orderData.customer_phone || tableDocData?.credit_customer_phone || '',
       order_notes: orderData.order_notes || '',
-      status: tableDocData?.pay_first_enabled ? 'AWAITING_PAYMENT' : 'RECEIVED',
-      pay_first: Boolean(tableDocData?.pay_first_enabled),
-      payment_status: tableDocData?.pay_first_enabled ? 'UNPAID' : null,
+      status: (tableDocData?.pay_first_enabled || tableDocData?.credit_only) ? 'AWAITING_PAYMENT' : 'RECEIVED',
+      pay_first: Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only),
+      payment_status: (tableDocData?.pay_first_enabled || tableDocData?.credit_only) ? 'UNPAID' : null,
+      credit_only: Boolean(tableDocData?.credit_only),
+      credit_pin_verified: false,
+      pin_verified: false,
+      credit_gl_account_id: tableDocData?.credit_gl_account_id || null,
+      credit_gl_account_number: tableDocData?.credit_gl_account_number || null,
+      credit_gl_account_name: tableDocData?.credit_gl_account_name || null,
       session_id: orderData.session_id || (tableDocData?.current_session_id || null),
       created_at: now,
       updated_at: now,
@@ -2220,6 +2311,11 @@ export class RBACService {
           status: order.status,
           pay_first: order.pay_first || false,
           payment_status: order.payment_status || null,
+          credit_only: order.credit_only || false,
+          credit_pin_verified: false,
+          credit_gl_account_id: order.credit_gl_account_id || null,
+          credit_gl_account_number: order.credit_gl_account_number || null,
+          credit_gl_account_name: order.credit_gl_account_name || null,
           session_id: order.session_id || null,
           taxes: (order.taxes as any) || [],
         },
@@ -2229,6 +2325,10 @@ export class RBACService {
           tax_amount: order.tax_amount || 0,
           total_amount: order.total_amount,
           status: order.status,
+          credit_only: order.credit_only || false,
+          credit_gl_account_id: order.credit_gl_account_id || null,
+          credit_gl_account_number: order.credit_gl_account_number || null,
+          credit_gl_account_name: order.credit_gl_account_name || null,
         },
       });
     } catch (e: any) {
@@ -2295,6 +2395,12 @@ export class RBACService {
         order_notes: d.order_notes || '',
         status: (d.status as OrderStatus) || 'RECEIVED',
         pay_first: Boolean(d.pay_first),
+        credit_only: Boolean(d.credit_only),
+        credit_pin_verified: Boolean(d.credit_pin_verified),
+        pin_verified: Boolean(d.credit_pin_verified),
+        credit_gl_account_id: d.credit_gl_account_id || null,
+        credit_gl_account_number: d.credit_gl_account_number || null,
+        credit_gl_account_name: d.credit_gl_account_name || null,
         payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
         payment_confirmed_by: d.payment_confirmed_by || null,
         sale_id: d.sale_id || null,
@@ -3564,6 +3670,7 @@ export class RBACService {
       startDate?: string;
       endDate?: string;
       paymentMethod?: string;
+      cashierId?: string;
       limit?: number;
     }
   ): Promise<SaleRecord[]> {
@@ -3577,6 +3684,9 @@ export class RBACService {
         where.date_string = {};
         if (startDay) where.date_string.gte = startDay;
         if (endDay) where.date_string.lte = endDay;
+      }
+      if (filters?.cashierId) {
+        where.cashier_id = filters.cashierId;
       }
       if (filters?.paymentMethod && filters.paymentMethod !== 'ALL') {
         where.payment_method = filters.paymentMethod;
@@ -3712,6 +3822,23 @@ export class RBACService {
     const shortRandom = Math.floor(1000 + Math.random() * 9000);
     const id = saleData.id || `sale-${timestamp}-${shortRandom}`;
 
+    // Concurrency / Race Condition Guard: First-Come First-Served Table Settlement
+    if (saleData.order_id) {
+      try {
+        const existingOrder = await prisma.tableOrder.findUnique({
+          where: { id: saleData.order_id },
+          select: { status: true, payment_status: true }
+        });
+        if (existingOrder && (existingOrder.status === 'COMPLETED' || existingOrder.payment_status === 'PAID')) {
+          const conflictErr: any = new Error('This table order has already been settled by another cashier (First-come first-served).');
+          conflictErr.statusCode = 409;
+          throw conflictErr;
+        }
+      } catch (e: any) {
+        if ((e as any).statusCode === 409) throw e;
+      }
+    }
+
     // Server-side validation for CREDIT sales
     let resolvedCreditGlName = saleData.credit_gl_account_name || null;
     let resolvedCreditGlNumber = saleData.credit_gl_account_number || null;
@@ -3789,7 +3916,7 @@ export class RBACService {
         return saleData.customer_name || 'Walk-in Guest';
       })(),
       customer_phone: saleData.customer_phone || (saleData.payment_method === 'CREDIT' ? (resolvedCreditCustomer.phone || '') : ''),
-      customer_pan: saleData.customer_pan || (saleData.payment_method === 'CREDIT' ? (resolvedCreditCustomer.pan_number || (resolvedCreditCustomer as any).pan || '') : '') || null,
+      customer_pan: saleData.customer_pan || (saleData.payment_method === 'CREDIT' ? ((resolvedCreditCustomer as any).pan_number || (resolvedCreditCustomer as any).pan || '') : '') || null,
       sale_type: saleData.sale_type || 'DINE_IN',
       items: (saleData.items || []).filter((it: any) => it && (it.name || '').trim().length > 0),
       subtotal: Number(saleData.subtotal) || 0,
@@ -3803,11 +3930,11 @@ export class RBACService {
       total_amount: Number(saleData.total_amount) || 0,
       currency: saleData.currency || taxConfig.currency || 'Rs.',
       payment_method: saleData.payment_method || 'CASH',
-      credit_gl_account_id: saleData.payment_method === 'CREDIT' ? saleData.credit_gl_account_id : null,
-      credit_gl_account_number: saleData.payment_method === 'CREDIT' ? resolvedCreditGlNumber : null,
-      credit_gl_account_name: saleData.payment_method === 'CREDIT' ? resolvedCreditGlName : null,
+      credit_gl_account_id: (saleData.payment_method === 'CREDIT' || saleData.payment_method === 'DEDUCT_FROM_DEPOSIT') ? saleData.credit_gl_account_id : null,
+      credit_gl_account_number: (saleData.payment_method === 'CREDIT' || saleData.payment_method === 'DEDUCT_FROM_DEPOSIT') ? (resolvedCreditGlNumber || saleData.credit_gl_account_number || null) : null,
+      credit_gl_account_name: (saleData.payment_method === 'CREDIT' || saleData.payment_method === 'DEDUCT_FROM_DEPOSIT') ? (resolvedCreditGlName || saleData.credit_gl_account_name || null) : null,
       payment_status: saleData.payment_status || 'PAID',
-      cashier_name: saleData.cashier_name || user?.email || 'Manager',
+      cashier_name: saleData.cashier_name || user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier'),
       cashier_id: saleData.cashier_id || user?.id || null,
       notes: saleData.notes || '',
       created_at: now.toISOString(),
@@ -4551,6 +4678,35 @@ export class RBACService {
         .reduce((acc: number, t: any) => acc + (Number(t.amount) || 0), 0) * 100
     ) / 100;
 
+    let creditGlId = order.credit_gl_account_id || null;
+    let creditGlNumber = order.credit_gl_account_number || null;
+    let creditGlName = order.credit_gl_account_name || null;
+
+    if (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') {
+      if (!creditGlId && order.table_id) {
+        try {
+          const tbl = await prisma.restaurantTable.findUnique({ where: { id: order.table_id } });
+          if (tbl?.credit_gl_account_id) {
+            creditGlId = tbl.credit_gl_account_id;
+            creditGlNumber = tbl.credit_gl_account_number;
+            creditGlName = tbl.credit_gl_account_name;
+          }
+        } catch (e) {}
+      }
+      if (!creditGlId && order.table_number) {
+        try {
+          const tbl = await prisma.restaurantTable.findFirst({
+            where: { business_id: businessId, table_number: order.table_number },
+          });
+          if (tbl?.credit_gl_account_id) {
+            creditGlId = tbl.credit_gl_account_id;
+            creditGlNumber = tbl.credit_gl_account_number;
+            creditGlName = tbl.credit_gl_account_name;
+          }
+        } catch (e) {}
+      }
+    }
+
     const salePayload = {
       order_id: orderId,
       order_number: order.order_number || undefined,
@@ -4571,9 +4727,12 @@ export class RBACService {
       total_amount: finalTotal,
       currency: order.currency || taxConfig.currency_symbol || 'Rs.',
       payment_method: paymentMethod as any,
+      credit_gl_account_id: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? creditGlId : null,
+      credit_gl_account_number: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? creditGlNumber : null,
+      credit_gl_account_name: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? creditGlName : null,
       payment_status: 'PAID',
       cashier_name: cashierName,
-      notes: notes || 'Pay-First order confirmed',
+      notes: notes || (paymentMethod === 'CREDIT' ? 'Pay-First Credit order confirmed' : paymentMethod === 'DEDUCT_FROM_DEPOSIT' ? 'Pay-First Deposit deduction confirmed' : 'Pay-First order confirmed'),
     };
     
     const createdSale = await this.createSale(businessId, salePayload as any, { id: 'system', role: 'SYSTEM' }, { skipOrderCompletion: true });
@@ -4625,9 +4784,14 @@ export class RBACService {
           promo_discount: promoDiscount,
           total_amount: finalTotal,
           payment_status: 'PAID',
+          payment_method: paymentMethod,
           payment_confirmed_at: new Date(),
           payment_confirmed_by: cashierName,
           sale_id: createdSale.id,
+          credit_only: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? Boolean(order.credit_only) : false,
+          credit_gl_account_id: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? creditGlId : null,
+          credit_gl_account_number: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? creditGlNumber : null,
+          credit_gl_account_name: (paymentMethod === 'CREDIT' || paymentMethod === 'DEDUCT_FROM_DEPOSIT') ? creditGlName : null,
           items: updatedItems as any,
         },
       });

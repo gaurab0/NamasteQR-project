@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CartItem, TableOrder } from '../../types/rbac';
 import { determineItemStation, getAllItemCategories } from '../../utils/menuUtils';
 import { 
@@ -20,7 +20,9 @@ import {
   Phone,
   User,
   AlertTriangle,
-  QrCode
+  QrCode,
+  Lock,
+  CreditCard
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -41,6 +43,13 @@ interface CustomerCartModalProps {
     sessionExpiredReason?: string | null;
     isHost?: boolean;
     hostToken?: string | null;
+    creditOnly?: boolean;
+    creditCustomerName?: string | null;
+    creditCustomerPhone?: string | null;
+    creditPin?: string | null;
+    creditGlAccountId?: string | null;
+    creditGlAccountNumber?: string | null;
+    creditGlAccountName?: string | null;
   };
   isHost?: boolean;
   hostToken?: string | null;
@@ -69,6 +78,17 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
   const [customerPhone, setCustomerPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const isCreditLocked = Boolean(tableInfo.creditOnly || tableInfo.creditCustomerName);
+
+  useEffect(() => {
+    if (tableInfo.creditCustomerName) {
+      setCustomerName(tableInfo.creditCustomerName);
+    }
+    if (tableInfo.creditCustomerPhone) {
+      setCustomerPhone(tableInfo.creditCustomerPhone);
+    }
+  }, [tableInfo.creditCustomerName, tableInfo.creditCustomerPhone]);
 
   if (!isOpen) return null;
 
@@ -132,6 +152,10 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
         existing_order_id: tableInfo.existingOrderId,
         session_id: tableInfo.sessionId || undefined,
         host_token: tableInfo.hostToken || hostTokenProp,
+        credit_only: tableInfo.creditOnly || false,
+        credit_gl_account_id: tableInfo.creditGlAccountId || undefined,
+        credit_gl_account_number: tableInfo.creditGlAccountNumber || undefined,
+        credit_gl_account_name: tableInfo.creditGlAccountName || undefined,
         items: items.map((ci) => {
           const itemCategories = getAllItemCategories(ci.menuItem);
           const station = determineItemStation(ci.menuItem);
@@ -423,37 +447,58 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                   />
                 </div>
 
+                {isCreditLocked && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 text-[11px] font-semibold">
+                    <Lock className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                    <span>Registered Credit Account (Locked for table security)</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-600 mb-0.5">
-                      Guest Name (Optional)
+                    <label className="block text-[11px] font-semibold text-zinc-600 mb-0.5 flex items-center justify-between">
+                      <span>{isCreditLocked ? 'Registered Customer' : 'Guest Name (Optional)'}</span>
+                      {isCreditLocked && <Lock className="w-3 h-3 text-purple-600" />}
                     </label>
                     <div className="relative">
-                      <User className="absolute left-2.5 top-2 w-3.5 h-3.5 text-zinc-400" />
+                      <User className={`absolute left-2.5 top-2 w-3.5 h-3.5 ${isCreditLocked ? 'text-purple-500' : 'text-zinc-400'}`} />
                       <input
                         id="order-guest-name"
                         type="text"
+                        readOnly={isCreditLocked}
+                        disabled={isCreditLocked}
                         placeholder="e.g. Sarah"
                         value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
-                        className="w-full pl-8 pr-2.5 py-1 text-xs border border-zinc-200 rounded-lg bg-zinc-50 text-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                        onChange={(e) => !isCreditLocked && setCustomerName(e.target.value)}
+                        className={`w-full pl-8 pr-2.5 py-1 text-xs border rounded-lg ${
+                          isCreditLocked
+                            ? 'bg-purple-50/60 border-purple-200 text-purple-950 font-bold cursor-not-allowed select-none'
+                            : 'bg-zinc-50 border-zinc-200 text-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-amber-500'
+                        }`}
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-600 mb-0.5">
-                      Phone Number (Optional)
+                    <label className="block text-[11px] font-semibold text-zinc-600 mb-0.5 flex items-center justify-between">
+                      <span>{isCreditLocked ? 'Registered Phone' : 'Phone Number (Optional)'}</span>
+                      {isCreditLocked && <Lock className="w-3 h-3 text-purple-600" />}
                     </label>
                     <div className="relative">
-                      <Phone className="absolute left-2.5 top-2 w-3.5 h-3.5 text-zinc-400" />
+                      <Phone className={`absolute left-2.5 top-2 w-3.5 h-3.5 ${isCreditLocked ? 'text-purple-500' : 'text-zinc-400'}`} />
                       <input
                         id="order-guest-phone"
                         type="tel"
+                        readOnly={isCreditLocked}
+                        disabled={isCreditLocked}
                         placeholder="+977 98XXXXXXXX"
                         value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        className="w-full pl-8 pr-2.5 py-1 text-xs border border-zinc-200 rounded-lg bg-zinc-50 text-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                        onChange={(e) => !isCreditLocked && setCustomerPhone(e.target.value)}
+                        className={`w-full pl-8 pr-2.5 py-1 text-xs border rounded-lg ${
+                          isCreditLocked
+                            ? 'bg-purple-50/60 border-purple-200 text-purple-950 font-bold cursor-not-allowed select-none'
+                            : 'bg-zinc-50 border-zinc-200 text-zinc-800 focus:outline-hidden focus:ring-2 focus:ring-amber-500'
+                        }`}
                       />
                     </div>
                   </div>
