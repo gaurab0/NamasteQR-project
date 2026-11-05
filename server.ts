@@ -59,8 +59,36 @@ async function startServer() {
   } else {
     console.log('📦 Serving production static build from dist/');
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+
+    // 1. Static asset server with CORS & proper cache control
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+          res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          if (filePath.endsWith('index.html')) {
+            // Prevent browsers (like Edge) from caching stale HTML pointing to old hashed CSS/JS
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+          } else if (filePath.includes('/assets/') || filePath.includes('\\assets\\')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      })
+    );
+
+    // 2. Reject missing assets with 404 (never send index.html for missing .css/.js to prevent MIME errors)
+    app.get(['/assets/*', '/*.*'], (req, res) => {
+      res.status(404).type('text/plain').send('Asset not found');
+    });
+
+    // 3. SPA catch-all fallback for HTML page routing
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

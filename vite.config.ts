@@ -3,9 +3,19 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+// Prevents Edge and strict browsers from blocking CSS via CORS policy
+function removeCrossOriginFromCss() {
+  return {
+    name: 'remove-crossorigin-from-css',
+    transformIndexHtml(html: string) {
+      return html.replace(/<link rel="stylesheet" crossorigin/g, '<link rel="stylesheet"');
+    },
+  };
+}
+
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), removeCrossOriginFromCss()],
     resolve: {
       preserveSymlinks: true,
       alias: {
