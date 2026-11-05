@@ -606,6 +606,7 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
         businessId={businessId || 'maya-forest-resort'}
         onSuccess={() => {
           setSuccessMessage('Menu successfully updated from spreadsheet!');
+          setSelectedCategory('All');
           loadData(true);
         }}
       />

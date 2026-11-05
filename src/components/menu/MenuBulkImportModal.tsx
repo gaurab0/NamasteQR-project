@@ -178,7 +178,25 @@ export const MenuBulkImportModal: React.FC<MenuBulkImportModalProps> = ({
           }
         } else {
           // Standard Column Key Detector
-          for (const row of rawJson) {
+          // Auto-detect header row index (e.g. if row 0 is a title like "7SPICES RESTAURANT MENU LIST")
+          let headerRowIdx = 0;
+          for (let r = 0; r < Math.min(raw2D.length, 10); r++) {
+            const row = raw2D[r];
+            if (!Array.isArray(row)) continue;
+            const cells = row.map(c => String(c || '').toLowerCase().trim());
+            const hasName = cells.some(c => /name|item|dish|product/i.test(c));
+            const hasPrice = cells.some(c => /price|rate|amount|cost/i.test(c));
+            if (hasName && hasPrice) {
+              headerRowIdx = r;
+              break;
+            }
+          }
+
+          const parsedRows: any[] = headerRowIdx > 0
+            ? XLSX.utils.sheet_to_json(ws, { range: headerRowIdx, defval: '' })
+            : rawJson;
+
+          for (const row of parsedRows) {
             const keys = Object.keys(row);
             
             // Find Name
@@ -451,7 +469,7 @@ export const MenuBulkImportModal: React.FC<MenuBulkImportModalProps> = ({
                     />
                     <div>
                       <span className="font-semibold text-zinc-900 block">Replace Entire Menu</span>
-                      <span className="text-[11px] text-rose-600">Deletes current dishes and re-populates strictly from file.</span>
+                      <span className="text-[11px] text-rose-600">Deletes current dishes & previous categories, re-populating fresh from file.</span>
                     </div>
                   </label>
                 </div>

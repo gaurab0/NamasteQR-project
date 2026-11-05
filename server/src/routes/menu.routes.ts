@@ -785,11 +785,26 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
       itemByName.set(it.name.trim().toLowerCase(), it);
     });
 
-    // If replace mode is requested, remove existing items
+    // If replace mode is requested, remove existing items and wipe previous categories
     if (mode === 'replace') {
       await prisma.menuItem.deleteMany({ where: { business_id: businessId } });
+      await prisma.menuCategory.deleteMany({ where: { business_id: businessId } });
+      categoryMap.clear();
       itemByErpCode.clear();
       itemByName.clear();
+
+      // Clear existing custom categoryOrder in business menu_theme_config so new categories order cleanly
+      const biz = await prisma.business.findUnique({ where: { id: businessId } });
+      if (biz && biz.menu_theme_config) {
+        const existingTheme = (biz.menu_theme_config as any) || {};
+        if (existingTheme.categoryOrder) {
+          const { categoryOrder, ...restTheme } = existingTheme;
+          await prisma.business.update({
+            where: { id: businessId },
+            data: { menu_theme_config: restTheme },
+          });
+        }
+      }
     }
 
     let createdCount = 0;
