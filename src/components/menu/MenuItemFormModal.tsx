@@ -179,8 +179,12 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   };
 
   const handleSuggestVariantPhotos = async (index: number) => {
-    const vName = variants[index].name;
-    const combinedQuery = (name + ' ' + vName).trim();
+    const vName = (variants[index].name || '').trim();
+    const parentName = name.trim();
+    // If variant already contains main keywords from parentName, don't duplicate (e.g. "Chicken Spagetti" under "Spaghetti")
+    const parentTokens = parentName.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    const hasOverlap = parentTokens.some(t => vName.toLowerCase().includes(t.slice(0, 4)));
+    const combinedQuery = hasOverlap || !parentName ? vName : `${parentName} ${vName}`.trim();
     if (!combinedQuery) return;
     
     setIsSearchingVariantImages(prev => ({ ...prev, [index]: true }));

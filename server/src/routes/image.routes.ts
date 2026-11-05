@@ -105,13 +105,47 @@ function parseGoogleImagesHtml(html: string, query: string): ImageSearchResult[]
   return results;
 }
 
+const NON_FOOD_KEYWORDS = [
+  'building', 'exterior', 'street', 'entrance', 'facade', 'storefront',
+  'hospital', 'center', 'centre', 'mall', 'hotel', 'town', 'shop',
+  'map', 'sign', 'board', 'interior', 'room', 'lobby', 'counter',
+  'door', 'road', 'parking', 'car', 'vehicle', 'person', 'people', 'staff'
+];
+
+function isFoodCandidate(title: string, url: string): boolean {
+  const text = `${title} ${url}`.toLowerCase();
+  for (const bad of NON_FOOD_KEYWORDS) {
+    if (text.includes(bad)) return false;
+  }
+  return true;
+}
+
+function cleanDishQuery(raw: string): string {
+  const words = raw.trim().split(/\s+/);
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const w of words) {
+    const norm = w.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const stem = norm.replace(/g+h?e+t+i?/g, 'spaghetti');
+    if (!seen.has(stem) && norm.length > 1) {
+      seen.add(stem);
+      deduped.push(w);
+    }
+  }
+  return deduped.join(' ');
+}
+
 /**
  * Direct Bing Image Search as secondary high-definition search engine
  */
-async function searchBingImages(query: string): Promise<ImageSearchResult[]> {
+async function searchBingImages(query: string, category?: string): Promise<ImageSearchResult[]> {
   const results: ImageSearchResult[] = [];
   try {
-    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query + ' food dish recipe')}&qft=+filterui:photo-photo&form=HDRSC2&first=1`;
+    const cleanQ = cleanDishQuery(query);
+    const catContext = (category && !/general|special menu|none|all/i.test(category)) ? ` ${category}` : '';
+    const searchQuery = `${cleanQ}${catContext} dish on plate delicious food photography -building -exterior -storefront -entrance -facade -street -hospital -mall -hotel`;
+
+    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(searchQuery)}&qft=+filterui:photo-photo&form=HDRSC2&first=1`;
     const res = await fetch(searchUrl, {
       headers: {
         'User-Agent': USER_AGENT,
@@ -133,7 +167,8 @@ async function searchBingImages(query: string): Promise<ImageSearchResult[]> {
           rawUrl.startsWith('http') &&
           !rawUrl.endsWith('.svg') &&
           !rawUrl.includes('logo') &&
-          !rawUrl.includes('icon')
+          !rawUrl.includes('icon') &&
+          isFoodCandidate(title, rawUrl)
         ) {
           results.push({
             id: `bing-${results.length + 1}`,
@@ -161,7 +196,8 @@ router.get('/search', async (req: Request, res: Response) => {
       return res.json({ results: [] });
     }
 
-    const queryKey = rawQuery.toLowerCase();
+    const rawCategory = (req.query.category as string || '').trim();
+    const queryKey = `${rawQuery.toLowerCase()}__${rawCategory.toLowerCase()}`;
     const cached = searchCache.get(queryKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       return res.json({ results: cached.results });
@@ -172,12 +208,12 @@ router.get('/search', async (req: Request, res: Response) => {
     // 1. Try Google Images directly
     const googleResults = await searchGoogleImages(rawQuery);
     if (googleResults.length > 0) {
-      results.push(...googleResults);
+      results.push(...googleResults.filter(r => isFoodCandidate(r.title, r.url)));
     }
 
     // 2. If Google returned fewer than 3, complement with Bing image results
     if (results.length < 3) {
-      const bingResults = await searchBingImages(rawQuery);
+      const bingResults = await searchBingImages(rawQuery, rawCategory);
       for (const item of bingResults) {
         if (results.length >= 4) break;
         if (!results.some(r => r.url === item.url)) {
