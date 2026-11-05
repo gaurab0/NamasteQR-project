@@ -115,11 +115,11 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   },
   {
     id: 'date_localization',
-    label: 'Business Operations',
-    shortLabel: 'Business Operations',
+    label: 'Localization',
+    shortLabel: 'Localization',
     description: 'Configure Nepali and English date & time formats for the app and billing.',
     icon: <Globe className="w-4 h-4" />,
-    badge: 'Localization',
+    badge: 'Date & Time',
     badgeColor: 'bg-orange-100 text-orange-800 border-orange-200',
   },
   {
@@ -204,6 +204,8 @@ interface BusinessConfigurationCenterProps {
   onRequestRoleSignIn?: () => void;
   onNavigate: (route: string) => void;
   initialDomain?: ConfigurationDomain;
+  onSubTabActiveChange?: (isSubTab: boolean, domain: ConfigurationDomain) => void;
+  resetToMobileListSignal?: number;
 }
 
 export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterProps> = ({
@@ -214,11 +216,30 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   onRequestRoleSignIn,
   onNavigate,
   initialDomain = 'business_profile',
+  onSubTabActiveChange,
+  resetToMobileListSignal,
 }) => {
   const { updateBusiness } = useAuth();
   const [activeDomain, setActiveDomain] = useState<ConfigurationDomain>(initialDomain);
   const [domainSearchFilter, setDomainSearchFilter] = useState('');
   const [showMobileDetail, setShowMobileDetail] = useState(false);
+
+  // Sync sub-tab active state with parent history coordinator
+  useEffect(() => {
+    const isDesktop = typeof window !== 'undefined' && window.innerWidth >= 1024;
+    if (isDesktop) {
+      onSubTabActiveChange?.(true, activeDomain);
+    } else {
+      onSubTabActiveChange?.(showMobileDetail, activeDomain);
+    }
+  }, [activeDomain, showMobileDetail, onSubTabActiveChange]);
+
+  // Reset mobile detail screen back to sections list on external signal
+  useEffect(() => {
+    if (resetToMobileListSignal) {
+      setShowMobileDetail(false);
+    }
+  }, [resetToMobileListSignal]);
 
   const businessId = business?.id || user?.business?.id || 'default-biz';
   const [businessProfile, setBusinessProfile] = useState<Business>(business as Business);
@@ -493,7 +514,6 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
     tagline: business?.tagline || '',
     location: business?.location || '',
     address: business?.address || '',
-    kitchen_hours: business?.kitchen_hours || '',
     phone: business?.phone || phoneE164 || '',
   });
   const [savingBizProfile, setSavingBizProfile] = useState(false);
@@ -514,7 +534,6 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
         tagline: bizForm.tagline.trim(),
         location: bizForm.location.trim(),
         address: bizForm.address.trim(),
-        kitchen_hours: bizForm.kitchen_hours.trim(),
         phone: bizForm.phone.trim(),
       }, businessId);
 
@@ -525,7 +544,6 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
         tagline: updated.tagline,
         location: updated.location !== undefined ? updated.location : bizForm.location.trim(),
         address: updated.address !== undefined ? updated.address : bizForm.address.trim(),
-        kitchen_hours: updated.kitchen_hours,
         phone: updated.phone,
       };
       setBusinessProfile(freshBiz);
@@ -689,6 +707,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                   onClick={() => {
                     setActiveDomain(opt.id);
                     setShowMobileDetail(true);
+                    onSubTabActiveChange?.(true, opt.id);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
                   className={`w-full text-left p-3 rounded-2xl transition-all cursor-pointer flex items-center justify-between gap-3 border ${
@@ -743,7 +762,10 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
               <button
                 type="button"
                 id="btn-mobile-back-to-sections"
-                onClick={() => setShowMobileDetail(false)}
+                onClick={() => {
+                  setShowMobileDetail(false);
+                  onSubTabActiveChange?.(false, activeDomain);
+                }}
                 className="inline-flex items-center gap-1.5 text-xs font-bold text-zinc-800 hover:text-amber-800 bg-zinc-100 hover:bg-zinc-200 active:scale-95 px-3 py-2 rounded-xl transition-all cursor-pointer shadow-2xs"
               >
                 <ArrowLeft className="w-4 h-4 text-zinc-700" />
@@ -768,6 +790,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                     type="button"
                     onClick={() => {
                       setActiveDomain(opt.id);
+                      onSubTabActiveChange?.(true, opt.id);
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
                     className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs ${
@@ -789,7 +812,10 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
             <div className="flex items-center gap-3.5">
               <button
                 type="button"
-                onClick={() => setShowMobileDetail(false)}
+                onClick={() => {
+                  setShowMobileDetail(false);
+                  onSubTabActiveChange?.(false, activeDomain);
+                }}
                 className="lg:hidden w-10 h-10 rounded-2xl bg-zinc-100 hover:bg-zinc-200 text-zinc-700 flex items-center justify-center shrink-0 cursor-pointer active:scale-95 transition shadow-2xs"
                 title="Back to all configuration sections"
                 aria-label="Back to all configuration sections"
@@ -1389,23 +1415,6 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                       />
                       <p className="text-[11px] text-zinc-500 mt-1">
                         Specific indoor or outdoor dining zone within the facility.
-                      </p>
-                    </div>
-
-                    {/* Kitchen / Open Hours */}
-                    <div>
-                      <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1.5">
-                        Kitchen & Service Operating Hours
-                      </label>
-                      <input
-                        type="text"
-                        value={bizForm.kitchen_hours}
-                        onChange={(e) => setBizForm({ ...bizForm, kitchen_hours: e.target.value })}
-                        placeholder="e.g., 07:30 AM – 10:30 PM"
-                        className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
-                      />
-                      <p className="text-[11px] text-zinc-500 mt-1">
-                        Accurate kitchen opening and ordering hours for your guests.
                       </p>
                     </div>
 

@@ -112,6 +112,78 @@ export function createApp() {
     });
   });
 
+  // Short URL Table Router: e.g. /t/tbl-cabin-901-floor-9-6fcf or /t/1
+  app.get('/t/:tableId', async (req, res, next) => {
+    try {
+      const { tableId } = req.params;
+      if (!tableId) return next();
+
+      const { prisma } = await import('./lib/prisma');
+      let table = await prisma.restaurantTable.findUnique({
+        where: { id: tableId },
+      });
+
+      if (!table) {
+        table = await prisma.restaurantTable.findFirst({
+          where: {
+            OR: [
+              { table_number: tableId },
+              { id: { contains: tableId, mode: 'insensitive' } },
+            ],
+          },
+        });
+      }
+
+      if (!table) {
+        return res.redirect('/menu');
+      }
+
+      const query = new URLSearchParams({
+        businessId: table.business_id,
+        tableId: table.id,
+        tableNumber: table.table_number,
+      });
+      if (table.floor) query.set('floor', table.floor);
+      if (table.building) query.set('building', table.building);
+
+      return res.redirect(302, `/menu?${query.toString()}`);
+    } catch {
+      return res.redirect('/menu');
+    }
+  });
+
+  // Short URL Table Router with business: e.g. /t/7-spices/1 or /t/7-spices/Cabin-901
+  app.get('/t/:businessId/:tableNumber', async (req, res, next) => {
+    try {
+      const { businessId, tableNumber } = req.params;
+      if (!businessId || !tableNumber) return next();
+
+      const { prisma } = await import('./lib/prisma');
+      const table = await prisma.restaurantTable.findFirst({
+        where: {
+          business_id: businessId,
+          table_number: { equals: tableNumber, mode: 'insensitive' },
+        },
+      });
+
+      if (!table) {
+        return res.redirect(`/menu?businessId=${encodeURIComponent(businessId)}`);
+      }
+
+      const query = new URLSearchParams({
+        businessId: table.business_id,
+        tableId: table.id,
+        tableNumber: table.table_number,
+      });
+      if (table.floor) query.set('floor', table.floor);
+      if (table.building) query.set('building', table.building);
+
+      return res.redirect(302, `/menu?${query.toString()}`);
+    } catch {
+      return res.redirect('/menu');
+    }
+  });
+
   // 7. Mount Routes
   app.use('/api/auth', authRoutes);
   app.use('/api/rbac', rbacRoutes);

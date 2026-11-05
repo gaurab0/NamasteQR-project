@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { authApi } from '../api/authApi';
@@ -48,7 +48,7 @@ import { canAccessTab, getFirstPermittedTab, isBusinessOwner } from '../utils/ta
 import { UserProfileModal } from '../components/profile/UserProfileModal';
 import { AddBranchModal } from '../components/franchise/AddBranchModal';
 import { FranchiseBranchList } from '../components/franchise/FranchiseBranchList';
-import { BusinessConfigurationCenter } from '../components/config/BusinessConfigurationCenter';
+import { BusinessConfigurationCenter, ConfigurationDomain } from '../components/config/BusinessConfigurationCenter';
 import { Sidebar, DashboardTab } from '../components/layout/Sidebar';
 import { OperationsOverviewDashboard } from '../components/dashboard/OperationsOverviewDashboard';
 import { OperationsManagementTab } from '../components/operations/OperationsManagementTab';
@@ -79,12 +79,80 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   const { user, logout, updateBusiness, activeBusiness } = useAuth();
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [operationsSubTab, setOperationsSubTab] = useState<'shift' | 'records' | 'gl_accounts'>('shift');
+  const isSubTabActiveRef = useRef(false);
+  const activeTabRef = useRef<DashboardTab>(activeTab);
+  activeTabRef.current = activeTab;
+  const isExitingRef = useRef(false);
+  const [mobileSettingsResetSignal, setMobileSettingsResetSignal] = useState(0);
+
+  // Central tab changer that synchronizes history trap state
+  const handleTabChange = useCallback((newTab: DashboardTab) => {
+    setActiveTab(newTab);
+    if (newTab !== 'configurations') {
+      isSubTabActiveRef.current = false;
+      if (window.history.state?.serveflow_trap === 'subtab') {
+        window.history.replaceState({ serveflow_trap: 'main', tab: newTab }, '', window.location.href);
+      }
+    }
+  }, []);
+
+  const handleSettingsSubTabActiveChange = useCallback((isSubTab: boolean, domain: ConfigurationDomain) => {
+    isSubTabActiveRef.current = isSubTab;
+    if (isSubTab) {
+      if (window.history.state?.serveflow_trap !== 'subtab') {
+        window.history.pushState({ serveflow_trap: 'subtab', tab: 'configurations', domain }, '', window.location.href);
+      } else {
+        window.history.replaceState({ serveflow_trap: 'subtab', tab: 'configurations', domain }, '', window.location.href);
+      }
+    } else {
+      if (window.history.state?.serveflow_trap === 'subtab') {
+        window.history.replaceState({ serveflow_trap: 'main', tab: 'configurations' }, '', window.location.href);
+      }
+    }
+  }, []);
+
+  // Initialize and maintain browser history trap for Back navigation
+  useEffect(() => {
+    if (!window.history.state?.serveflow_trap) {
+      window.history.replaceState({ serveflow_trap: 'base' }, '', window.location.href);
+      window.history.pushState({ serveflow_trap: 'main', tab: activeTabRef.current }, '', window.location.href);
+    }
+
+    const handlePopState = () => {
+      if (isExitingRef.current) return;
+
+      // 1. In settings tab (mobile & desktop), if user navigates to any sub tab,
+      // default back MUST be the dashboard overview.
+      if (isSubTabActiveRef.current) {
+        isSubTabActiveRef.current = false;
+        setMobileSettingsResetSignal((prev) => prev + 1);
+        setActiveTab('overview');
+        window.history.replaceState({ serveflow_trap: 'main', tab: 'overview' }, '', window.location.href);
+        return;
+      }
+
+      // 2. When clicking the back button from main tabs (side nav bar),
+      // re-push the trap state so the app does not unload, and prompt for confirmation.
+      window.history.pushState({ serveflow_trap: 'main', tab: activeTabRef.current }, '', window.location.href);
+
+      const confirmed = window.confirm('Are you sure you want to exit the application?');
+      if (confirmed) {
+        isExitingRef.current = true;
+        window.history.go(-2);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
 
   const handleNavigateTab = (tab: DashboardTab | string, subTab?: 'shift' | 'records' | 'gl_accounts') => {
     let targetTab: DashboardTab = tab as DashboardTab;
     if ((tab as string) === 'tables') targetTab = 'checkins';
     if ((tab as string) === 'orders') targetTab = 'kds';
-    setActiveTab(targetTab);
+    handleTabChange(targetTab);
     if (subTab) {
       setOperationsSubTab(subTab);
     }
@@ -132,7 +200,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
     tagline: effectiveBusiness?.tagline || '',
     location: effectiveBusiness?.location || '',
     address: effectiveBusiness?.address || '',
-    kitchen_hours: effectiveBusiness?.kitchen_hours || '',
     phone: effectiveBusiness?.phone || user?.phone?.e164 || '',
   });
   const [savingBusiness, setSavingBusiness] = useState(false);
@@ -158,7 +225,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         tagline: user.business.tagline || 'Authentic Cuisine • Prepared Fresh to Order',
         location: user.business.location !== undefined ? user.business.location : 'Main Dining & Service Area',
         address: user.business.address || '',
-        kitchen_hours: user.business.kitchen_hours || '07:30 AM – 10:30 PM',
         phone: user.business.phone || user.phone?.e164 || '',
       });
     }
@@ -176,7 +242,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             tagline: fresh.tagline || 'Authentic Cuisine • Prepared Fresh to Order',
             location: fresh.location !== undefined ? fresh.location : 'Main Dining & Service Area',
             address: fresh.address || '',
-            kitchen_hours: fresh.kitchen_hours || '07:30 AM – 10:30 PM',
             phone: fresh.phone || user.phone?.e164 || '',
           });
         }
@@ -467,7 +532,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         tagline: bizForm.tagline.trim(),
         location: bizForm.location.trim(),
         address: bizForm.address.trim(),
-        kitchen_hours: bizForm.kitchen_hours.trim(),
         phone: bizForm.phone.trim(),
       }, businessId);
       updateBusiness({
@@ -478,7 +542,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         tagline: bizForm.tagline.trim(),
         location: bizForm.location.trim(),
         address: bizForm.address.trim(),
-        kitchen_hours: bizForm.kitchen_hours.trim(),
         phone: bizForm.phone.trim(),
       });
       setBizSaveSuccess('Business profile and live customer menu configuration updated successfully!');
@@ -498,7 +561,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         <Sidebar
           activeTab={activeTab}
           onSelectTab={(tab) => {
-            setActiveTab(tab);
+            handleTabChange(tab);
           }}
           isCollapsed={isCollapsed}
           onToggleCollapse={() => {
@@ -527,7 +590,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             <Sidebar
               activeTab={activeTab}
               onSelectTab={(tab) => {
-                setActiveTab(tab);
+                handleTabChange(tab);
                 setIsMobileMenuOpen(false);
               }}
               isCollapsed={false}
@@ -858,8 +921,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
               activeRole={staffSession?.role || user.role}
               isViewOnly={isViewOnly}
               onRequestRoleSignIn={() => setIsRoleModalOpen(true)}
-              onNavigate={onNavigate}
-              />
+              onNavigate={(route) => {
+                isExitingRef.current = true;
+                onNavigate(route);
+              }}
+              onSubTabActiveChange={handleSettingsSubTabActiveChange}
+              resetToMobileListSignal={mobileSettingsResetSignal}
+            />
           )}
 
           {/* Business Details & Profile Tab */}
@@ -1031,18 +1099,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                         />
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1.5">
-                          Operating / Kitchen Hours
-                        </label>
-                        <input
-                          type="text"
-                          value={bizForm.kitchen_hours}
-                          onChange={(e) => setBizForm({ ...bizForm, kitchen_hours: e.target.value })}
-                          placeholder="e.g., 07:30 AM – 10:30 PM"
-                          className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
-                        />
-                      </div>
+                      
 
                       <div>
                         <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1.5">
@@ -1140,15 +1197,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                         </div>
                       </div>
 
-                      <div className="p-4 rounded-xl bg-zinc-50/70 border border-zinc-100">
-                        <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
-                          Kitchen & Service Hours
-                        </label>
-                        <div className="text-xs font-semibold text-zinc-800 mt-1 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                          <span>{user.business?.kitchen_hours || '07:30 AM – 10:30 PM'}</span>
-                        </div>
-                      </div>
+                      
 
                       <div className="p-4 rounded-xl bg-zinc-50/70 border border-zinc-100">
                         <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
@@ -1208,15 +1257,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
         initialTab={stationModalTab}
         onNavigateToKDS={() => {
           setIsStationModalOpen(false);
-          setActiveTab('kds');
+          handleTabChange('kds');
         }}
         onNavigateToWaiter={() => {
           setIsStationModalOpen(false);
-          setActiveTab('waiter');
+          handleTabChange('waiter');
         }}
         onNavigateToTables={() => {
           setIsStationModalOpen(false);
-          setActiveTab('checkins');
+          handleTabChange('checkins');
         }}
         currency={user?.business?.currency || 'Rs.'}
       />

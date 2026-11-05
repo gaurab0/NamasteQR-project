@@ -95,6 +95,7 @@ function AppContent() {
     if (isLoading) return;
 
     const basePath = currentPath.split('?')[0];
+    if (basePath.startsWith('/t/')) return;
     if (!isAuthenticated && (basePath.startsWith('/dashboard') || basePath.startsWith('/menu-management'))) {
       navigate('/login');
     } else if (isAuthenticated && (basePath === '/login' || basePath === '/signup')) {
@@ -102,7 +103,10 @@ function AppContent() {
     }
   }, [isAuthenticated, isLoading, currentPath]);
 
-  const isCustomerMenuRoute = currentPath.startsWith('/menu') || currentPath.startsWith('/menu-preview');
+  const isCustomerMenuRoute =
+    currentPath.startsWith('/menu') ||
+    currentPath.startsWith('/menu-preview') ||
+    currentPath.startsWith('/t/');
   const isDashboardRoute = currentPath.startsWith('/dashboard');
 
   // Prevent Google Translate from translating admin/staff routes
@@ -152,6 +156,11 @@ function AppContent() {
   // Render matching view with strict synchronous route protection
   const renderCurrentView = () => {
     const basePath = currentPath.split('?')[0];
+
+    // Short table QR URL (/t/:tableId)
+    if (basePath.startsWith('/t/')) {
+      return <CustomerMenuPreviewPage onNavigate={navigate} />;
+    }
 
     // 1. GUEST LOCK: If an UNAUTHENTICATED customer is dining at a table or active in customer mode, lock strictly to /menu (prevent accidental backdoors into admin or auth)
     const isGuestCustomerSession = !isAuthenticated && Boolean(

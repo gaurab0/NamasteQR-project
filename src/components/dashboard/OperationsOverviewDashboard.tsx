@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -148,6 +148,191 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
       customerCount: Object.keys(customerMap).length || 0,
     };
   }, [sales]);
+
+  // Hover & Touch Tracing state
+  const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; date: string; revenue: number; orders: number } | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const touchTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (touchTimeoutRef.current) clearTimeout(touchTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    setHoveredPoint(null);
+  }, [timeFilter]);
+
+  // Aggregate Time-Series Data for Spline
+  const chartPointsData = useMemo(() => {
+    const now = new Date();
+    let minTime = new Date(now).setHours(0, 0, 0, 0);
+    let maxTime = new Date(now).setHours(23, 59, 59, 999);
+    let bucketCount = 10;
+
+    if (timeFilter === 'week') {
+      minTime = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+      maxTime = now.getTime();
+      bucketCount = 8;
+    } else if (timeFilter === 'month') {
+      minTime = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+      maxTime = now.getTime();
+      bucketCount = 12;
+    }
+
+    const bucketSize = (maxTime - minTime) / bucketCount;
+    const buckets = Array.from({ length: bucketCount }, (_, i) => {
+      const bStartTime = minTime + i * bucketSize;
+      const bEndTime = bStartTime + bucketSize;
+      const midTime = new Date(bStartTime + bucketSize / 2);
+
+      let dateLabel = '';
+      if (timeFilter === 'today') {
+        dateLabel = midTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      } else {
+        dateLabel = midTime.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      }
+
+      return {
+        startTime: bStartTime,
+        endTime: bEndTime,
+        date: dateLabel,
+        revenue: 0,
+        orders: 0,
+      };
+    });
+
+    filteredSales.forEach((s) => {
+      const t = new Date(s.created_at).getTime();
+      if (t >= minTime && t <= maxTime) {
+        let idx = Math.floor((t - minTime) / bucketSize);
+        if (idx >= bucketCount) idx = bucketCount - 1;
+        if (idx >= 0 && buckets[idx]) {
+          buckets[idx].revenue += Number(s.total_amount || (s as any).grand_total) || 0;
+          buckets[idx].orders += 1;
+        }
+      }
+    });
+
+    return buckets;
+  }, [filteredSales, timeFilter]);
+
+  // SVG Coordinates & Usable Dimensions
+  const svgWidth = 600;
+  const svgHeight = 200;
+  const padTop = 18;
+  const padBottom = 26;
+  const padLeft = 52;
+  const padRight = 16;
+  const usableWidth = svgWidth - padLeft - padRight;
+  const usableHeight = svgHeight - padTop - padBottom;
+
+  const maxRevenue = Math.max(...chartPointsData.map((d) => d.revenue), 100) * 1.15;
+  const roundedMax = Math.ceil(maxRevenue / 100) * 100;
+
+  // Format compact numbers for Y-axis scale markers
+  const formatCompactVal = (num: number) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${Math.round(num / 1000)}k`;
+    return `${Math.round(num)}`;
+  };
+
+  const yTicks = [
+    { y: padTop, label: formatCompactVal(roundedMax) },
+    { y: padTop + usableHeight * 0.25, label: formatCompactVal(roundedMax * 0.75) },
+    { y: padTop + usableHeight * 0.5, label: formatCompactVal(roundedMax * 0.5) },
+    { y: padTop + usableHeight * 0.75, label: formatCompactVal(roundedMax * 0.25) },
+    { y: svgHeight - padBottom, label: '0' },
+  ];
+
+  const points = useMemo(() => {
+    const n = chartPointsData.length;
+    if (n === 0) return [];
+
+    return chartPointsData.map((item, i) => {
+      const x = n > 1 ? padLeft + (i / (n - 1)) * usableWidth : padLeft + usableWidth / 2;
+      const y = svgHeight - padBottom - (item.revenue / roundedMax) * usableHeight;
+      return { x, y, ...item };
+    });
+  }, [chartPointsData, roundedMax, usableWidth, usableHeight]);
+
+  // Cubic Bezier Spline Builder
+  const splinePath = useMemo(() => {
+    if (points.length === 0) return '';
+    if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      const mx = (p0.x + p1.x) / 2;
+      d += ` C ${mx} ${p0.y}, ${mx} ${p1.y}, ${p1.x} ${p1.y}`;
+    }
+    return d;
+  }, [points]);
+
+  const areaPath = useMemo(() => {
+    if (!splinePath || points.length === 0) return '';
+    const lastX = points[points.length - 1].x;
+    const firstX = points[0].x;
+    const baseY = svgHeight - padBottom;
+    return `${splinePath} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
+  }, [splinePath, points, svgHeight, padBottom]);
+
+  // Non-overlapping X-axis milestone labels (5 milestones)
+  const xAxisTicks = useMemo(() => {
+    const n = points.length;
+    if (n === 0) return [];
+    if (n <= 5) return points.map((p, idx) => ({ ...p, originalIndex: idx }));
+
+    const targetCount = 5;
+    const indices = new Set<number>();
+    indices.add(0);
+    indices.add(n - 1);
+    for (let step = 1; step < targetCount - 1; step++) {
+      const idx = Math.round((step / (targetCount - 1)) * (n - 1));
+      indices.add(idx);
+    }
+    const sortedIndices = Array.from(indices).sort((a, b) => a - b);
+    return sortedIndices.map((idx) => ({ ...points[idx], originalIndex: idx }));
+  }, [points]);
+
+  // Pointer & Touch Tracing Handler
+  const handlePointerTrack = useCallback((clientX: number) => {
+    if (!points.length || !chartContainerRef.current) return;
+    if (touchTimeoutRef.current) {
+      clearTimeout(touchTimeoutRef.current);
+      touchTimeoutRef.current = null;
+    }
+    const rect = chartContainerRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const relativeX = clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, relativeX / rect.width));
+    const targetSvgX = pct * svgWidth;
+
+    let closest = points[0];
+    let minDiff = Math.abs(points[0].x - targetSvgX);
+    for (let i = 1; i < points.length; i++) {
+      const diff = Math.abs(points[i].x - targetSvgX);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = points[i];
+      }
+    }
+    setHoveredPoint(closest);
+  }, [points, svgWidth]);
+
+  const handlePointerLeave = () => {
+    setHoveredPoint(null);
+  };
+
+  const handleTouchEnd = () => {
+    if (touchTimeoutRef.current) clearTimeout(touchTimeoutRef.current);
+    touchTimeoutRef.current = setTimeout(() => {
+      setHoveredPoint(null);
+    }, 2500);
+  };
 
   const isViewOnly = !staffSession && !user;
 
@@ -372,146 +557,239 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
         </div>
 
         {/* Right: Sales Overview Graph (8 cols) */}
-        <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-zinc-200 shadow-2xs flex flex-col justify-between">
+        <div className="lg:col-span-8 bg-white p-5 sm:p-6 rounded-2xl border border-zinc-200 shadow-2xs flex flex-col justify-between">
           <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-100">
               <div>
-                <h3 className="text-base font-extrabold text-zinc-900">
+                <h3 className="text-base font-extrabold text-zinc-900 flex items-center gap-2">
                   Sales Overview
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    Smooth Spline
+                  </span>
                 </h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
                   Here is a live overview of your sales transactions
                 </p>
               </div>
 
-              <div className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-700 bg-zinc-50 hover:bg-zinc-100 transition-colors cursor-pointer">
-                <Calendar className="w-3.5 h-3.5 text-zinc-400" />
-                <select
-                  value={timeFilter}
-                  onChange={(e) => onChangeTimeFilter ? onChangeTimeFilter(e.target.value as any) : undefined}
-                  className="appearance-none bg-transparent outline-none pr-4 cursor-pointer text-zinc-700 font-bold"
-                >
-                  <option value="today">Today</option>
-                  <option value="week">This Week</option>
-                  <option value="month">This Month</option>
-                </select>
-                <ChevronDown className="w-3 h-3 text-zinc-400 absolute right-3 pointer-events-none" />
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Traced Stat Live Readout */}
+                {hoveredPoint ? (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1 rounded-xl shadow-2xs animate-in fade-in duration-150">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse"></span>
+                    <span className="text-xs font-bold text-blue-950">
+                      <span className="text-zinc-600 font-semibold">{hoveredPoint.date}:</span> {currency} {hoveredPoint.revenue.toLocaleString()}
+                      <span className="text-blue-700/80 font-normal ml-1.5">({hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'order' : 'orders'})</span>
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-zinc-400 hidden sm:inline mr-1">• Hover or drag to trace</span>
+                )}
+
+                <div className="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-700 bg-zinc-50 hover:bg-zinc-100 transition-colors cursor-pointer">
+                  <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                  <select
+                    value={timeFilter}
+                    onChange={(e) => onChangeTimeFilter ? onChangeTimeFilter(e.target.value as any) : undefined}
+                    className="appearance-none bg-transparent outline-none pr-4 cursor-pointer text-zinc-700 font-bold"
+                  >
+                    <option value="today">Today</option>
+                    <option value="week">This Week</option>
+                    <option value="month">This Month</option>
+                  </select>
+                  <ChevronDown className="w-3 h-3 text-zinc-400 absolute right-3 pointer-events-none" />
+                </div>
               </div>
             </div>
 
-            {/* SVG Interactive Smooth Graph */}
-            <div className="mt-6 relative h-56 w-full">
-              {(() => {
-                // Determine min/max time based on timeFilter
-                const now = new Date();
-                let minTime = new Date(now).setHours(0, 0, 0, 0); // Default to start of today
-                let maxTime = new Date(now).setHours(23, 59, 59, 999);
-                
-                if (timeFilter === 'week') {
-                  minTime = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-                  maxTime = now.getTime();
-                } else if (timeFilter === 'month') {
-                  minTime = now.getTime() - 30 * 24 * 60 * 60 * 1000;
-                  maxTime = now.getTime();
-                }
+            {/* Responsive SVG Smooth Spline Canvas */}
+            <div
+              ref={chartContainerRef}
+              className="mt-4 relative h-60 sm:h-64 w-full select-none touch-pan-y cursor-crosshair pt-1"
+              onMouseMove={(e) => handlePointerTrack(e.clientX)}
+              onMouseLeave={handlePointerLeave}
+              onTouchStart={(e) => {
+                if (e.touches && e.touches[0]) handlePointerTrack(e.touches[0].clientX);
+              }}
+              onTouchMove={(e) => {
+                if (e.touches && e.touches[0]) handlePointerTrack(e.touches[0].clientX);
+              }}
+              onTouchEnd={handleTouchEnd}
+            >
+              {points.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center text-zinc-400">
+                  <TrendingUp className="w-8 h-8 text-zinc-300 mb-1" />
+                  <p className="text-xs font-bold text-zinc-600">No sales transactions for this period</p>
+                </div>
+              ) : (
+                <svg
+                  className="w-full h-full overflow-visible"
+                  viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                  preserveAspectRatio="none"
+                >
+                  <defs>
+                    <linearGradient id="dashboardSalesGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#2563eb" stopOpacity="0.25" />
+                      <stop offset="100%" stopColor="#2563eb" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
 
-                // Bucket sales into 10 points for X-axis
-                const buckets = Array(10).fill(0);
-                const bucketSize = (maxTime - minTime) / 10;
+                  {/* Dotted Grid lines & Y-Axis Scale Markers */}
+                  {yTicks.map((tick, idx) => (
+                    <g key={idx}>
+                      <line
+                        x1={padLeft}
+                        y1={tick.y}
+                        x2={svgWidth - padRight}
+                        y2={tick.y}
+                        stroke={idx === yTicks.length - 1 ? "#cbd5e1" : "#f1f5f9"}
+                        strokeDasharray={idx === yTicks.length - 1 ? undefined : "4 4"}
+                        strokeWidth={idx === yTicks.length - 1 ? "1.5" : "1"}
+                      />
+                      <text
+                        x={padLeft - 8}
+                        y={tick.y + 3.5}
+                        textAnchor="end"
+                        fontSize="9.5"
+                        fill="#94a3b8"
+                        fontWeight="600"
+                        className="select-none font-mono"
+                      >
+                        {currency} {tick.label}
+                      </text>
+                    </g>
+                  ))}
 
-                filteredSales.forEach(s => {
-                  const t = new Date(s.created_at).getTime();
-                  if (t >= minTime && t <= maxTime) {
-                    let idx = Math.floor((t - minTime) / bucketSize);
-                    if (idx >= 10) idx = 9;
-                    buckets[idx] += Number(s.total_amount) || 0;
-                  }
-                });
+                  {/* Area Gradient Fill */}
+                  {areaPath && <path fill="url(#dashboardSalesGrad)" d={areaPath} />}
 
-                const maxBucketVal = Math.max(100, ...buckets);
-                const roundedMax = Math.ceil(maxBucketVal / 100) * 100;
+                  {/* Spline Stroke Line */}
+                  {splinePath && (
+                    <path
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d={splinePath}
+                    />
+                  )}
 
-                // SVG dimensions
-                const svgW = 500;
-                const svgH = 170;
+                  {/* Data Points on the Spline */}
+                  {points.map((pt, idx) => {
+                    const isHovered = hoveredPoint && hoveredPoint.date === pt.date && hoveredPoint.revenue === pt.revenue;
+                    const dotRadius = points.length > 10 ? 3 : 4;
+                    return (
+                      <circle
+                        key={idx}
+                        cx={pt.x}
+                        cy={pt.y}
+                        r={isHovered ? 6 : dotRadius}
+                        fill="#ffffff"
+                        stroke="#2563eb"
+                        strokeWidth={isHovered ? 2.5 : 2}
+                        className="cursor-pointer transition-all"
+                        onClick={() => setHoveredPoint(pt)}
+                      />
+                    );
+                  })}
 
-                // Build Path
-                let pathD = `M 0 ${svgH} `;
-                let strokeD = '';
-                const points = [];
-                for (let i = 0; i < buckets.length; i++) {
-                  const x = (i / 9) * svgW;
-                  const y = svgH - (buckets[i] / roundedMax) * (svgH - 20); // 20px top padding
-                  
-                  if (i === 0) strokeD += `M ${x} ${y} `;
-                  else strokeD += `L ${x} ${y} `;
-                  pathD += `L ${x} ${y} `;
-                  
-                  if (buckets[i] > 0) points.push({ x, y, val: buckets[i] });
-                }
-                pathD += `L ${svgW} ${svgH} Z`;
+                  {/* Interactive Crosshair & Highlight for Tracing */}
+                  {hoveredPoint && (
+                    <g className="pointer-events-none transition-opacity duration-150">
+                      <line
+                        x1={hoveredPoint.x}
+                        y1={padTop}
+                        x2={hoveredPoint.x}
+                        y2={svgHeight - padBottom}
+                        stroke="#2563eb"
+                        strokeWidth="1.5"
+                        strokeDasharray="3 3"
+                        opacity="0.8"
+                      />
+                      <circle
+                        cx={hoveredPoint.x}
+                        cy={hoveredPoint.y}
+                        r="9"
+                        fill="#3b82f6"
+                        fillOpacity="0.25"
+                      />
+                      <circle
+                        cx={hoveredPoint.x}
+                        cy={hoveredPoint.y}
+                        r="5.5"
+                        fill="#2563eb"
+                        stroke="#ffffff"
+                        strokeWidth="2.5"
+                      />
+                    </g>
+                  )}
+                </svg>
+              )}
 
-                // X-axis labels
-                const labels = [];
-                for (let i = 0; i <= 4; i++) {
-                  const d = new Date(minTime + (i / 4) * (maxTime - minTime));
-                  if (timeFilter === 'today') {
-                    labels.push(d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
-                  } else {
-                    labels.push(d.toLocaleDateString([], { month: 'short', day: 'numeric' }));
-                  }
-                }
-
-                return (
-                  <>
-                    {/* Y-axis labels */}
-                    <div className="absolute left-0 inset-y-0 flex flex-col justify-between text-[10px] font-mono text-zinc-400 select-none pb-6">
-                      <span>{currency} {roundedMax}</span>
-                      <span>{currency} {Math.round(roundedMax * 0.75)}</span>
-                      <span>{currency} {Math.round(roundedMax * 0.5)}</span>
-                      <span>{currency} {Math.round(roundedMax * 0.25)}</span>
-                      <span>{currency} 0</span>
-                    </div>
-
-                    <div className="ml-12 h-full relative pb-6">
-                      {/* Grid Lines */}
-                      <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-40">
-                        <div className="border-b border-dashed border-zinc-200 w-full" />
-                        <div className="border-b border-dashed border-zinc-200 w-full" />
-                        <div className="border-b border-dashed border-zinc-200 w-full" />
-                        <div className="border-b border-dashed border-zinc-200 w-full" />
-                        <div className="border-b border-zinc-200 w-full" />
-                      </div>
-
-                      {/* SVG Chart */}
-                      <svg className="w-full h-full overflow-visible absolute inset-0" preserveAspectRatio="none" viewBox={`0 0 ${svgW} ${svgH}`}>
-                        <defs>
-                          <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.25" />
-                            <stop offset="100%" stopColor="#2563eb" stopOpacity="0.0" />
-                          </linearGradient>
-                        </defs>
-                        <path d={pathD} fill="url(#salesGrad)" />
-                        <path d={strokeD} fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        {points.map((pt, i) => (
-                          <circle key={i} cx={pt.x} cy={pt.y} r="4" fill="#2563eb" stroke="#ffffff" strokeWidth="2" />
-                        ))}
-                      </svg>
-                    </div>
-
-                    {/* X-axis timeline */}
-                    <div className="ml-12 flex justify-between text-[10px] font-mono text-zinc-400 select-none absolute bottom-0 left-0 right-0">
-                      {labels.map((lbl, i) => (
-                        <span key={i}>{lbl}</span>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
+              {/* Interactive Floating Tooltip */}
+              {hoveredPoint && (
+                <div
+                  className="absolute pointer-events-none z-20 bg-zinc-900/95 backdrop-blur-md text-white border border-blue-500/40 px-3.5 py-2.5 rounded-xl shadow-xl text-xs transition-transform duration-75"
+                  style={{
+                    left: `${(hoveredPoint.x / svgWidth) * 100}%`,
+                    top: `${(hoveredPoint.y / svgHeight) * 100}%`,
+                    transform: `${
+                      (hoveredPoint.x / svgWidth) < 0.22
+                        ? 'translateX(0)'
+                        : (hoveredPoint.x / svgWidth) > 0.78
+                          ? 'translateX(-100%)'
+                          : 'translateX(-50%)'
+                    } ${hoveredPoint.y < 65 ? 'translateY(12px)' : 'translateY(-110%)'}`,
+                  }}
+                >
+                  <div className="font-extrabold text-zinc-300 border-b border-zinc-800 pb-1 mb-1.5 flex items-center justify-between gap-4">
+                    <span>{hoveredPoint.date}</span>
+                    <span className="text-[10px] text-blue-400 font-bold bg-blue-500/10 px-1.5 py-0.5 rounded">
+                      {timeFilter === 'today' ? 'Hourly' : 'Daily'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 text-blue-400 font-black text-sm">
+                    <span className="text-zinc-400 text-xs font-medium">Revenue:</span>
+                    <span>{currency} {hoveredPoint.revenue.toLocaleString()}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 text-zinc-400 text-[11px] font-semibold mt-0.5">
+                    <span>Settlements:</span>
+                    <span className="text-zinc-200">{hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'order' : 'orders'}</span>
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* X-Axis Milestone Labels */}
+            {points.length > 0 && (
+              <div className="relative w-full h-5 mt-1 border-t border-zinc-100 select-none">
+                {xAxisTicks.map((tick, i) => {
+                  const isFirst = i === 0;
+                  const isLast = i === xAxisTicks.length - 1;
+                  const leftPct = (tick.x / svgWidth) * 100;
+                  let transform = 'translateX(-50%)';
+                  if (isFirst) transform = 'translateX(0)';
+                  else if (isLast) transform = 'translateX(-100%)';
+
+                  return (
+                    <span
+                      key={tick.originalIndex}
+                      className="absolute top-1 text-[10px] font-mono text-zinc-400 whitespace-nowrap"
+                      style={{
+                        left: `${leftPct}%`,
+                        transform,
+                      }}
+                    >
+                      {tick.date}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div className="mt-8 flex items-center justify-between pt-4 border-t border-zinc-100 text-xs text-zinc-500">
+          <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-4 border-t border-zinc-100 text-xs text-zinc-500">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
               Peak Service: 7:00 PM – 8:45 PM Dine-in Rush

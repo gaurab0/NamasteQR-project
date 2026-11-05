@@ -630,8 +630,10 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     }
 
     const urlParams = new URLSearchParams(window.location.search);
+    const pathParts = window.location.pathname.split('/');
+    const pathTableId = (pathParts[1] === 't' && pathParts[2]) ? decodeURIComponent(pathParts[2]) : undefined;
     const urlBizId = urlParams.get('businessId') || user?.business?.id || undefined;
-    const urlTableId = urlParams.get('tableId') || undefined;
+    const urlTableId = urlParams.get('tableId') || urlParams.get('t') || pathTableId || undefined;
     const urlTableNum = urlParams.get('tableNumber') || undefined;
     const urlFloor = urlParams.get('floor') || null;
     const urlBuilding = urlParams.get('building') || null;
@@ -649,12 +651,14 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       // 1. Fresh QR Scan: Sanitize URL address bar immediately so search history and bookmarks only store clean /menu
       try {
         const cleanUrl = new URL(window.location.href);
+        cleanUrl.pathname = '/menu';
         cleanUrl.searchParams.delete('tableId');
         cleanUrl.searchParams.delete('tableNumber');
         cleanUrl.searchParams.delete('floor');
         cleanUrl.searchParams.delete('building');
+        cleanUrl.searchParams.delete('t');
         const remainingQuery = cleanUrl.searchParams.toString();
-        const cleanPath = cleanUrl.pathname + (remainingQuery ? `?${remainingQuery}` : '');
+        const cleanPath = '/menu' + (remainingQuery ? `?${remainingQuery}` : '');
         window.history.replaceState({}, document.title, cleanPath);
       } catch (e) {
         console.warn('URL address bar sanitization note:', e);

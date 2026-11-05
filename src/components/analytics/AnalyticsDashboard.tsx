@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   TrendingUp, 
   Calendar, 
@@ -44,6 +44,20 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; date: string; revenue: number; orders: number } | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const touchTimeoutRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (touchTimeoutRef.current) {
+        clearTimeout(touchTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    setHoveredPoint(null);
+  }, [timeRange]);
 
   const fetchAnalyticsData = useCallback(async () => {
     if (!businessId || businessId === 'default-business') return;
@@ -302,12 +316,15 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
     return Array.from(daysMap.values());
   }, [filteredSales, timeRange]);
 
-  // Compute SVG Curve Coordinates
+  // Compute SVG Curve Coordinates & Padding
   const svgWidth = 700;
   const svgHeight = 220;
-  const padTop = 25;
-  const padBottom = 30;
+  const padTop = 20;
+  const padBottom = 28;
+  const padLeft = 45;
+  const padRight = 18;
   const usableHeight = svgHeight - padTop - padBottom;
+  const usableWidth = svgWidth - padLeft - padRight;
 
   const maxRevenue = Math.max(...chartData.map((d) => d.revenue), 1000) * 1.15;
 
@@ -316,11 +333,11 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
     if (n === 0) return [];
 
     return chartData.map((item, i) => {
-      const x = n > 1 ? (i / (n - 1)) * svgWidth : svgWidth / 2;
+      const x = n > 1 ? padLeft + (i / (n - 1)) * usableWidth : padLeft + usableWidth / 2;
       const y = svgHeight - padBottom - (item.revenue / maxRevenue) * usableHeight;
       return { x, y, ...item };
     });
-  }, [chartData, maxRevenue]);
+  }, [chartData, maxRevenue, usableWidth, usableHeight]);
 
   // Cubic Bezier Spline Builder
   const splinePath = useMemo(() => {
@@ -338,9 +355,79 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
   }, [points]);
 
   const areaPath = useMemo(() => {
-    if (!splinePath) return '';
-    return `${splinePath} L ${svgWidth} ${svgHeight - padBottom} L 0 ${svgHeight - padBottom} Z`;
-  }, [splinePath]);
+    if (!splinePath || points.length === 0) return '';
+    const lastX = points[points.length - 1].x;
+    const firstX = points[0].x;
+    const baseY = svgHeight - padBottom;
+    return `${splinePath} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
+  }, [splinePath, points, svgHeight, padBottom]);
+
+  // Format compact numbers for Y-axis scale markers
+  const formatCompactVal = (num: number) => {
+    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
+    if (num >= 1000) return `${Math.round(num / 1000)}k`;
+    return `${Math.round(num)}`;
+  };
+
+  const yTicks = [
+    { y: padTop, label: formatCompactVal(maxRevenue) },
+    { y: padTop + usableHeight * 0.5, label: formatCompactVal(maxRevenue * 0.5) },
+    { y: svgHeight - padBottom, label: '0' },
+  ];
+
+  // Pick non-overlapping milestone dates for X-axis labels
+  const xAxisTicks = useMemo(() => {
+    const n = points.length;
+    if (n === 0) return [];
+    if (n <= 6) return points.map((p, idx) => ({ ...p, originalIndex: idx }));
+
+    const targetCount = 5;
+    const indices = new Set<number>();
+    indices.add(0);
+    indices.add(n - 1);
+    for (let step = 1; step < targetCount - 1; step++) {
+      const idx = Math.round((step / (targetCount - 1)) * (n - 1));
+      indices.add(idx);
+    }
+    const sortedIndices = Array.from(indices).sort((a, b) => a - b);
+    return sortedIndices.map((idx) => ({ ...points[idx], originalIndex: idx }));
+  }, [points]);
+
+  // Pointer & Touch Tracing Handler: Snaps to nearest point along the curve
+  const handlePointerTrack = useCallback((clientX: number) => {
+    if (!points.length || !chartContainerRef.current) return;
+    if (touchTimeoutRef.current) {
+      clearTimeout(touchTimeoutRef.current);
+      touchTimeoutRef.current = null;
+    }
+    const rect = chartContainerRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const relativeX = clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, relativeX / rect.width));
+    const targetSvgX = pct * svgWidth;
+
+    let closest = points[0];
+    let minDiff = Math.abs(points[0].x - targetSvgX);
+    for (let i = 1; i < points.length; i++) {
+      const diff = Math.abs(points[i].x - targetSvgX);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = points[i];
+      }
+    }
+    setHoveredPoint(closest);
+  }, [points, svgWidth]);
+
+  const handlePointerLeave = () => {
+    setHoveredPoint(null);
+  };
+
+  const handleTouchEnd = () => {
+    if (touchTimeoutRef.current) clearTimeout(touchTimeoutRef.current);
+    touchTimeoutRef.current = setTimeout(() => {
+      setHoveredPoint(null);
+    }, 2500);
+  };
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
@@ -492,7 +579,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
       </div>
 
       {/* Main Curvilinear Visual Chart: Sales Trajectory */}
-      <div className="bg-white border border-zinc-200/90 rounded-2xl p-6 shadow-xs space-y-4">
+      <div className="bg-white border border-zinc-200/90 rounded-2xl p-4 sm:p-6 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-100">
           <div>
             <h3 className="text-base font-extrabold text-zinc-900 flex items-center gap-2">
@@ -506,15 +593,40 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
             </p>
           </div>
           <div className="flex items-center gap-3 text-xs font-semibold text-zinc-600">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-amber-500 shadow-2xs"></span>
-              <span>Revenue ({currencySymbol})</span>
-            </div>
+            {hoveredPoint ? (
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-300/80 px-3 py-1.5 rounded-xl shadow-2xs animate-in fade-in duration-150">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                <span className="text-xs font-bold text-amber-950">
+                  <span className="text-zinc-600 font-semibold">{hoveredPoint.date}:</span> {currencySymbol} {hoveredPoint.revenue.toLocaleString()}
+                  <span className="text-amber-700/80 font-normal ml-1.5">({hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'order' : 'orders'})</span>
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-full bg-amber-500 shadow-2xs"></span>
+                  <span>Revenue ({currencySymbol})</span>
+                </div>
+                <span className="text-[11px] text-zinc-400 hidden sm:inline">• Hover or drag to trace</span>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Responsive SVG Chart Canvas */}
-        <div className="relative w-full h-64 select-none pt-2">
+        <div
+          ref={chartContainerRef}
+          className="relative w-full h-64 sm:h-72 select-none pt-2 touch-pan-y cursor-crosshair"
+          onMouseMove={(e) => handlePointerTrack(e.clientX)}
+          onMouseLeave={handlePointerLeave}
+          onTouchStart={(e) => {
+            if (e.touches && e.touches[0]) handlePointerTrack(e.touches[0].clientX);
+          }}
+          onTouchMove={(e) => {
+            if (e.touches && e.touches[0]) handlePointerTrack(e.touches[0].clientX);
+          }}
+          onTouchEnd={handleTouchEnd}
+        >
           {points.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center text-zinc-400">
               <TrendingUp className="w-8 h-8 text-zinc-300 mb-1" />
@@ -534,11 +646,31 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
                 </linearGradient>
               </defs>
 
-              {/* Dotted Grid lines */}
-              <line x1="0" y1="40" x2={svgWidth} y2="40" stroke="#f4f4f5" strokeDasharray="4 4" strokeWidth="1" />
-              <line x1="0" y1="95" x2={svgWidth} y2="95" stroke="#f4f4f5" strokeDasharray="4 4" strokeWidth="1" />
-              <line x1="0" y1="150" x2={svgWidth} y2="150" stroke="#f4f4f5" strokeDasharray="4 4" strokeWidth="1" />
-              <line x1="0" y1={svgHeight - padBottom} x2={svgWidth} y2={svgHeight - padBottom} stroke="#e4e4e7" strokeWidth="1.5" />
+              {/* Dotted Grid lines & Y-Axis Scale Markers */}
+              {yTicks.map((tick, idx) => (
+                <g key={idx}>
+                  <line
+                    x1={padLeft}
+                    y1={tick.y}
+                    x2={svgWidth - padRight}
+                    y2={tick.y}
+                    stroke={idx === yTicks.length - 1 ? "#cbd5e1" : "#f1f5f9"}
+                    strokeDasharray={idx === yTicks.length - 1 ? undefined : "4 4"}
+                    strokeWidth={idx === yTicks.length - 1 ? "1.5" : "1"}
+                  />
+                  <text
+                    x={padLeft - 8}
+                    y={tick.y + 3.5}
+                    textAnchor="end"
+                    fontSize="10"
+                    fill="#94a3b8"
+                    fontWeight="600"
+                    className="select-none font-mono"
+                  >
+                    {tick.label}
+                  </text>
+                </g>
+              ))}
 
               {/* Area Gradient Fill */}
               {areaPath && <path fill="url(#revenueAmberGrad)" d={areaPath} />}
@@ -555,56 +687,116 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
                 />
               )}
 
-              {/* Interactive Scrub Dots */}
-              {points.map((pt, idx) => (
-                <circle
-                  key={idx}
-                  cx={pt.x}
-                  cy={pt.y}
-                  r="5"
-                  fill="#ffffff"
-                  stroke="#d97706"
-                  strokeWidth="3"
-                  className="cursor-pointer transition-all hover:r-7"
-                  onMouseEnter={() => setHoveredPoint(pt)}
-                  onMouseLeave={() => setHoveredPoint(null)}
-                />
-              ))}
+              {/* Normal Data Points on the Spline */}
+              {points.map((pt, idx) => {
+                const isHovered = hoveredPoint && hoveredPoint.date === pt.date && hoveredPoint.revenue === pt.revenue;
+                const dotRadius = points.length > 20 ? 3 : 4;
+                return (
+                  <circle
+                    key={idx}
+                    cx={pt.x}
+                    cy={pt.y}
+                    r={isHovered ? 6 : dotRadius}
+                    fill="#ffffff"
+                    stroke="#d97706"
+                    strokeWidth={isHovered ? 2.5 : 2}
+                    className="cursor-pointer transition-all"
+                    onClick={() => setHoveredPoint(pt)}
+                  />
+                );
+              })}
+
+              {/* Interactive Crosshair & Highlight for Tracing */}
+              {hoveredPoint && (
+                <g className="pointer-events-none transition-opacity duration-150">
+                  <line
+                    x1={hoveredPoint.x}
+                    y1={padTop}
+                    x2={hoveredPoint.x}
+                    y2={svgHeight - padBottom}
+                    stroke="#d97706"
+                    strokeWidth="1.5"
+                    strokeDasharray="3 3"
+                    opacity="0.8"
+                  />
+                  <circle
+                    cx={hoveredPoint.x}
+                    cy={hoveredPoint.y}
+                    r="9"
+                    fill="#f59e0b"
+                    fillOpacity="0.25"
+                  />
+                  <circle
+                    cx={hoveredPoint.x}
+                    cy={hoveredPoint.y}
+                    r="5.5"
+                    fill="#d97706"
+                    stroke="#ffffff"
+                    strokeWidth="2.5"
+                  />
+                </g>
+              )}
             </svg>
           )}
 
           {/* Interactive Floating Tooltip */}
           {hoveredPoint && (
             <div
-              className="absolute pointer-events-none z-20 bg-zinc-900 text-white border border-amber-500/40 px-3 py-2 rounded-xl shadow-2xl text-xs -translate-x-1/2 -translate-y-full transition-all"
+              className="absolute pointer-events-none z-20 bg-zinc-900/95 backdrop-blur-md text-white border border-amber-500/40 px-3.5 py-2.5 rounded-xl shadow-xl text-xs transition-transform duration-75"
               style={{
                 left: `${(hoveredPoint.x / svgWidth) * 100}%`,
                 top: `${(hoveredPoint.y / svgHeight) * 100}%`,
+                transform: `${
+                  (hoveredPoint.x / svgWidth) < 0.22
+                    ? 'translateX(0)'
+                    : (hoveredPoint.x / svgWidth) > 0.78
+                      ? 'translateX(-100%)'
+                      : 'translateX(-50%)'
+                } ${hoveredPoint.y < 70 ? 'translateY(12px)' : 'translateY(-110%)'}`,
               }}
             >
-              <div className="font-extrabold text-zinc-300 border-b border-zinc-800 pb-1 mb-1">
-                {hoveredPoint.date}
+              <div className="font-extrabold text-zinc-300 border-b border-zinc-800 pb-1 mb-1.5 flex items-center justify-between gap-4">
+                <span>{hoveredPoint.date}</span>
+                <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">
+                  {timeRange === 'today' ? 'Hourly' : 'Daily'}
+                </span>
               </div>
-              <div className="flex items-center justify-between gap-3 text-amber-400 font-black">
-                <span>Revenue:</span>
+              <div className="flex items-center justify-between gap-4 text-amber-400 font-black text-sm">
+                <span className="text-zinc-400 text-xs font-medium">Revenue:</span>
                 <span>{currencySymbol} {hoveredPoint.revenue.toLocaleString()}</span>
               </div>
-              <div className="flex items-center justify-between gap-3 text-zinc-400 text-[10px] font-semibold">
+              <div className="flex items-center justify-between gap-4 text-zinc-400 text-[11px] font-semibold mt-0.5">
                 <span>Settlements:</span>
-                <span>{hoveredPoint.orders} orders</span>
+                <span className="text-zinc-200">{hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'order' : 'orders'}</span>
               </div>
             </div>
           )}
         </div>
 
-        {/* X-Axis Labels */}
+        {/* X-Axis Labels - Responsive & Non-overlapping */}
         {points.length > 0 && (
-          <div className="flex justify-between text-[11px] font-semibold text-zinc-500 px-1 pt-1 border-t border-zinc-100">
-            {points.map((pt, i) => (
-              <span key={i} className="truncate max-w-[60px] text-center">
-                {pt.date}
-              </span>
-            ))}
+          <div className="relative w-full h-6 pt-1 border-t border-zinc-100 select-none">
+            {xAxisTicks.map((tick, i) => {
+              const isFirst = i === 0;
+              const isLast = i === xAxisTicks.length - 1;
+              const leftPct = (tick.x / svgWidth) * 100;
+              let transform = 'translateX(-50%)';
+              if (isFirst) transform = 'translateX(0)';
+              else if (isLast) transform = 'translateX(-100%)';
+
+              return (
+                <span
+                  key={tick.originalIndex}
+                  className="absolute top-1 text-[11px] font-semibold text-zinc-500 whitespace-nowrap"
+                  style={{
+                    left: `${leftPct}%`,
+                    transform,
+                  }}
+                >
+                  {tick.date}
+                </span>
+              );
+            })}
           </div>
         )}
       </div>

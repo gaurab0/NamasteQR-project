@@ -87,7 +87,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
 
   // New tax rate form
   const [newTaxName, setNewTaxName] = useState<string>('');
-  const [newTaxRate, setNewTaxRate] = useState<number>(5);
+  const [newTaxRate, setNewTaxRate] = useState<number | string>(0);
   const [newTaxDesc, setNewTaxDesc] = useState<string>('');
 
   const handleToggleTaxInclusive = async (nextInclusive: boolean) => {
@@ -138,11 +138,11 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
       rate_percent: Number(newTaxRate) || 0,
       enabled: true,
       is_inclusive: taxInclusive,
-      description: newTaxDesc.trim() || `${newTaxName} (${newTaxRate}%)`,
+      description: newTaxDesc.trim() || `${newTaxName} (${Number(newTaxRate) || 0}%)`,
     };
     setRates((prev) => [...prev, newRateItem]);
     setNewTaxName('');
-    setNewTaxRate(5);
+    setNewTaxRate(0);
     setNewTaxDesc('');
   };
 
@@ -675,7 +675,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
               step="0.1"
               placeholder="Rate %"
               value={newTaxRate}
-              onChange={(e) => setNewTaxRate(parseFloat(e.target.value) || 0)}
+              onChange={(e) => setNewTaxRate(e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
               className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 text-xs bg-white focus:ring-2 focus:ring-amber-500"
             />
             <span className="text-xs font-bold text-zinc-500">%</span>

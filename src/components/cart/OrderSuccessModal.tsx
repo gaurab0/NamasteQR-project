@@ -1026,31 +1026,56 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
             </div>
             
             <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 min-h-0 bg-zinc-50">
-               <div className="bg-amber-50 text-amber-900 p-4 sm:p-5 rounded-2xl border border-amber-200/90 shadow-2xs">
-                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                   <div className="min-w-0">
-                     <div className="flex items-center gap-2 mb-1">
-                       <span className="relative flex h-2.5 w-2.5 shrink-0">
-                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-600"></span>
-                       </span>
-                       <h4 className="font-extrabold text-sm sm:text-base text-amber-950">Waiting for payment</h4>
-                     </div>
-                     <p className="text-xs text-amber-800/90 leading-relaxed">
-                       Once confirmed, your order will automatically be sent to the kitchen!
-                     </p>
-                   </div>
+              {(() => {
+                const isPinVerified = Boolean(liveOrder?.credit_pin_verified || (liveOrder as any)?.pin_verified || pinSuccess);
+                return (
+                  <div className={`p-4 sm:p-5 rounded-2xl border shadow-2xs transition-colors ${
+                    isPinVerified
+                      ? 'bg-emerald-50/90 text-emerald-950 border-emerald-300'
+                      : 'bg-amber-50 text-amber-900 border-amber-200/90'
+                  }`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="relative flex h-2.5 w-2.5 shrink-0">
+                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                              isPinVerified ? 'bg-emerald-400' : 'bg-amber-400'
+                            }`}></span>
+                            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                              isPinVerified ? 'bg-emerald-600' : 'bg-amber-600'
+                            }`}></span>
+                          </span>
+                          <h4 className={`font-extrabold text-sm sm:text-base ${
+                            isPinVerified ? 'text-emerald-950' : 'text-amber-950'
+                          }`}>
+                            {isPinVerified ? 'Payment is Being processed by the Cashier' : 'Waiting for payment'}
+                          </h4>
+                        </div>
+                        <p className={`text-xs leading-relaxed ${
+                          isPinVerified ? 'text-emerald-800/90 font-medium' : 'text-amber-800/90'
+                        }`}>
+                          {isPinVerified
+                            ? 'Your table authorization PIN has been verified. Cashier is reviewing and confirming your order to the kitchen!'
+                            : 'Once confirmed, your order will automatically be sent to the kitchen!'}
+                        </p>
+                      </div>
 
-                   <div className="bg-white border-2 border-amber-400/90 rounded-xl px-3.5 py-2 sm:px-4 sm:py-2.5 flex items-center justify-between sm:flex-col sm:items-end gap-2 sm:gap-0.5 shrink-0 shadow-2xs">
-                     <span className="text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider text-amber-800">
-                       Order Number
-                     </span>
-                     <span className="text-lg sm:text-2xl font-black font-mono text-zinc-950 tracking-tight">
-                       #{liveOrder?.order_number ? liveOrder.order_number.toString().replace(/^#/, '') : (liveOrder?.id ? liveOrder.id.slice(0, 8).toUpperCase() : '')}
-                     </span>
-                   </div>
-                 </div>
-               </div>
+                      <div className={`bg-white border-2 rounded-xl px-3.5 py-2 sm:px-4 sm:py-2.5 flex items-center justify-between sm:flex-col sm:items-end gap-2 sm:gap-0.5 shrink-0 shadow-2xs ${
+                        isPinVerified ? 'border-emerald-400' : 'border-amber-400/90'
+                      }`}>
+                        <span className={`text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider ${
+                          isPinVerified ? 'text-emerald-800' : 'text-amber-800'
+                        }`}>
+                          Order Number
+                        </span>
+                        <span className="text-lg sm:text-2xl font-black font-mono text-zinc-950 tracking-tight">
+                          #{liveOrder?.order_number ? liveOrder.order_number.toString().replace(/^#/, '') : (liveOrder?.id ? liveOrder.id.slice(0, 8).toUpperCase() : '')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
                
                <div className="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
                   <h4 className="font-bold text-zinc-900 border-b border-zinc-100 pb-2">How are you paying?</h4>

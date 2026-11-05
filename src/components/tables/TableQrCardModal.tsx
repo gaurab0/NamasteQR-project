@@ -184,7 +184,7 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
 
   // Target customer URL
   const origin = window.location.origin;
-  const menuUrl = `${origin}/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(table.id)}&tableNumber=${encodeURIComponent(table.table_number)}${table.floor ? `&floor=${encodeURIComponent(table.floor)}` : ''}${table.building ? `&building=${encodeURIComponent(table.building)}` : ''}`;
+  const menuUrl = `${origin}/t/${encodeURIComponent(table.id)}`;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -220,10 +220,46 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
     }
   }, [menuUrl, table]);
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(menuUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyLink = async () => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(menuUrl);
+      } else {
+        // Fallback for non-HTTPS / LAN IP contexts (http://192.168.x.x:3000)
+        const textarea = document.createElement('textarea');
+        textarea.value = menuUrl;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '-9999px';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.warn('Clipboard write error, attempting execCommand fallback:', err);
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = menuUrl;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '-9999px';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (fallbackErr) {
+        console.error('All copy strategies failed:', fallbackErr);
+      }
+    }
   };
 
   const handleDownloadQr = () => {

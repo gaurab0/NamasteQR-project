@@ -68,7 +68,6 @@ export const AddBranchModal: React.FC<AddBranchModalProps> = ({
         location: location.trim() || undefined,
         phone: phone.trim() || undefined,
         tagline: tagline.trim() || undefined,
-        kitchen_hours: kitchenHours.trim() || undefined,
         currency: currency.trim() || 'Rs.',
         tax_rate: Number(taxRate) || 0,
         business_type: user?.business?.type || 'RESTAURANT',
@@ -235,18 +234,7 @@ export const AddBranchModal: React.FC<AddBranchModalProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-zinc-400" /> Kitchen Hours
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 08:00 AM – 11:00 PM"
-                  value={kitchenHours}
-                  onChange={(e) => setKitchenHours(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                />
-              </div>
+              
             </div>
 
             <div className="grid grid-cols-2 gap-3">
