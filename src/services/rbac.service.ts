@@ -20,7 +20,8 @@ import {
   GLAccountLink,
   GLAccountCategory,
   CashierRegisterSession,
-  TabPermissionId
+  TabPermissionId,
+  CompRecord
 } from '../types/rbac';
 import { Business } from '../types/auth';
 
@@ -516,7 +517,7 @@ export class ClientRBACService {
     paramsOrTableId?: string | { business_id?: string; table_number?: string; floor?: string | null; building?: string | null; existingHostToken?: string },
     tableNumber?: string,
     existingHostToken?: string
-  ): Promise<{ table: RestaurantTable; business: any; is_host: boolean; host_token: string | null; session_id: string }> {
+  ): Promise<{ table: RestaurantTable; business: any; is_host: boolean; host_token: string | null; session_id: string; active_order?: TableOrder | null }> {
     let businessId: string | undefined;
     let tableId: string | undefined;
     let tableNum: string | undefined;
@@ -882,6 +883,24 @@ export class ClientRBACService {
     return data.data;
   }
 
+  public async getCompRecordsApi(
+    businessId: string,
+    params: { start_date?: string; end_date?: string } = {}
+  ): Promise<CompRecord[]> {
+    const qs = new URLSearchParams();
+    if (businessId) qs.append('businessId', businessId);
+    if (params.start_date) qs.append('start_date', params.start_date);
+    if (params.end_date) qs.append('end_date', params.end_date);
+    const queryString = qs.toString() ? `?${qs.toString()}` : '';
+    const res = await fetch(`/api/rbac/comp-records${queryString}`, {
+      headers: this.getAuthHeaders(undefined, businessId),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Failed to load complementary records');
+    return data.data ?? [];
+  }
+
   public async createSaleApi(
     payload: Partial<SaleRecord>,
     businessId?: string
@@ -1164,21 +1183,62 @@ export class ClientRBACService {
     return result.data || [];
   }
 
-  public async acknowledgeTablePingApi(businessId: string, tableId: string): Promise<boolean> {
-    const res = await fetch(`/api/rbac/tables/${encodeURIComponent(tableId)}/acknowledge-ping`, {
+  public async acknowledgeTablePingApi(
+    param1: string,
+    param2?: string,
+    tableNumber?: string
+  ): Promise<boolean> {
+    let knownBizId = this.getCurrentStaffSession()?.businessId;
+    if (!knownBizId && typeof window !== 'undefined') {
+      try {
+        const cachedUser = JSON.parse(localStorage.getItem('serveflow_cached_user') || '{}');
+        knownBizId = cachedUser?.business?.id || cachedUser?.businessId;
+      } catch {}
+    }
+
+    let tableId: string;
+    let businessId: string;
+
+    if (param1 && param2) {
+      if (knownBizId && param1 === knownBizId) {
+        businessId = param1;
+        tableId = param2;
+      } else if (knownBizId && param2 === knownBizId) {
+        tableId = param1;
+        businessId = param2;
+      } else {
+        // Default to (tableId, businessId) which matches callers in KitchenDisplaySystem and BillingPOS
+        tableId = param1;
+        businessId = param2;
+      }
+    } else {
+      tableId = param1 || '';
+      businessId = param2 || knownBizId || '';
+    }
+
+    const routeTableIdentifier = tableId || tableNumber || 'active';
+    const queryBiz = businessId ? `?businessId=${encodeURIComponent(businessId)}` : '';
+    const res = await fetch(`/api/rbac/tables/${encodeURIComponent(routeTableIdentifier)}/acknowledge-ping${queryBiz}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      headers: this.getAuthHeaders(undefined, businessId),
       credentials: 'include',
-      body: JSON.stringify({ businessId }),
+      body: JSON.stringify({ businessId, tableId, tableNumber }),
     });
     const result = await res.json();
-    return result.success ?? false;
+    if (!res.ok || !result.success) {
+      throw new Error(result.error?.message || result.error || 'Failed to acknowledge table call');
+    }
+    return result.success ?? true;
   }
 
   public async requestBillApi(businessId: string, orderId: string, payload?: any): Promise<any> {
+    const extraHeaders: Record<string, string> = {};
+    if (payload?.host_token) {
+      extraHeaders['x-host-token'] = payload.host_token;
+    }
     const res = await fetch(`/api/rbac/orders/${orderId}/request-bill`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+      headers: this.getAuthHeaders(extraHeaders, businessId),
       credentials: 'include',
       body: JSON.stringify({ businessId, ...payload }),
     });

@@ -165,11 +165,17 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               .filter((item) => (item.name || '').trim().length > 0)
               .map((item, idx) => {
               const uPrice = item.unit_price ?? item.price ?? 0;
-              const tPrice = item.total_price ?? item.subtotal ?? (uPrice * item.quantity);
+              const isComp = Boolean(item.is_comp || ((item.comp_qty ?? 0) >= item.quantity));
+              const tPrice = isComp ? 0 : (item.total_price ?? item.subtotal ?? (uPrice * Math.max(0, item.quantity - (item.comp_qty ?? 0))));
               return (
                 <div key={idx} className="flex justify-between items-start">
                   <div className="flex-1 pr-2">
                     <span className="font-bold">{item.name}</span>
+                    {(item.comp_qty ?? 0) > 0 && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold uppercase tracking-wider">
+                        {isComp ? 'COMPLIMENTARY' : `${item.comp_qty}× COMP`}
+                      </span>
+                    )}
                     <span className="text-[10px] text-zinc-500 block">
                       {item.quantity} x {sale.currency} {uPrice.toFixed(2)}
                     </span>
@@ -237,6 +243,13 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               <span>Payment Mode:</span>
               <span className="font-bold text-zinc-800">{sale.payment_method === 'CREDIT' && sale.credit_gl_account_name ? `Credit — ${sale.credit_gl_account_name}` : sale.payment_method}</span>
             </div>
+
+            {sale.comp_reason && (
+              <div className="flex justify-between text-[10px] text-amber-800 pt-0.5">
+                <span>Comp Reason:</span>
+                <span className="font-semibold">{sale.comp_reason}</span>
+              </div>
+            )}
           </div>
 
           <div className="border-b border-dashed border-zinc-300 my-2" />

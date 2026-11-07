@@ -20,7 +20,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Eye,
-  EyeOff
+  EyeOff,
+  Gift
 } from 'lucide-react';
 import { RestaurantTable } from '../../types/rbac';
 import { rbacService } from '../../services/rbac.service';
@@ -56,6 +57,12 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
   const [creditSaving, setCreditSaving] = useState<boolean>(false);
   const [creditSuccessMsg, setCreditSuccessMsg] = useState<string | null>(null);
   const [creditErrorMsg, setCreditErrorMsg] = useState<string | null>(null);
+
+  // Complementary Mode State
+  const [isCompEnabled, setIsCompEnabled] = useState<boolean>(Boolean(table.comp_enabled));
+  const [compSaving, setCompSaving] = useState<boolean>(false);
+  const [compSuccessMsg, setCompSuccessMsg] = useState<string | null>(null);
+  const [compErrorMsg, setCompErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!glAccountNumber) {
@@ -179,6 +186,25 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
       setCreditErrorMsg(err?.message || 'Failed to save credit configuration and link GL account.');
     } finally {
       setCreditSaving(false);
+    }
+  };
+
+  const handleToggleComp = async () => {
+    const newVal = !isCompEnabled;
+    setIsCompEnabled(newVal);
+    setCompSaving(true);
+    setCompErrorMsg(null);
+    setCompSuccessMsg(null);
+    try {
+      await rbacService.updateTableApi(table.id, { comp_enabled: newVal }, businessId);
+      setCompSuccessMsg(newVal ? 'Complementary mode enabled for this table.' : 'Complementary mode disabled.');
+      if (onTableUpdated) onTableUpdated({ ...table, comp_enabled: newVal });
+      setTimeout(() => setCompSuccessMsg(null), 3000);
+    } catch (err: any) {
+      setIsCompEnabled(!newVal); // revert optimistic update
+      setCompErrorMsg(err?.message || 'Failed to update complementary setting.');
+    } finally {
+      setCompSaving(false);
     }
   };
 
@@ -440,6 +466,12 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
                     Credit Only Table
                   </span>
                 )}
+                {isCompEnabled && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
+                    <Gift className="w-3 h-3 text-amber-600" />
+                    Comp Mode Active
+                  </span>
+                )}
               </div>
             </div>
 
@@ -691,6 +723,50 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
                     </button>
                   </div>
                 </form>
+              )}
+            </div>
+
+            {/* Complementary Mode Card */}
+            <div className="border border-amber-200 bg-amber-50/40 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <Gift className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-zinc-900">Complementary Mode</p>
+                    <p className="text-[11px] text-zinc-500 leading-tight">
+                      Allow staff to mark items as complimentary at billing
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleToggleComp}
+                  disabled={compSaving}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                    isCompEnabled ? 'bg-amber-500' : 'bg-zinc-300'
+                  } disabled:opacity-50 cursor-pointer`}
+                  aria-label="Toggle complementary mode"
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                      isCompEnabled ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              {compSuccessMsg && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>{compSuccessMsg}</span>
+                </div>
+              )}
+              {compErrorMsg && (
+                <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{compErrorMsg}</span>
+                </div>
               )}
             </div>
           </div>

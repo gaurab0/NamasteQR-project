@@ -317,10 +317,13 @@ export class EscPosEncoder {
       (item: any) => item && (item.name || '').trim().length > 0
     );
     items.forEach((item: any) => {
-      const qty = item.quantity || 1;
+      const qty = Number(item.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
+      const isComp = Boolean(item.is_comp || compQty >= qty);
       const name = item.name || 'Dish';
-      const price = Number(item.price || 0);
-      const lineTotal = Number(item.total || qty * price);
+      const price = Number(item.unit_price ?? item.price ?? 0);
+      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+      const lineTotal = isComp ? 0 : Number(item.total_price ?? item.subtotal ?? (billedQty * price));
 
       encoder.bold(isKot);
       if (isKot) {
@@ -331,6 +334,10 @@ export class EscPosEncoder {
         } else {
           const pricePart = `${price.toFixed(2)}  ${lineTotal.toFixed(2)}`;
           encoder.row(`${qty}x ${name}`, `Rs ${pricePart}`, cols);
+        }
+        if (compQty > 0) {
+          const badgeText = isComp ? '  [COMPLIMENTARY]' : `  [${compQty}x COMP]`;
+          encoder.align('left').bold(true).text(badgeText).feed(1).bold(false);
         }
       }
       encoder.bold(false);
@@ -360,6 +367,11 @@ export class EscPosEncoder {
       encoder.bold(true).size('double-height');
       encoder.row('GRAND TOTAL:', `Rs ${total.toFixed(2)}`, cols);
       encoder.size('normal').bold(false);
+
+      if (data.comp_reason) {
+        encoder.divider('-', cols);
+        encoder.align('left').text(`Comp Reason: ${data.comp_reason}`).feed(1);
+      }
 
       if (data.payment_method) {
         encoder.divider('-', cols);

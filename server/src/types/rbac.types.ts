@@ -129,6 +129,12 @@ export interface RestaurantTable {
   credit_gl_account_id?: string | null;
   credit_gl_account_number?: string | null;
   credit_gl_account_name?: string | null;
+  comp_enabled?: boolean;
+  assigned_waiter_ids?: string[];
+  waiter_ping?: {
+    active: boolean;
+    timestamp?: string | Date;
+  } | null;
   qr_code_url?: string;
   last_scanned_at?: Date | null;
   current_session_id?: string | null;
@@ -207,6 +213,7 @@ export interface TableOrder {
   served_at?: Date | null;
   source?: 'QR' | 'POS_MANUAL' | string;
   pos_sale_id?: string;
+  settled?: boolean;
   invoice_number?: string;
   created_at: Date;
   updated_at: Date;
@@ -287,6 +294,9 @@ export interface SaleItem {
   subtotal: number;
   category?: string;
   notes?: string;
+  comp_qty?: number;
+  is_comp?: boolean;
+  comp_value?: number;
 }
 
 export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'ROOM_SERVICE' | 'QUICK_POS';
@@ -329,6 +339,7 @@ export interface SaleRecord {
   source?: 'POS_MANUAL' | 'QR' | string;
   is_manual_pos?: boolean;
   dispatch_kitchen?: boolean;
+  comp_reason?: string;
 }
 
 export interface ServiceRequest {
@@ -386,4 +397,30 @@ export interface CashierRegisterSession {
   notes?: string | null;
   opened_at: string | Date;
   closed_at?: string | Date | null;
+}
+
+export interface CompRecordItem {
+  item_id: string;
+  name: string;
+  comp_qty: number;
+  unit_price: number;
+  comp_value: number;
+  category?: string;
+  variant_name?: string;
+}
+
+export interface CompRecord {
+  id: string;
+  business_id: string;
+  sale_id?: string;
+  table_id?: string;
+  table_number: string;
+  staff_id?: string;
+  staff_name: string;
+  reason?: string;
+  items: CompRecordItem[];
+  total_comp_value: number;
+  currency: string;
+  settled_at: string;
+  date_string: string;
 }

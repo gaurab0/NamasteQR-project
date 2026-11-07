@@ -25,6 +25,8 @@ import { rbacService } from '../../services/rbac.service';
 interface FinalTableBillPageProps {
   dateFormatBilling?: DateFormatMode;
   order: TableOrder;
+  isHost?: boolean;
+  hostToken?: string | null;
   businessId?: string;
   businessName?: string;
   onDoneReturnToMenu: (settledOrder?: TableOrder) => void;
@@ -34,6 +36,8 @@ interface FinalTableBillPageProps {
 export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   dateFormatBilling = 'ENGLISH',
   order,
+  isHost = true,
+  hostToken,
   businessId,
   businessName = 'Restaurant Dining Service',
   onDoneReturnToMenu,
@@ -67,7 +71,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   }, [order]);
 
   // Restore saved promo code from liveOrder if present
-  const isPromoVisible = taxConfig?.active_promo_enabled !== false;
+  const isPromoVisible = taxConfig?.active_promo_enabled !== false && isHost !== false;
 
   useEffect(() => {
     if (!isPromoVisible && appliedPromo) {
@@ -267,6 +271,10 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   // Actions
   const handleRequestBillAction = async () => {
     if (!liveOrder?.id || !targetBizId) return;
+    if (isHost === false) {
+      alert('Ordering authority reserved: Only the Table Host who first scanned the table QR code can request the final bill.');
+      return;
+    }
     if (!allItemsServed) {
       alert('Cannot request bill: All ordered dishes must be delivered and marked as served by the waiter first.');
       return;
@@ -290,6 +298,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
         taxes: taxesList,
         total_amount: totalAmount,
         currency: currencySymbol,
+        host_token: hostToken || undefined,
         order_notes: (
           (liveOrder.order_notes ? liveOrder.order_notes + ' • ' : '') +
           `[WAITER BILL REQUESTED - ${currencySymbol} ${totalAmount.toLocaleString()}]`
@@ -691,16 +700,20 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
                     type="button"
                     variant="primary"
                     size="lg"
-                    disabled={!allItemsServed || requestingBill}
+                    disabled={!allItemsServed || requestingBill || isHost === false}
                     onClick={handleRequestBillAction}
                     className={`w-full py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 ${
-                      !allItemsServed
+                      !allItemsServed || isHost === false
                         ? 'opacity-50 cursor-not-allowed bg-zinc-400 text-zinc-100'
                         : 'cursor-pointer bg-zinc-950 hover:bg-zinc-800 text-white'
                     }`}
                   >
                     <Receipt className="w-4 h-4 text-amber-400" />
-                    <span>Request Final Bill <span className="notranslate font-mono font-bold">({currencySymbol} {totalAmount.toFixed(2)})</span></span>
+                    <span>
+                      {isHost === false
+                        ? 'View-Only Guest • Bill Request Reserved for Host'
+                        : <>Request Final Bill <span className="notranslate font-mono font-bold">({currencySymbol} {totalAmount.toFixed(2)})</span></>}
+                    </span>
                   </Button>
 
                   

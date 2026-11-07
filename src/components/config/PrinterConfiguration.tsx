@@ -178,10 +178,13 @@ export const PrinterConfiguration: React.FC = () => {
       if (res.success && res.reachable) {
         setModalPingStatus({ loading: false, success: true, latencyMs: res.latencyMs });
       } else {
+        const errorText = typeof res.error === 'object' && res.error !== null
+          ? (res.error as any).message || (res.error as any).code || 'Could not connect'
+          : String(res.error || `Could not connect to ${host}:${port}`);
         setModalPingStatus({
           loading: false,
           success: false,
-          error: res.error || `Could not connect to ${host}:${port}`,
+          error: errorText,
         });
       }
     } catch (err: any) {
@@ -236,7 +239,10 @@ export const PrinterConfiguration: React.FC = () => {
       if (res.success && res.reachable) {
         setPingStatus({ loading: false, success: true, latencyMs: res.latencyMs });
       } else {
-        setPingStatus({ loading: false, success: false, error: res.error || 'Unreachable' });
+        const errorText = typeof res.error === 'object' && res.error !== null
+          ? (res.error as any).message || (res.error as any).code || 'Unreachable'
+          : String(res.error || 'Unreachable');
+        setPingStatus({ loading: false, success: false, error: errorText });
       }
     } catch (err: any) {
       setPingStatus({ loading: false, success: false, error: err.message || 'Error' });
@@ -982,7 +988,7 @@ export const PrinterConfiguration: React.FC = () => {
                           ) : (
                             <>
                               <AlertCircle className="w-4 h-4 text-rose-600" />
-                              <span>{modalPingStatus.error}</span>
+                              <span>{typeof modalPingStatus.error === 'string' ? modalPingStatus.error : (modalPingStatus.error as any)?.message || 'Unreachable'}</span>
                             </>
                           )}
                         </div>

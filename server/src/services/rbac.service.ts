@@ -463,14 +463,17 @@ export class RBACService {
       if (updates.image_url !== undefined) prismaData.image_url = updates.image_url;
       if (updates.food_type !== undefined) prismaData.food_type = updates.food_type;
       if (updates.is_available !== undefined && updates.status !== undefined) {
-        prismaData.is_available = updates.is_available && updates.status === 'available';
-        prismaData.status = !prismaData.is_available && updates.status === 'available' ? 'unavailable' : updates.status;
+        const normStatus = String(updates.status).toLowerCase();
+        const isAvail = Boolean(updates.is_available) && normStatus !== 'out_of_stock' && normStatus !== 'unavailable';
+        prismaData.is_available = isAvail;
+        prismaData.status = isAvail ? 'available' : normStatus;
       } else if (updates.status !== undefined) {
-        prismaData.status = updates.status;
-        prismaData.is_available = updates.status === 'available';
+        const normStatus = String(updates.status).toLowerCase();
+        prismaData.status = normStatus;
+        prismaData.is_available = normStatus === 'available' || normStatus === 'in_stock';
       } else if (updates.is_available !== undefined) {
-        prismaData.is_available = updates.is_available;
-        prismaData.status = updates.is_available ? 'available' : 'unavailable';
+        prismaData.is_available = Boolean(updates.is_available);
+        prismaData.status = updates.is_available ? 'available' : 'out_of_stock';
       }
       if (updates.has_variants !== undefined) prismaData.has_variants = updates.has_variants;
       if (updates.variants !== undefined) prismaData.variants = updates.variants;
@@ -491,6 +494,25 @@ export class RBACService {
     }
 
     realtimeEmitter.menuUpdated(businessId);
+  }
+
+  /**
+   * Toggles menu item availability or 86 out-of-stock status
+   */
+  public async updateMenuItemStatus(
+    businessId: string,
+    itemId: string,
+    status: MenuStatus,
+    is_available?: boolean,
+    user?: { id: string; role?: string; email?: string }
+  ): Promise<void> {
+    const isAvail = is_available !== undefined ? is_available : (status === 'available');
+    return this.updateMenuItem(
+      businessId,
+      itemId,
+      { status, is_available: isAvail },
+      user || { id: 'system', role: 'ADMIN' }
+    );
   }
 
   /**
@@ -1237,6 +1259,9 @@ export class RBACService {
         credit_gl_account_id: d.credit_gl_account_id || null,
         credit_gl_account_number: d.credit_gl_account_number || null,
         credit_gl_account_name: d.credit_gl_account_name || null,
+        comp_enabled: Boolean(d.comp_enabled),
+        assigned_waiter_ids: d.assigned_waiter_ids || [],
+        waiter_ping: (d.waiter_ping as any) || null,
         qr_code_url: d.qr_code_url || '',
         last_scanned_at: d.last_scanned_at ? new Date(d.last_scanned_at) : null,
         current_session_id: d.current_session_id || null,
@@ -1272,6 +1297,8 @@ export class RBACService {
       credit_gl_account_id?: string | null;
       credit_gl_account_number?: string | null;
       credit_gl_account_name?: string | null;
+      comp_enabled?: boolean;
+      assigned_waiter_ids?: string[];
     },
     user: { id: string; role?: string; email?: string }
   ): Promise<RestaurantTable> {
@@ -1298,6 +1325,9 @@ export class RBACService {
       credit_gl_account_id: tableData.credit_gl_account_id?.trim() || null,
       credit_gl_account_number: tableData.credit_gl_account_number?.trim() || null,
       credit_gl_account_name: tableData.credit_gl_account_name?.trim() || null,
+      comp_enabled: Boolean(tableData.comp_enabled),
+      assigned_waiter_ids: tableData.assigned_waiter_ids || [],
+      waiter_ping: null,
       qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent(tableData.table_number.trim())}`,
       last_scanned_at: null,
       current_session_id: null,
@@ -1325,6 +1355,8 @@ export class RBACService {
           credit_gl_account_id: newTable.credit_gl_account_id || null,
           credit_gl_account_number: newTable.credit_gl_account_number || null,
           credit_gl_account_name: newTable.credit_gl_account_name || null,
+          comp_enabled: newTable.comp_enabled || false,
+          assigned_waiter_ids: newTable.assigned_waiter_ids || [],
           qr_code_url: newTable.qr_code_url,
         },
         update: {
@@ -1341,6 +1373,8 @@ export class RBACService {
           credit_gl_account_id: newTable.credit_gl_account_id || null,
           credit_gl_account_number: newTable.credit_gl_account_number || null,
           credit_gl_account_name: newTable.credit_gl_account_name || null,
+          comp_enabled: newTable.comp_enabled || false,
+          assigned_waiter_ids: newTable.assigned_waiter_ids || [],
         },
       });
     } catch (e: any) {
@@ -1402,6 +1436,9 @@ export class RBACService {
       if (updates.credit_gl_account_id !== undefined) tableUpdates.credit_gl_account_id = updates.credit_gl_account_id ? updates.credit_gl_account_id.trim() : null;
       if (updates.credit_gl_account_number !== undefined) tableUpdates.credit_gl_account_number = updates.credit_gl_account_number ? updates.credit_gl_account_number.trim() : null;
       if (updates.credit_gl_account_name !== undefined) tableUpdates.credit_gl_account_name = updates.credit_gl_account_name ? updates.credit_gl_account_name.trim() : null;
+      if (updates.comp_enabled !== undefined) tableUpdates.comp_enabled = Boolean(updates.comp_enabled);
+      if (updates.assigned_waiter_ids !== undefined) tableUpdates.assigned_waiter_ids = updates.assigned_waiter_ids;
+      if (updates.waiter_ping !== undefined) tableUpdates.waiter_ping = updates.waiter_ping;
 
       await prisma.restaurantTable.upsert({
         where: { id: tableId },
@@ -1421,6 +1458,7 @@ export class RBACService {
           credit_gl_account_id: updates.credit_gl_account_id ? updates.credit_gl_account_id.trim() : null,
           credit_gl_account_number: updates.credit_gl_account_number ? updates.credit_gl_account_number.trim() : null,
           credit_gl_account_name: updates.credit_gl_account_name ? updates.credit_gl_account_name.trim() : null,
+          comp_enabled: Boolean(updates.comp_enabled),
           qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent((updates.table_number || tableId).trim())}`,
         },
         update: tableUpdates,
@@ -1650,21 +1688,25 @@ export class RBACService {
     businessId: string,
     tableId: string,
     metadata?: { tableNumber?: string; customerName?: string; existingHostToken?: string }
-  ): Promise<{ table: RestaurantTable; business: any; is_host: boolean; host_token: string | null; session_id: string }> {
+  ): Promise<{ table: RestaurantTable; business: any; is_host: boolean; host_token: string | null; session_id: string; active_order?: TableOrder | null }> {
     await db.ensureBusiness(businessId);
 
-    let existingTable = await prisma.restaurantTable.findUnique({ where: { id: tableId } });
-    if (!existingTable && metadata?.tableNumber) {
-      existingTable = await prisma.restaurantTable.findFirst({
-        where: { business_id: businessId, table_number: metadata.tableNumber },
-      });
-    }
+    let existingTable = await prisma.restaurantTable.findFirst({
+      where: {
+        business_id: businessId,
+        OR: [
+          { id: tableId },
+          ...(metadata?.tableNumber ? [{ table_number: metadata.tableNumber }] : []),
+        ],
+      },
+    });
 
     const now = new Date();
     let tableData: RestaurantTable;
     let isHost = false;
     let hostToken: string | null = null;
     let sessionId: string;
+    let activeOrder: TableOrder | null = null;
 
     if (existingTable) {
       const existingSessionId = existingTable.current_session_id;
@@ -1685,8 +1727,45 @@ export class RBACService {
             ],
             status: { notIn: ['COMPLETED', 'CANCELLED'] },
           },
+          orderBy: { created_at: 'desc' },
         });
-        hasActiveOrders = activeOrders.length > 0;
+        if (activeOrders.length > 0) {
+          hasActiveOrders = true;
+          const d: any = activeOrders[0];
+          activeOrder = {
+            id: d.id,
+            business_id: d.business_id,
+            table_id: d.table_id || null,
+            table_number: d.table_number,
+            order_number: d.order_number || null,
+            floor: d.floor || null,
+            building: d.building || null,
+            items: (d.items as any) || [],
+            subtotal: Number(d.subtotal),
+            tax_amount: Number(d.tax_amount || 0),
+            total_amount: Number(d.total_amount),
+            currency: d.currency || 'Rs.',
+            customer_name: d.customer_name || null,
+            customer_phone: d.customer_phone || null,
+            customer_pan: d.customer_pan || null,
+            order_notes: d.order_notes || null,
+            status: d.status as OrderStatus,
+            pay_first: Boolean(d.pay_first),
+            credit_only: Boolean(d.credit_only),
+            session_id: d.session_id || null,
+            bill_requested: Boolean(d.bill_requested),
+            bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
+            payment_method: d.payment_method || null,
+            payment_status: d.payment_status || null,
+            promo_code: d.promo_code || null,
+            promo_discount: Number(d.promo_discount) || 0,
+            taxes: (d.taxes as any) || [],
+            ready_at: d.ready_at ? new Date(d.ready_at) : null,
+            served_at: d.served_at ? new Date(d.served_at) : null,
+            created_at: new Date(d.created_at),
+            updated_at: new Date(d.updated_at),
+          };
+        }
       } catch (e) {}
 
       const isSessionRecent = (Date.now() - lastScannedMs) < (15 * 60 * 1000); // 15 mins
@@ -1717,10 +1796,13 @@ export class RBACService {
           credit_gl_account_id: existingTable.credit_gl_account_id || null,
           credit_gl_account_number: existingTable.credit_gl_account_number || null,
           credit_gl_account_name: existingTable.credit_gl_account_name || null,
+          comp_enabled: Boolean(existingTable.comp_enabled),
+          assigned_waiter_ids: existingTable.assigned_waiter_ids || [],
+          waiter_ping: (existingTable.waiter_ping as any) || null,
           qr_code_url: existingTable.qr_code_url || '',
           last_scanned_at: existingTable.last_scanned_at ? new Date(existingTable.last_scanned_at) : now,
           current_session_id: sessionId,
-          host_token: isHost ? hostToken : null,
+          host_token: existingHostToken || (isHost ? hostToken : null),
           created_at: new Date(existingTable.created_at),
           updated_at: now,
         };
@@ -1764,6 +1846,9 @@ export class RBACService {
           credit_gl_account_id: existingTable.credit_gl_account_id || null,
           credit_gl_account_number: existingTable.credit_gl_account_number || null,
           credit_gl_account_name: existingTable.credit_gl_account_name || null,
+          comp_enabled: Boolean(existingTable.comp_enabled),
+          assigned_waiter_ids: existingTable.assigned_waiter_ids || [],
+          waiter_ping: (existingTable.waiter_ping as any) || null,
           qr_code_url: existingTable.qr_code_url || '',
           last_scanned_at: now,
           current_session_id: sessionId,
@@ -1777,8 +1862,14 @@ export class RBACService {
       hostToken = `host-${crypto.randomBytes(12).toString('hex')}`;
       isHost = true;
 
+      let safeTableId = tableId;
+      const globalConflict = await prisma.restaurantTable.findUnique({ where: { id: safeTableId } });
+      if (globalConflict && globalConflict.business_id !== businessId) {
+        safeTableId = `tbl-${businessId.slice(0, 16)}-${metadata?.tableNumber ? encodeURIComponent(metadata.tableNumber) : Date.now().toString(36)}`;
+      }
+
       tableData = {
-        id: tableId,
+        id: safeTableId,
         business_id: businessId,
         table_number: metadata?.tableNumber || 'Table 1',
         floor: null,
@@ -1813,7 +1904,7 @@ export class RBACService {
         update: {
           status: tableData.status,
           current_session_id: sessionId,
-          host_token: hostToken,
+          host_token: tableData.host_token,
           last_scanned_at: now,
         },
       });
@@ -1837,7 +1928,8 @@ export class RBACService {
       business: biz, 
       is_host: isHost, 
       host_token: hostToken, 
-      session_id: sessionId 
+      session_id: sessionId,
+      active_order: activeOrder,
     };
   }
 
@@ -1846,7 +1938,16 @@ export class RBACService {
    */
   private determineItemStation(item: { name?: string; category?: string; additional_categories?: string[]; station?: 'KITCHEN' | 'BAR' | 'BOTH' }): 'KITCHEN' | 'BAR' | 'BOTH' {
     if (item?.station) return item.station;
-    return 'KITCHEN';
+    const DRINK_KEYWORDS = [
+      'drink', 'beverage', 'beverages', 'bar', 'cocktail', 'cocktails', 'mocktail', 'mocktails',
+      'wine', 'beer', 'juice', 'juices', 'shake', 'shakes', 'smoothie', 'smoothies', 'soda',
+      'soft drink', 'tea', 'coffee', 'liquor', 'whiskey', 'vodka', 'rum', 'gin', 'champagne',
+      'cider', 'cooler', 'espresso', 'latte', 'brew'
+    ];
+    const categories = [item?.category || '', ...(item?.additional_categories || [])];
+    const combinedText = [item?.name || '', ...categories].join(' ').toLowerCase();
+    const isDrink = DRINK_KEYWORDS.some((kw) => combinedText.includes(kw));
+    return isDrink ? 'BAR' : 'KITCHEN';
   }
 
   /**
@@ -1922,14 +2023,22 @@ export class RBACService {
     let tableDocData: any = null;
 
     // Session Security Enforcement: Validate table session is active and not settled/expired
-    if (orderData.table_id && orderData.table_id !== 'walk-in' && orderData.table_id !== 'takeout') {
-      try {
-        let tableSnap = await prisma.restaurantTable.findUnique({ where: { id: orderData.table_id } });
-        if (!tableSnap && orderData.table_number) {
-          tableSnap = await prisma.restaurantTable.findFirst({
-            where: { business_id: businessId, table_number: orderData.table_number },
-          });
-        }
+    const lookupTableId = (orderData.table_id && orderData.table_id !== 'walk-in' && orderData.table_id !== 'takeout' && orderData.table_id !== 'table-general')
+      ? orderData.table_id
+      : undefined;
+
+    try {
+      let tableSnap: any = null;
+      if (lookupTableId) {
+        tableSnap = await prisma.restaurantTable.findFirst({
+          where: { id: lookupTableId, business_id: businessId },
+        });
+      }
+      if (!tableSnap && orderData.table_number) {
+        tableSnap = await prisma.restaurantTable.findFirst({
+          where: { business_id: businessId, table_number: orderData.table_number },
+        });
+      }
 
         if (tableSnap) {
           tableDocData = tableSnap;
@@ -1971,7 +2080,6 @@ export class RBACService {
         }
         console.warn('Table session verification note:', err);
       }
-    }
 
     // Security Hardening: verify item prices against the database menu item records to prevent client pricing tampering
     const itemIds = orderData.items.map((it: any) => it.item_id || it.id).filter(Boolean);
@@ -2248,10 +2356,10 @@ export class RBACService {
       id: orderId,
       order_number: orderNumber,
       business_id: businessId,
-      table_id: orderData.table_id || '',
-      table_number: orderData.table_number || 'Table',
-      floor: orderData.floor ?? null,
-      building: orderData.building ?? null,
+      table_id: tableDocData?.id || orderData.table_id || '',
+      table_number: tableDocData?.table_number || orderData.table_number || 'Table',
+      floor: tableDocData?.floor ?? orderData.floor ?? null,
+      building: tableDocData?.building ?? orderData.building ?? null,
       items: newItems,
       subtotal,
       tax_amount: taxAmount,
@@ -2278,16 +2386,33 @@ export class RBACService {
     try {
       await db.ensureBusiness(businessId);
       if (order.table_id) {
-        const tExists = await prisma.restaurantTable.findUnique({ where: { id: order.table_id } });
+        const tExists = await prisma.restaurantTable.findFirst({
+          where: { id: order.table_id, business_id: businessId },
+        });
         if (!tExists) {
-          await prisma.restaurantTable.create({
-            data: {
-              id: order.table_id,
-              business_id: businessId,
-              table_number: order.table_number || 'T-1',
-              status: 'ACTIVE',
-            },
-          }).catch(() => {});
+          const tByNumber = await prisma.restaurantTable.findFirst({
+            where: { business_id: businessId, table_number: order.table_number || 'T-1' },
+          });
+          if (tByNumber) {
+            order.table_id = tByNumber.id;
+          } else {
+            try {
+              const createdTbl = await prisma.restaurantTable.create({
+                data: {
+                  id: order.table_id,
+                  business_id: businessId,
+                  table_number: order.table_number || 'T-1',
+                  status: 'ACTIVE',
+                },
+              });
+              order.table_id = createdTbl.id;
+            } catch (err) {
+              const fallbackTbl = await prisma.restaurantTable.findFirst({
+                where: { business_id: businessId, table_number: order.table_number || 'T-1' },
+              });
+              order.table_id = fallbackTbl ? fallbackTbl.id : (null as any);
+            }
+          }
         }
       }
       await prisma.tableOrder.upsert({
@@ -2376,54 +2501,85 @@ export class RBACService {
         },
         orderBy: { created_at: 'desc' },
       });
-      return dbOrders.map((d: any) => ({
-        id: d.id,
-        business_id: d.business_id,
-        table_id: d.table_id || '',
-        table_number: d.table_number,
-        order_number: d.order_number || undefined,
-        floor: d.floor ?? null,
-        building: d.building ?? null,
-        items: (d.items as any) || [],
-        subtotal: Number(d.subtotal) || 0,
-        tax_amount: Number(d.tax_amount) || 0,
-        total_amount: Number(d.total_amount) || 0,
-        currency: d.currency || 'Rs.',
-        customer_name: d.customer_name || 'Guest',
-        customer_phone: d.customer_phone || '',
-        customer_pan: (d as any).customer_pan || '',
-        order_notes: d.order_notes || '',
-        status: (d.status as OrderStatus) || 'RECEIVED',
-        pay_first: Boolean(d.pay_first),
-        credit_only: Boolean(d.credit_only),
-        credit_pin_verified: Boolean(d.credit_pin_verified),
-        pin_verified: Boolean(d.credit_pin_verified),
-        credit_gl_account_id: d.credit_gl_account_id || null,
-        credit_gl_account_number: d.credit_gl_account_number || null,
-        credit_gl_account_name: d.credit_gl_account_name || null,
-        payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
-        payment_confirmed_by: d.payment_confirmed_by || null,
-        sale_id: d.sale_id || null,
-        source: d.source || (d.sale_id ? 'POS_MANUAL' : 'QR'),
-        pos_sale_id: d.sale_id || null,
-        invoice_number: d.invoice_number || null,
-        folio_delivered: Boolean(d.folio_delivered),
-        folio_delivered_at: d.folio_delivered_at ? new Date(d.folio_delivered_at) : null,
-        bill_acknowledged: Boolean(d.bill_acknowledged),
-        payment_rejected_reason: d.payment_rejected_reason || null,
-        session_id: d.session_id || null,
-        bill_requested: Boolean(d.bill_requested),
-        bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
-        payment_method: d.payment_method || null,
-        payment_status: d.payment_status || null,
-        promo_code: d.promo_code || null,
-        promo_discount: Number(d.promo_discount) || 0,
-        taxes: (d.taxes as any) || [],
-        ready_at: d.ready_at ? new Date(d.ready_at) : null,
-        served_at: d.served_at ? new Date(d.served_at) : null,
-        created_at: new Date(d.created_at),
-        updated_at: new Date(d.updated_at),
-      }));
+      return dbOrders.map((d: any) => {
+        const isSettledPaid = (d.payment_status === 'PAID' || Boolean(d.sale_id)) && !d.pay_first;
+        const effectiveStatus: OrderStatus = (isSettledPaid && d.status !== 'CANCELLED')
+          ? 'COMPLETED'
+          : ((d.status as OrderStatus) || 'RECEIVED');
+
+        const rawItems = (d.items as any[]) || [];
+        const needsItemServed = isSettledPaid && rawItems.some((it: any) => it && it.status !== 'CANCELLED' && it.status !== 'SERVED');
+        const healedItems = needsItemServed
+          ? rawItems.map((it: any) => it.status !== 'CANCELLED' ? { ...it, status: 'SERVED', served_at: it.served_at || new Date().toISOString() } : it)
+          : rawItems;
+
+        if (isSettledPaid && (d.status !== 'COMPLETED' || needsItemServed) && d.status !== 'CANCELLED') {
+          // Self-heal corrupted database records in background
+          prisma.tableOrder.update({
+            where: { id: d.id },
+            data: {
+              status: 'COMPLETED',
+              ...(needsItemServed ? { items: healedItems as any } : {}),
+            },
+          }).catch(() => {});
+        }
+
+        const isOrderSettled = Boolean(
+          d.pay_first
+            ? effectiveStatus === 'COMPLETED'
+            : (effectiveStatus === 'COMPLETED' || d.payment_status === 'PAID' || Boolean(d.sale_id))
+        );
+
+        return {
+          id: d.id,
+          business_id: d.business_id,
+          table_id: d.table_id || '',
+          table_number: d.table_number,
+          order_number: d.order_number || undefined,
+          floor: d.floor ?? null,
+          building: d.building ?? null,
+          items: healedItems,
+          subtotal: Number(d.subtotal) || 0,
+          tax_amount: Number(d.tax_amount) || 0,
+          total_amount: Number(d.total_amount) || 0,
+          currency: d.currency || 'Rs.',
+          customer_name: d.customer_name || 'Guest',
+          customer_phone: d.customer_phone || '',
+          customer_pan: (d as any).customer_pan || '',
+          order_notes: d.order_notes || '',
+          status: effectiveStatus,
+          settled: isOrderSettled,
+          pay_first: Boolean(d.pay_first),
+          credit_only: Boolean(d.credit_only),
+          credit_pin_verified: Boolean(d.credit_pin_verified),
+          pin_verified: Boolean(d.credit_pin_verified),
+          credit_gl_account_id: d.credit_gl_account_id || null,
+          credit_gl_account_number: d.credit_gl_account_number || null,
+          credit_gl_account_name: d.credit_gl_account_name || null,
+          payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
+          payment_confirmed_by: d.payment_confirmed_by || null,
+          sale_id: d.sale_id || null,
+          source: d.source || (d.sale_id ? 'POS_MANUAL' : 'QR'),
+          pos_sale_id: d.sale_id || null,
+          invoice_number: d.invoice_number || null,
+          folio_delivered: Boolean(d.folio_delivered),
+          folio_delivered_at: d.folio_delivered_at ? new Date(d.folio_delivered_at) : null,
+          bill_acknowledged: Boolean(d.bill_acknowledged),
+          payment_rejected_reason: d.payment_rejected_reason || null,
+          session_id: d.session_id || null,
+          bill_requested: Boolean(d.bill_requested),
+          bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
+          payment_method: d.payment_method || null,
+          payment_status: d.payment_status || null,
+          promo_code: d.promo_code || null,
+          promo_discount: Number(d.promo_discount) || 0,
+          taxes: (d.taxes as any) || [],
+          ready_at: d.ready_at ? new Date(d.ready_at) : null,
+          served_at: d.served_at ? new Date(d.served_at) : null,
+          created_at: new Date(d.created_at),
+          updated_at: new Date(d.updated_at),
+        };
+      });
     } catch (err: any) {
       console.warn('Prisma getTableOrders error:', err.message);
       return [];
@@ -2449,20 +2605,33 @@ export class RBACService {
     if (currentOrder.pay_first && currentOrder.payment_status === 'UNPAID' && status !== 'CANCELLED') {
       throw new Error('Use the confirm-payment endpoint to process this order.');
     }
+    const isCompletedOrSettled = currentOrder.status === 'COMPLETED' ||
+      (!currentOrder.pay_first && (currentOrder.payment_status === 'PAID' || Boolean(currentOrder.sale_id)));
+    if (isCompletedOrSettled) {
+      if (status !== 'COMPLETED' && status !== 'CANCELLED') {
+        throw new Error(`Order ${orderId} has already been settled and completed; its status cannot be changed back to ${status}.`);
+      }
+    }
+
+    const normalizedStatus: OrderStatus = (
+      (status as any) === 'IN_PREP' ? 'PREPARING' :
+      (status as any) === 'DELIVERED' ? 'SERVED' :
+      status
+    );
 
     const now = new Date();
     let readyAt = currentOrder.ready_at;
     let servedAt = currentOrder.served_at;
-    let nextStatus = status;
+    let nextStatus = normalizedStatus;
 
-    if (status === 'READY' && !readyAt) {
+    if (normalizedStatus === 'READY' && !readyAt) {
       readyAt = now;
     }
-    if (status === 'SERVED' && !servedAt) {
+    if (normalizedStatus === 'SERVED' && !servedAt) {
       servedAt = now;
     }
     // Auto-complete pay-first orders when served
-    if (status === 'SERVED' && currentOrder.pay_first) {
+    if (normalizedStatus === 'SERVED' && currentOrder.pay_first) {
       nextStatus = 'COMPLETED' as any;
     }
 
@@ -2532,6 +2701,7 @@ export class RBACService {
       sale_id: updated.sale_id || null,
       source: updated.source || (updated.sale_id ? 'POS_MANUAL' : 'QR'),
       pos_sale_id: updated.sale_id || null,
+      settled: Boolean(updated.pay_first ? updated.status === 'COMPLETED' : (updated.status === 'COMPLETED' || updated.payment_status === 'PAID' || Boolean(updated.sale_id))),
       ready_at: updated.ready_at ? new Date(updated.ready_at) : null,
       served_at: updated.served_at ? new Date(updated.served_at) : null,
       created_at: new Date(updated.created_at),
@@ -2582,16 +2752,22 @@ export class RBACService {
       throw new Error(`Item not found in order ${orderId}`);
     }
 
+    const effectiveNewStatus: OrderStatus = (
+      (newStatus as any) === 'IN_PREP' ? 'PREPARING' :
+      (newStatus as any) === 'DELIVERED' ? 'SERVED' :
+      newStatus
+    );
+
     const now = new Date();
     const targetItem = items[targetIdx];
-    targetItem.status = newStatus;
-    if (newStatus === 'READY') {
+    targetItem.status = effectiveNewStatus;
+    if (effectiveNewStatus === 'READY') {
       targetItem.ready_at = now.toISOString();
     }
-    if (newStatus === 'SERVED') {
+    if (effectiveNewStatus === 'SERVED') {
       targetItem.served_at = now.toISOString();
     }
-    if (newStatus === 'CANCELLED') {
+    if (effectiveNewStatus === 'CANCELLED') {
       targetItem.cancelled_at = now.toISOString();
     }
 
@@ -2609,7 +2785,11 @@ export class RBACService {
     const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
 
     let nextOrderStatus: OrderStatus = currentData.status;
-    if (activeItems.length === 0) {
+    const isAlreadySettled = currentData.status === 'COMPLETED' || (!currentData.pay_first && (currentData.payment_status === 'PAID' || Boolean(currentData.sale_id)));
+    if (isAlreadySettled) {
+      // Order is already completed and settled. Do not revert order status.
+      nextOrderStatus = 'COMPLETED';
+    } else if (activeItems.length === 0) {
       nextOrderStatus = 'CANCELLED';
     } else {
       const allServed = activeItems.length > 0 && activeItems.every((it) => it.status === 'SERVED');
@@ -2677,12 +2857,17 @@ export class RBACService {
       } catch (e) {}
     }
 
-    // If order was cancelled completely, check if table can be marked AVAILABLE
+    // If order was cancelled completely, check if table can be marked ACTIVE and session reset
     if (nextOrderStatus === 'CANCELLED' && currentData.table_id) {
       try {
         await prisma.restaurantTable.updateMany({
           where: { id: currentData.table_id },
-          data: { status: 'AVAILABLE' },
+          data: {
+            status: 'ACTIVE',
+            current_session_id: null,
+            host_token: null,
+            last_scanned_at: null,
+          },
         });
       } catch (e) {
         console.warn('Table status update on order cancellation note:', e);
@@ -2717,6 +2902,9 @@ export class RBACService {
       order_notes: d.order_notes || '',
       status: (d.status as OrderStatus) || 'RECEIVED',
       pay_first: Boolean(d.pay_first),
+      payment_status: (d.payment_status as any) || null,
+      payment_method: d.payment_method || null,
+      settled: Boolean(d.pay_first ? d.status === 'COMPLETED' : (d.status === 'COMPLETED' || d.payment_status === 'PAID' || Boolean(d.sale_id))),
       payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
       payment_confirmed_by: d.payment_confirmed_by || null,
       sale_id: d.sale_id || null,
@@ -3739,6 +3927,30 @@ export class RBACService {
   }
 
   /**
+   * Fetch complementary ledger records with optional date filters
+   */
+  public async getCompRecords(
+    businessId: string,
+    filters?: { start_date?: string; end_date?: string }
+  ): Promise<any[]> {
+    try {
+      const where: any = { business_id: businessId };
+      if (filters?.start_date || filters?.end_date) {
+        where.date_string = {};
+        if (filters.start_date) where.date_string.gte = filters.start_date.includes('T') ? filters.start_date.split('T')[0] : filters.start_date;
+        if (filters.end_date) where.date_string.lte = filters.end_date.includes('T') ? filters.end_date.split('T')[0] : filters.end_date;
+      }
+      return await prisma.compRecord.findMany({
+        where,
+        orderBy: { settled_at: 'desc' }
+      });
+    } catch (e: any) {
+      console.warn('Prisma getCompRecords error:', e.message);
+      return [];
+    }
+  }
+
+  /**
    * Create a new sale record (from POS or settled table order)
    */
   public async getNextSequenceNumber(businessId: string, type: 'invoice' | 'order', providedVal?: string, defaultPrefix = '', taxConfig?: any): Promise<string> {
@@ -3823,19 +4035,49 @@ export class RBACService {
     const id = saleData.id || `sale-${timestamp}-${shortRandom}`;
 
     // Concurrency / Race Condition Guard: First-Come First-Served Table Settlement
-    if (saleData.order_id) {
-      try {
-        const existingOrder = await prisma.tableOrder.findUnique({
-          where: { id: saleData.order_id },
-          select: { status: true, payment_status: true }
-        });
-        if (existingOrder && (existingOrder.status === 'COMPLETED' || existingOrder.payment_status === 'PAID')) {
-          const conflictErr: any = new Error('This table order has already been settled by another cashier (First-come first-served).');
-          conflictErr.statusCode = 409;
-          throw conflictErr;
+    if (!options?.skipOrderCompletion) {
+      if (saleData.order_id) {
+        try {
+          const existingOrder = await prisma.tableOrder.findUnique({
+            where: { id: saleData.order_id },
+            select: { status: true, payment_status: true, sale_id: true, pay_first: true }
+          });
+          if (existingOrder) {
+            const isSettled = existingOrder.status === 'COMPLETED' ||
+              (!existingOrder.pay_first && (existingOrder.payment_status === 'PAID' || Boolean(existingOrder.sale_id)));
+            if (isSettled) {
+              const conflictErr: any = new Error('This table order has already been settled by another cashier (First-come first-served).');
+              conflictErr.statusCode = 409;
+              throw conflictErr;
+            }
+          }
+        } catch (e: any) {
+          if ((e as any).statusCode === 409) throw e;
         }
-      } catch (e: any) {
-        if ((e as any).statusCode === 409) throw e;
+      } else if (saleData.table_id || saleData.table_number) {
+        try {
+          const tableOrders = await prisma.tableOrder.findMany({
+            where: {
+              business_id: businessId,
+              ...(saleData.table_id ? { table_id: saleData.table_id } : { table_number: saleData.table_number }),
+            },
+            select: { id: true, status: true, payment_status: true, sale_id: true, pay_first: true },
+            orderBy: { created_at: 'desc' },
+            take: 10,
+          });
+          if (tableOrders.length > 0) {
+            const hasUnsettled = tableOrders.some(
+              (o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && (o.pay_first || (o.payment_status !== 'PAID' && !o.sale_id))
+            );
+            if (!hasUnsettled && saleData.items && saleData.items.length > 0) {
+              const conflictErr: any = new Error('This table order has already been settled by another cashier (First-come first-served).');
+              conflictErr.statusCode = 409;
+              throw conflictErr;
+            }
+          }
+        } catch (e: any) {
+          if ((e as any).statusCode === 409) throw e;
+        }
       }
     }
 
@@ -3872,6 +4114,29 @@ export class RBACService {
         name: glData.customer_name || null,
         phone: glData.customer_phone || null,
       };
+    }
+
+    // Server-side validation for COMPLEMENTARY items: Table must have comp_enabled
+    const rawCompItems = (saleData.items || []).filter((i: any) => (i.comp_qty ?? 0) > 0);
+    if (rawCompItems.length > 0) {
+      if (!saleData.table_id) {
+        const compErr: any = new Error('Complementary sales mode requires a valid table with complementary mode enabled.');
+        compErr.statusCode = 400;
+        throw compErr;
+      }
+      try {
+        const tableSnap = await prisma.restaurantTable.findUnique({
+          where: { id: saleData.table_id },
+          select: { comp_enabled: true }
+        });
+        if (!tableSnap || !tableSnap.comp_enabled) {
+          const compErr: any = new Error('Complementary sales mode is disabled on this table. Please enable it in Table QR settings before comping items.');
+          compErr.statusCode = 400;
+          throw compErr;
+        }
+      } catch (te: any) {
+        if (te.statusCode === 400) throw te;
+      }
     }
 
     const taxConfig = await this.getTaxConfig(businessId);
@@ -3937,6 +4202,7 @@ export class RBACService {
       cashier_name: saleData.cashier_name || user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier'),
       cashier_id: saleData.cashier_id || user?.id || null,
       notes: saleData.notes || '',
+      comp_reason: (saleData as any).comp_reason || undefined,
       created_at: now.toISOString(),
       date_string: dateStr,
     };
@@ -3991,6 +4257,62 @@ export class RBACService {
       console.warn('Prisma createSale error:', e.message);
     }
 
+    // Create comp record if any items are comped
+    try {
+      const compItems = (saleData.items || []).filter((i: any) => (i.comp_qty ?? 0) > 0);
+      if (compItems.length > 0) {
+        let settlingStaffName = user?.name;
+        if (!settlingStaffName && user?.acting_as?.id) {
+          try {
+            const actingUser = await db.findUserById(user.acting_as.id);
+            if (actingUser?.name) settlingStaffName = actingUser.name;
+          } catch {}
+        }
+        if (!settlingStaffName && saleData.cashier_name) {
+          settlingStaffName = saleData.cashier_name;
+        }
+        if (!settlingStaffName && user?.email) {
+          settlingStaffName = user.email.split('@')[0];
+        }
+        if (!settlingStaffName) {
+          settlingStaffName = 'Unknown Staff';
+        }
+
+        const compRecordItems = compItems.map((i: any) => {
+          const qty = Number(i.quantity) || 1;
+          const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || 0));
+          const unitPrice = Number(i.unit_price ?? i.price ?? 0);
+          return {
+            item_id: i.item_id || i.id || '',
+            name: i.name,
+            comp_qty: compQty,
+            unit_price: unitPrice,
+            comp_value: compQty * unitPrice,
+            category: i.category,
+            variant_name: i.variant_name,
+          };
+        });
+        const totalCompValue = compRecordItems.reduce((acc: number, i: any) => acc + i.comp_value, 0);
+        await prisma.compRecord.create({
+          data: {
+            business_id: businessId,
+            sale_id: id,
+            table_id: saleData.table_id || null,
+            table_number: saleData.table_number || 'N/A',
+            staff_id: user?.acting_as?.id || user?.id || null,
+            staff_name: settlingStaffName,
+            reason: (saleData as any).comp_reason || null,
+            items: compRecordItems,
+            total_comp_value: totalCompValue,
+            currency: saleData.currency || taxConfig.currency || 'Rs.',
+            date_string: dateStr,
+          }
+        });
+      }
+    } catch (e: any) {
+      console.warn('Prisma createCompRecord error:', e.message);
+    }
+
 
 
     // =========================================================================
@@ -4035,7 +4357,11 @@ export class RBACService {
         } catch (e) {}
       }
       if (!finalTableNumber) {
-        finalTableNumber = saleData.sale_type === 'TAKEAWAY' || !saleData.table_id ? 'Counter' : 'Dine-In';
+        finalTableNumber = saleData.sale_type === 'DELIVERY'
+          ? 'Delivery'
+          : saleData.sale_type === 'ROOM_SERVICE'
+          ? 'Room Service'
+          : (saleData.sale_type === 'TAKEAWAY' || !saleData.table_id ? 'Counter' : 'Dine-In');
       }
 
       const tableOrderRecord: any = {
@@ -4109,33 +4435,48 @@ export class RBACService {
     // Only runs when settling an existing order (saleData.order_id exists)
     else if (!options?.skipOrderCompletion && (saleData.order_id || saleData.table_id || saleData.table_number)) {
       let matchingOrders: any[] = [];
+      let targetTableId = saleData.table_id;
+      let targetTableNumber = saleData.table_number;
       try {
         const orderWhere: any = {
           business_id: businessId,
-          status: { notIn: ['COMPLETED', 'CANCELLED'] },
         };
         if (saleData.order_id) {
           orderWhere.id = saleData.order_id;
         } else if (saleData.table_id) {
           orderWhere.table_id = saleData.table_id;
+          orderWhere.status = { notIn: ['COMPLETED', 'CANCELLED'] };
         } else if (saleData.table_number) {
           orderWhere.table_number = saleData.table_number;
+          orderWhere.status = { notIn: ['COMPLETED', 'CANCELLED'] };
         }
 
         matchingOrders = await prisma.tableOrder.findMany({
           where: orderWhere,
         });
 
-        await prisma.tableOrder.updateMany({
-          where: orderWhere,
-          data: {
-            status: 'COMPLETED',
-            payment_status: 'PAID',
-            payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
-            sale_id: newSale.id,
-            bill_requested: false,
-          },
-        });
+        for (const ord of matchingOrders) {
+          if (!targetTableId && ord.table_id) targetTableId = ord.table_id;
+          if (!targetTableNumber && ord.table_number) targetTableNumber = ord.table_number;
+          const ordItems = (ord.items as any[]) || [];
+          const updatedOrdItems = ordItems.map((it: any) =>
+            it.status !== 'CANCELLED'
+              ? { ...it, status: 'SERVED', served_at: it.served_at || now.toISOString() }
+              : it
+          );
+          await prisma.tableOrder.update({
+            where: { id: ord.id },
+            data: {
+              status: 'COMPLETED',
+              payment_status: 'PAID',
+              payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
+              sale_id: newSale.id,
+              bill_requested: false,
+              items: updatedOrdItems as any,
+              served_at: ord.served_at || now,
+            },
+          });
+        }
       } catch (e: any) {
         console.warn('Prisma order completion note:', e.message);
       }
@@ -4147,8 +4488,8 @@ export class RBACService {
             business_id: businessId,
             OR: [
               saleData.order_id ? { order_id: saleData.order_id } : undefined,
-              saleData.table_id ? { table_id: saleData.table_id } : undefined,
-              saleData.table_number ? { table_number: saleData.table_number } : undefined,
+              targetTableId ? { table_id: targetTableId } : undefined,
+              targetTableNumber ? { table_number: targetTableNumber } : undefined,
             ].filter(Boolean) as any,
             type: 'BILL_REQUEST',
             status: 'PENDING',
@@ -4161,36 +4502,60 @@ export class RBACService {
         });
       } catch (e) {}
 
-      // Reset Table in Prisma
+      // Reset Table in Prisma only if all active orders on this table have been settled
       try {
-        if (saleData.table_id) {
-          await prisma.restaurantTable.updateMany({
-            where: { id: saleData.table_id, business_id: businessId },
-            data: {
-              status: 'ACTIVE',
-              current_session_id: null,
-              host_token: null,
-              last_scanned_at: null,
+        if (targetTableId) {
+          const remainingOrders = await prisma.tableOrder.count({
+            where: {
+              business_id: businessId,
+              table_id: targetTableId,
+              id: { notIn: matchingOrders.map((m: any) => m.id) },
+              status: { notIn: ['COMPLETED', 'CANCELLED'] },
             },
           });
-        } else if (saleData.table_number) {
-          await prisma.restaurantTable.updateMany({
-            where: { table_number: saleData.table_number, business_id: businessId },
-            data: {
+          if (remainingOrders === 0) {
+            await prisma.restaurantTable.updateMany({
+              where: { id: targetTableId, business_id: businessId },
+              data: {
+                status: 'ACTIVE',
+                current_session_id: null,
+                host_token: null,
+                last_scanned_at: null,
+              },
+            });
+            realtimeEmitter.tableUpdated(businessId, {
+              id: targetTableId || '',
+              table_number: targetTableNumber || '',
               status: 'ACTIVE',
-              current_session_id: null,
-              host_token: null,
-              last_scanned_at: null,
+            });
+          }
+        } else if (targetTableNumber) {
+          const remainingOrders = await prisma.tableOrder.count({
+            where: {
+              business_id: businessId,
+              table_number: targetTableNumber,
+              id: { notIn: matchingOrders.map((m: any) => m.id) },
+              status: { notIn: ['COMPLETED', 'CANCELLED'] },
             },
           });
+          if (remainingOrders === 0) {
+            await prisma.restaurantTable.updateMany({
+              where: { table_number: targetTableNumber, business_id: businessId },
+              data: {
+                status: 'ACTIVE',
+                current_session_id: null,
+                host_token: null,
+                last_scanned_at: null,
+              },
+            });
+            realtimeEmitter.tableUpdated(businessId, {
+              id: targetTableId || '',
+              table_number: targetTableNumber || '',
+              status: 'ACTIVE',
+            });
+          }
         }
       } catch (e) {}
-
-      realtimeEmitter.tableUpdated(businessId, {
-        id: saleData.table_id || '',
-        table_number: saleData.table_number || '',
-        status: 'ACTIVE',
-      });
 
       const emittedOrderIds = new Set<string>();
       if (matchingOrders && matchingOrders.length > 0) {
@@ -4198,8 +4563,8 @@ export class RBACService {
           emittedOrderIds.add(ord.id);
           realtimeEmitter.orderUpdated(businessId, {
             id: ord.id,
-            table_id: ord.table_id || saleData.table_id || '',
-            table_number: ord.table_number || saleData.table_number || '',
+            table_id: ord.table_id || targetTableId || '',
+            table_number: ord.table_number || targetTableNumber || '',
             status: 'COMPLETED',
             payment_status: 'PAID',
             payment_method: newSale.payment_method || saleData.payment_method || ord.payment_method || 'Cash',
@@ -4214,8 +4579,8 @@ export class RBACService {
       if (saleData.order_id && !emittedOrderIds.has(saleData.order_id)) {
         realtimeEmitter.orderUpdated(businessId, {
           id: saleData.order_id,
-          table_id: saleData.table_id || '',
-          table_number: saleData.table_number || '',
+          table_id: targetTableId || saleData.table_id || '',
+          table_number: targetTableNumber || saleData.table_number || '',
           status: 'COMPLETED',
           payment_status: 'PAID',
           payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
@@ -4244,6 +4609,9 @@ export class RBACService {
    */
   public async deleteSale(businessId: string, saleId: string, user?: any): Promise<void> {
     try {
+      await prisma.compRecord.deleteMany({
+        where: { business_id: businessId, sale_id: saleId },
+      });
       await prisma.sale.deleteMany({
         where: { id: saleId, business_id: businessId },
       });
@@ -4272,6 +4640,9 @@ export class RBACService {
   ): Promise<{ deletedCount: number }> {
     let prismaCount = 0;
     try {
+      await prisma.compRecord.deleteMany({
+        where: { business_id: businessId, date_string: dateString },
+      });
       const delRes = await prisma.sale.deleteMany({
         where: { business_id: businessId, date_string: dateString },
       });
@@ -4297,6 +4668,9 @@ export class RBACService {
   public async deleteAllSales(businessId: string, user?: any): Promise<{ deletedCount: number }> {
     let prismaCount = 0;
     try {
+      await prisma.compRecord.deleteMany({
+        where: { business_id: businessId },
+      });
       const delRes = await prisma.sale.deleteMany({
         where: { business_id: businessId },
       });
@@ -4745,16 +5119,33 @@ export class RBACService {
     try {
       await db.ensureBusiness(businessId);
       if (order.table_id) {
-        const tExists = await prisma.restaurantTable.findUnique({ where: { id: order.table_id } });
+        const tExists = await prisma.restaurantTable.findFirst({
+          where: { id: order.table_id, business_id: businessId },
+        });
         if (!tExists) {
-          await prisma.restaurantTable.create({
-            data: {
-              id: order.table_id,
-              business_id: businessId,
-              table_number: order.table_number || 'T-1',
-              status: 'ACTIVE',
-            },
-          }).catch(() => {});
+          const tByNumber = await prisma.restaurantTable.findFirst({
+            where: { business_id: businessId, table_number: order.table_number || 'T-1' },
+          });
+          if (tByNumber) {
+            order.table_id = tByNumber.id;
+          } else {
+            try {
+              const createdTbl = await prisma.restaurantTable.create({
+                data: {
+                  id: order.table_id,
+                  business_id: businessId,
+                  table_number: order.table_number || 'T-1',
+                  status: 'ACTIVE',
+                },
+              });
+              order.table_id = createdTbl.id;
+            } catch (err) {
+              const fallbackTbl = await prisma.restaurantTable.findFirst({
+                where: { business_id: businessId, table_number: order.table_number || 'T-1' },
+              });
+              order.table_id = fallbackTbl ? fallbackTbl.id : (null as any);
+            }
+          }
         }
       }
       await prisma.tableOrder.upsert({

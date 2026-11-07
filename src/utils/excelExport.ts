@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { SaleRecord, GLAccountLink } from '../types/rbac';
+import type { SaleRecord, GLAccountLink, CompRecord } from '../types/rbac';
 
 export interface ExcelSheetData {
   sheetName: string;
@@ -14,15 +14,34 @@ export interface ExcelSheetData {
  */
 export function buildSalesWorkbookData(
   sales: any[],
-  glAccounts: any[],
-  currency: string = 'Rs.'
+  glAccounts: any[] = [],
+  currencyOrCompRecords?: string | CompRecord[],
+  optionalCompRecords?: CompRecord[]
 ): ExcelSheetData[] {
+  let currency = 'Rs.';
+  let compRecords: CompRecord[] | undefined = undefined;
+
+  if (typeof currencyOrCompRecords === 'string') {
+    currency = currencyOrCompRecords;
+    compRecords = optionalCompRecords;
+  } else if (Array.isArray(currencyOrCompRecords)) {
+    compRecords = currencyOrCompRecords;
+    if (typeof optionalCompRecords === 'string') {
+      currency = optionalCompRecords;
+    }
+  }
+
+  const isAllCompSale = (s: any) => {
+    const items = Array.isArray(s.items) ? s.items : [];
+    return items.length > 0 && items.every((i: any) => Boolean(i.is_comp || (Number(i.comp_qty) > 0 && Number(i.comp_qty) >= (Number(i.quantity) || 1))));
+  };
+
   // -------------------------------------------------------------
-  // Filter out CREDIT sales from main Sales Register
+  // Filter out CREDIT sales and 100% COMP sales from main Sales Register
   // -------------------------------------------------------------
-  const nonCreditSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() !== 'CREDIT');
-  const creditSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() === 'CREDIT');
-  const depositSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() === 'DEDUCT_FROM_DEPOSIT');
+  const nonCreditSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() !== 'CREDIT' && !isAllCompSale(s));
+  const creditSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() === 'CREDIT' && !isAllCompSale(s));
+  const depositSales = (sales || []).filter((s) => (s.payment_method || '').toUpperCase() === 'DEDUCT_FROM_DEPOSIT' && !isAllCompSale(s));
 
   // Compute aggregated totals for GL mapping (excluding credit sales totals here, we handle credit separately per account)
   let totalCash = 0;
@@ -66,7 +85,10 @@ export function buildSalesWorkbookData(
       for (const item of s.items) {
         const cat = (item.category || '').toLowerCase();
         const isBar = (item.station || '').toUpperCase() === 'BAR';
-        const itemTot = (Number(item.price || item.unit_price) || 0) * (Number(item.quantity) || 1);
+        const qty = Number(item.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
+        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
+        const itemTot = Number(item.total_price ?? item.subtotal ?? (billedQty * (Number(item.price || item.unit_price) || 0)));
         itemsGross += itemTot;
         if (isBar || cat.includes('bev') || cat.includes('drink') || cat.includes('bar') || cat.includes('tea') || cat.includes('coffee') || cat.includes('juice')) {
           bevGross += itemTot;
@@ -126,7 +148,10 @@ export function buildSalesWorkbookData(
       for (const item of s.items) {
         const cat = (item.category || '').toLowerCase();
         const isBar = (item.station || '').toUpperCase() === 'BAR';
-        const itemTot = (Number(item.price || item.unit_price) || 0) * (Number(item.quantity) || 1);
+        const qty = Number(item.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
+        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
+        const itemTot = Number(item.total_price ?? item.subtotal ?? (billedQty * (Number(item.price || item.unit_price) || 0)));
         itemsGross += itemTot;
         if (isBar || cat.includes('bev') || cat.includes('drink') || cat.includes('bar') || cat.includes('tea') || cat.includes('coffee') || cat.includes('juice')) {
           bevGross += itemTot;
@@ -166,7 +191,8 @@ export function buildSalesWorkbookData(
     'Discount Amount', 'Promo Code', 'Grand Total', 'Cashier / Billed By', 'Notes'
   ];
 
-  const salesRows: (string | number)[][] = sales.map((sale, idx) => {
+  const eligibleSales = (sales || []).filter((s) => !isAllCompSale(s));
+  const salesRows: (string | number)[][] = eligibleSales.map((sale, idx) => {
     let formattedDate = sale.date_string || '';
     if (sale.created_at) {
       try {
@@ -177,10 +203,22 @@ export function buildSalesWorkbookData(
     }
 
     const itemsSummary = Array.isArray(sale.items)
-      ? sale.items.map((i: any) => `${i.name || i.item_name || 'Item'} (x${i.quantity || 1})`).join('; ')
+      ? sale.items
+          .map((i: any) => {
+            const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
+            const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
+            if (billedQty <= 0) return null;
+            return `${i.name || i.item_name || 'Item'} (x${billedQty})`;
+          })
+          .filter(Boolean)
+          .join('; ')
       : '';
     const totalItemsCount = Array.isArray(sale.items)
-      ? sale.items.reduce((sum: number, i: any) => sum + (Number(i.quantity) || 1), 0)
+      ? sale.items.reduce((sum: number, i: any) => {
+          const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
+          const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
+          return sum + billedQty;
+        }, 0)
       : 0;
 
     const taxesSummary = Array.isArray(sale.taxes)
@@ -332,10 +370,18 @@ export function buildSalesWorkbookData(
           variantName && variantName !== '-' ? `${cleanBase} (${variantName})` : cleanBase;
 
         const qty = Number(item.quantity) || 1;
-        const unitPrice = Number(item.unit_price ?? item.price ?? 0);
-        const lineTotal = Number(item.total_price ?? item.subtotal ?? qty * unitPrice);
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
+        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
 
-        totalItemUnits += qty;
+        // If item is completely comped, it belongs exclusively to the Complementary Ledger
+        if (billedQty <= 0 && (item.is_comp || compQty > 0)) {
+          continue;
+        }
+
+        const unitPrice = Number(item.unit_price ?? item.price ?? 0);
+        const lineTotal = Number(item.total_price ?? item.subtotal ?? (billedQty * unitPrice));
+
+        totalItemUnits += billedQty;
         totalItemRevenue = Number((totalItemRevenue + lineTotal).toFixed(2));
 
         itemRows.push([
@@ -348,7 +394,7 @@ export function buildSalesWorkbookData(
           variantName,
           item.category || 'General',
           (item.station || 'KITCHEN').toUpperCase(),
-          qty,
+          billedQty,
           Number(unitPrice.toFixed(2)),
           Number(lineTotal.toFixed(2)),
           normalizedPayment,
@@ -516,7 +562,17 @@ export function buildSalesWorkbookData(
           try { formattedDate = new Date(sale.created_at).toLocaleString('en-US', { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true }); }
           catch { formattedDate = String(sale.created_at); }
         }
-        const itemsSummary = Array.isArray(sale.items) ? sale.items.map((i: any) => `${i.name || i.item_name || 'Item'} (x${i.quantity || 1})`).join('; ') : '';
+        const itemsSummary = Array.isArray(sale.items)
+          ? sale.items
+              .map((i: any) => {
+                const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
+                const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
+                if (billedQty <= 0) return null;
+                return `${i.name || i.item_name || 'Item'} (x${billedQty})`;
+              })
+              .filter(Boolean)
+              .join('; ')
+          : '';
         
         customerSubtotal += Number(sale.total_amount) || 0;
         
@@ -574,10 +630,22 @@ export function buildSalesWorkbookData(
     }
 
     const itemsSummary = Array.isArray(sale.items)
-      ? sale.items.map((i: any) => `${i.name || i.item_name || 'Item'} (x${i.quantity || 1})`).join('; ')
+      ? sale.items
+          .map((i: any) => {
+            const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
+            const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
+            if (billedQty <= 0) return null;
+            return `${i.name || i.item_name || 'Item'} (x${billedQty})`;
+          })
+          .filter(Boolean)
+          .join('; ')
       : '';
     const totalItemsCount = Array.isArray(sale.items)
-      ? sale.items.reduce((sum: number, i: any) => sum + (Number(i.quantity) || 1), 0)
+      ? sale.items.reduce((sum: number, i: any) => {
+          const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
+          const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
+          return sum + billedQty;
+        }, 0)
       : 0;
 
     const tot = Number(sale.total_amount) || 0;
@@ -624,7 +692,7 @@ export function buildSalesWorkbookData(
 
   const depositColWidths = [6, 18, 14, 22, 16, 16, 32, 16, 22, 16, 16, 45, 12, 10, 14, 12, 14, 15, 18, 14, 20, 25];
 
-  return [
+  const sheets: ExcelSheetData[] = [
     { sheetName: 'Sales Register', headers: salesHeaders, rows: salesRows, colWidths: salesColWidths },
     { sheetName: 'Item Sales Register', headers: itemHeaders, rows: itemRows, colWidths: itemColWidths },
     { sheetName: 'GL Links & Mapping', headers: glHeaders, rows: glRows, colWidths: glColWidths },
@@ -632,6 +700,37 @@ export function buildSalesWorkbookData(
     { sheetName: 'Credit Sales Register', headers: creditHeaders, rows: creditRows, colWidths: creditColWidths },
     { sheetName: 'Deduct from Deposit Sales', headers: depositHeaders, rows: depositRows, colWidths: depositColWidths },
   ];
+
+  // Complementary Ledger Sheet
+  if (compRecords && compRecords.length > 0) {
+    const compHeaders = [
+      'Date', 'Time', 'Table', 'Staff Name', 'Item Name', 'Category',
+      'Comp Qty', 'Unit Price (Rs.)', 'Comp Value (Rs.)', 'Reason', 'Sale Ref'
+    ];
+    const compRows: (string | number)[][] = [];
+    for (const rec of compRecords) {
+      const items = Array.isArray(rec.items) ? rec.items : [];
+      for (const item of items as any[]) {
+        compRows.push([
+          rec.date_string,
+          rec.settled_at ? new Date(rec.settled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '-',
+          rec.table_number,
+          rec.staff_name,
+          item.name ?? '',
+          item.category ?? '',
+          Number(item.comp_qty ?? 0),
+          Number(item.unit_price ?? 0).toFixed(2),
+          Number(item.comp_value ?? 0).toFixed(2),
+          rec.reason ?? '',
+          rec.sale_id ?? '',
+        ]);
+      }
+    }
+    const compColWidths = [14, 12, 14, 20, 25, 16, 12, 16, 16, 25, 20];
+    sheets.push({ sheetName: 'Complementary Ledger', headers: compHeaders, rows: compRows, colWidths: compColWidths });
+  }
+
+  return sheets;
 }
 
 export function exportSheetsToExcel(
@@ -675,12 +774,13 @@ export function exportSalesToExcel(
   sales: SaleRecord[],
   glAccounts: GLAccountLink[] = [],
   filenamePrefix = 'Sales_Register',
-  businessName = 'Business'
+  businessName = 'Business',
+  compRecords?: CompRecord[]
 ): void {
   if (!sales || sales.length === 0) {
     throw new Error('No sales records to export');
   }
 
-  const sheets = buildSalesWorkbookData(sales, glAccounts, sales[0]?.currency || 'Rs.');
+  const sheets = buildSalesWorkbookData(sales, glAccounts, sales[0]?.currency || 'Rs.', compRecords);
   exportSheetsToExcel(sheets, filenamePrefix, businessName);
 }

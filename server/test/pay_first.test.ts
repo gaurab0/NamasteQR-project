@@ -1,6 +1,6 @@
-import { firestoreDb as adminDb, collection, doc, getDoc, getDocs, deleteDoc, setDoc } from '../src/config/firebase';
 import { rbacService } from '../src/services/rbac.service';
-import { randomBytes } from 'crypto';
+import { prisma } from '../src/lib/prisma';
+import { db } from '../src/services/db.service';
 
 const testBusinessId = `test-payfirst-${Date.now()}`;
 let passed = 0;
@@ -21,10 +21,7 @@ async function runTests() {
 
   try {
     // Setup Business
-    await setDoc(doc(adminDb, 'businesses', testBusinessId), {
-      name: 'Test Pay First Business',
-      plan: 'PREMIUM',
-    });
+    await db.ensureBusiness(testBusinessId, 'Test Pay First Business');
 
     // 1. Create table with pay_first_enabled=true, and one with it off
     const tablePayFirst = await rbacService.createTable(testBusinessId, { table_number: '1', capacity: 4, status: 'ACTIVE', pay_first_enabled: true }, { id: 'test', role: 'OWNER' });
@@ -36,8 +33,8 @@ async function runTests() {
 
     // 2. Toggle the flag via update
     await rbacService.updateTable(testBusinessId, tableNormal.id, { pay_first_enabled: true }, { id: 'test', role: 'OWNER' });
-    const updatedNormal = await getDoc(doc(adminDb, 'businesses', testBusinessId, 'tables', tableNormal.id));
-    assert(updatedNormal.data()?.pay_first_enabled === true, 'Table 2 updated to pay_first_enabled = true');
+    const updatedNormal = await prisma.restaurantTable.findUnique({ where: { id: tableNormal.id } });
+    assert(updatedNormal?.pay_first_enabled === true, 'Table 2 updated to pay_first_enabled = true');
     await rbacService.updateTable(testBusinessId, tableNormal.id, { pay_first_enabled: false }, { id: 'test', role: 'OWNER' });
 
     // 3. Create an order on the pay-first table -> status is AWAITING_PAYMENT
@@ -85,15 +82,15 @@ async function runTests() {
 
     // 6. Confirm payment with CASH -> a Sale is created, order becomes RECEIVED + PAID
     await rbacService.confirmTableOrderPayment(order1.id, testBusinessId, 'CASH', 'Test Cashier');
-    const confirmedOrder1 = (await getDoc(doc(adminDb, 'businesses', testBusinessId, 'table_orders', order1.id))).data();
+    const confirmedOrder1 = await prisma.tableOrder.findUnique({ where: { id: order1.id } });
     
     assert(confirmedOrder1?.status === 'RECEIVED', 'Order 1 status is now RECEIVED');
     assert(confirmedOrder1?.payment_status === 'PAID', 'Order 1 payment_status is PAID');
     assert(!!confirmedOrder1?.sale_id, 'Order 1 has a sale_id linked');
     
-    const sale1 = (await getDoc(doc(adminDb, 'businesses', testBusinessId, 'sales', confirmedOrder1!.sale_id))).data();
+    const sale1 = await prisma.sale.findUnique({ where: { id: confirmedOrder1!.sale_id! } });
     assert(sale1?.payment_method === 'CASH', 'Sale 1 was created with method CASH');
-    assert(sale1?.total_amount >= 200, 'Sale 1 total amount is correct');
+    assert(Number(sale1?.total_amount) >= 200, 'Sale 1 total amount is correct');
 
     // 7. Confirm payment again -> no second sale, idempotent or error
     let doubleConfirmFailed = false;
@@ -112,7 +109,7 @@ async function runTests() {
     });
     
     await rbacService.rejectTableOrderPayment(order3.id, testBusinessId, 'Customer left', 'Test Cashier');
-    const cancelledOrder3 = (await getDoc(doc(adminDb, 'businesses', testBusinessId, 'table_orders', order3.id))).data();
+    const cancelledOrder3 = await prisma.tableOrder.findUnique({ where: { id: order3.id } });
     
     assert(cancelledOrder3?.status === 'CANCELLED', 'Order 3 status is CANCELLED');
     assert(cancelledOrder3?.payment_rejected_reason === 'Customer left', 'Order 3 has correct rejection reason');
@@ -133,14 +130,11 @@ async function runTests() {
     // Cleanup
     console.log(`Cleaning up test business ${testBusinessId}...`);
     try {
-       const collections = ['tables', 'table_orders', 'sales'];
-       for (const col of collections) {
-         const snaps = await getDocs(collection(adminDb, 'businesses', testBusinessId, col));
-         for (const doc of snaps.docs) {
-           await deleteDoc(doc.ref);
-         }
-       }
-       await deleteDoc(doc(adminDb, 'businesses', testBusinessId));
+      await prisma.sale.deleteMany({ where: { business_id: testBusinessId } });
+      await prisma.tableOrder.deleteMany({ where: { business_id: testBusinessId } });
+      await prisma.restaurantTable.deleteMany({ where: { business_id: testBusinessId } });
+      await prisma.counter.deleteMany({ where: { business_id: testBusinessId } });
+      await prisma.business.deleteMany({ where: { id: testBusinessId } });
     } catch(e) {}
     
     console.log(`\nResults: ${passed} Passed, ${failed} Failed`);

@@ -596,6 +596,11 @@ export const TableManagementGrid: React.FC<TableManagementGridProps> = ({
                                   💳 Credit Only
                                 </span>
                               )}
+                              {tbl.comp_enabled && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 shadow-2xs">
+                                  🎁 Comp Mode
+                                </span>
+                              )}
                             </div>
                             {tbl.last_scanned_at && (
                               <div className="text-[10px] text-zinc-400 mt-0.5">

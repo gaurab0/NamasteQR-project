@@ -295,14 +295,22 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
     }
   };
 
-  const handleOpenGlExcelPreview = () => {
+  const handleOpenGlExcelPreview = async () => {
     try {
       if (!sales || sales.length === 0) {
         setError('No sales records available to preview.');
         return;
       }
       const currencySymbol = taxConfig?.currency_symbol || taxConfig?.currency || 'Rs.';
-      const sheets = buildSalesWorkbookData(sales, glAccounts, currencySymbol);
+      let compRecords: any[] = [];
+      if (business?.id) {
+        try {
+          compRecords = await rbacService.getCompRecordsApi(business.id);
+        } catch (e) {
+          // non-fatal
+        }
+      }
+      const sheets = buildSalesWorkbookData(sales, glAccounts, currencySymbol, compRecords);
       setExcelPreviewSheets(sheets);
       setExcelPreviewOpen(true);
     } catch (err: any) {

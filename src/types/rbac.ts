@@ -168,6 +168,7 @@ export interface RestaurantTable {
   credit_gl_account_id?: string | null;
   credit_gl_account_number?: string | null;
   credit_gl_account_name?: string | null;
+  comp_enabled?: boolean;
   assigned_waiter_ids?: string[];
   waiter_ping?: {
     active: boolean;
@@ -278,6 +279,7 @@ export interface TableOrder {
   served_at?: string | Date | null;
   source?: 'QR' | 'POS_MANUAL' | string;
   pos_sale_id?: string;
+  settled?: boolean;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -336,6 +338,9 @@ export interface SaleItem {
   total_price?: number;
   category?: string;
   notes?: string;
+  comp_qty?: number;
+  is_comp?: boolean;
+  comp_value?: number;
 }
 
 export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'ROOM_SERVICE' | 'QUICK_POS';
@@ -377,6 +382,33 @@ export interface SaleRecord {
   date_string: string; // YYYY-MM-DD
   source?: 'POS_MANUAL' | 'QR' | string;
   dispatch_kitchen?: boolean;
+  comp_reason?: string;
+}
+
+export interface CompRecordItem {
+  item_id: string;
+  name: string;
+  comp_qty: number;
+  unit_price: number;
+  comp_value: number;
+  category?: string;
+  variant_name?: string;
+}
+
+export interface CompRecord {
+  id: string;
+  business_id: string;
+  sale_id?: string;
+  table_id?: string;
+  table_number: string;
+  staff_id?: string;
+  staff_name: string;
+  reason?: string;
+  items: CompRecordItem[];
+  total_comp_value: number;
+  currency: string;
+  settled_at: string;
+  date_string: string;
 }
 
 

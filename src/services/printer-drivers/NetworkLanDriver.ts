@@ -65,12 +65,16 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       const response = await fetch('/api/print/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        credentials: 'include',
         body: JSON.stringify({ host: this.host, port: this.port, timeout: 3500 }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to reach printer at ${this.host}:${this.port}`);
+        const errMsg = typeof errorData.error === 'object' && errorData.error !== null
+          ? errorData.error.message || errorData.error.code
+          : (errorData.error || `Failed to reach printer at ${this.host}:${this.port}`);
+        throw new Error(errMsg);
       }
 
       this._isConnected = true;
@@ -124,6 +128,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
           'x-printer-port': String(this.port),
           ...getAuthHeader(),
         },
+        credentials: 'include',
         body: data,
       });
 
@@ -136,6 +141,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       const jsonRes = await fetch('/api/print/lan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        credentials: 'include',
         body: JSON.stringify({
           host: this.host,
           port: this.port,
@@ -149,7 +155,10 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       }
 
       const errJson = await jsonRes.json().catch(() => ({}));
-      throw new Error(errJson.error || `HTTP ${jsonRes.status} from print service`);
+      const errMsg = typeof errJson.error === 'object' && errJson.error !== null
+        ? errJson.error.message || errJson.error.code
+        : (errJson.error || `HTTP ${jsonRes.status} from print service`);
+      throw new Error(errMsg);
     } catch (backendErr: any) {
       // 2. Fallback to local desktop bridge if running on localhost:9100
       try {

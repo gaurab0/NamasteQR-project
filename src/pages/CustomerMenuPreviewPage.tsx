@@ -18,6 +18,7 @@ import {
   Search,
   Clock,
   ArrowLeft,
+  ArrowRight,
   Sparkles,
   ShieldCheck,
   CheckCircle2,
@@ -270,6 +271,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const [activeOrder, setActiveOrder] = useState<TableOrder | null>(null);
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
   const [noOrderToast, setNoOrderToast] = useState(false);
+  const lastTargetOrderIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (activeOrder?.id) {
+      lastTargetOrderIdRef.current = activeOrder.id;
+    } else if (successOrderData?.id) {
+      lastTargetOrderIdRef.current = successOrderData.id;
+    }
+  }, [activeOrder?.id, successOrderData?.id]);
 
   // Customer View Language Preference State (Headless Google Translate)
   const [selectedLanguage, setSelectedLanguage] = useState<string>(() => {
@@ -327,10 +337,6 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     currency?: string;
   } | null>(() => {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('tableId') || urlParams.get('tableNumber')) {
-        return null;
-      }
       const cached = localStorage.getItem('serveflow_last_settled_payment');
       if (!cached) return null;
       const parsed = JSON.parse(cached);
@@ -358,10 +364,6 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const kickOutTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isTableBillConcluded, setIsTableBillConcluded] = useState<boolean>(() => {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('tableId') || urlParams.get('tableNumber')) {
-        return false;
-      }
       const stored = localStorage.getItem('serveflow_table_bill_concluded');
       return stored === 'true';
     } catch {
@@ -525,6 +527,26 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       }
     }
 
+    if ((!resolvedAmount || resolvedAmount <= 0) && settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0) {
+      resolvedAmount = Number(settledPaymentInfo.amount);
+      if (settledPaymentInfo.currency) resolvedCurrency = settledPaymentInfo.currency;
+      if (settledPaymentInfo.mode) resolvedMode = settledPaymentInfo.mode;
+    }
+
+    if (!resolvedAmount || resolvedAmount <= 0) {
+      try {
+        const cached = localStorage.getItem('serveflow_last_settled_payment');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.amount && Number(parsed.amount) > 0) {
+            resolvedAmount = Number(parsed.amount);
+            if (parsed.currency) resolvedCurrency = parsed.currency;
+            if (parsed.mode) resolvedMode = parsed.mode;
+          }
+        }
+      } catch {}
+    }
+
     const info: { mode: string; amount?: number; currency: string } = {
       mode: resolvedMode,
       currency: resolvedCurrency,
@@ -672,14 +694,17 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         floor: urlFloor,
         building: urlBuilding,
       });
-      setSessionExpired(false);
-      setSessionExpiredReason(null);
-      setIsTableBillConcluded(false);
-      setSettledPaymentInfo(null);
-      try {
-        localStorage.removeItem('serveflow_table_bill_concluded');
-        localStorage.removeItem('serveflow_last_settled_payment');
-      } catch {}
+      const alreadyConcluded = localStorage.getItem('serveflow_table_bill_concluded') === 'true';
+      if (!alreadyConcluded) {
+        setSessionExpired(false);
+        setSessionExpiredReason(null);
+        setIsTableBillConcluded(false);
+        setSettledPaymentInfo(null);
+        try {
+          localStorage.removeItem('serveflow_table_bill_concluded');
+          localStorage.removeItem('serveflow_last_settled_payment');
+        } catch {}
+      }
 
       // Check if this browser already had a host token for this table
       let existingHostToken: string | undefined = undefined;
@@ -704,11 +729,38 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           floor: urlFloor,
           building: urlBuilding,
           existingHostToken,
-        }).then((res) => {
+        }).then((res: any) => {
           const isUserHost = res.is_host !== false;
           const token = res.host_token || null;
           setIsHost(isUserHost);
           setHostToken(token);
+          if (!isUserHost) {
+            setCartItems([]);
+            try {
+              sessionStorage.removeItem(tableCartStorageKey);
+            } catch {}
+          }
+
+          if (res.active_order) {
+            setActiveOrder(res.active_order);
+            if (res.active_order.bill_requested) {
+              setIsFinalBillPageOpen(true);
+            }
+          } else {
+            const confirmedTableId = res.table?.id || urlTableId;
+            const confirmedBizId = res.table?.business_id || urlBizId;
+            if (confirmedTableId) {
+              rbacService.getTableOrdersApi(confirmedTableId, confirmedBizId).then((orders) => {
+                const active = orders.find((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED' && !(o as any).settled);
+                if (active) {
+                  setActiveOrder(active);
+                  if (active.bill_requested) {
+                    setIsFinalBillPageOpen(true);
+                  }
+                }
+              }).catch(() => {});
+            }
+          }
 
           const generatedSessionId = res.session_id || res.table?.current_session_id || `sess_${Date.now()}`;
           const sessionPayload: CustomerTableSession = {
@@ -752,6 +804,16 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             creditGlAccountNumber: sessionPayload.creditGlAccountNumber,
             creditGlAccountName: sessionPayload.creditGlAccountName,
           });
+
+          // Successful table check-in clears any prior concluded flags from previous dining
+          setIsTableBillConcluded(false);
+          setSessionExpired(false);
+          setSessionExpiredReason(null);
+          setSettledPaymentInfo(null);
+          try {
+            localStorage.removeItem('serveflow_table_bill_concluded');
+            localStorage.removeItem('serveflow_last_settled_payment');
+          } catch {}
         }).catch((err) => {
           console.warn('Table check-in scan registration note:', err);
         });
@@ -900,8 +962,16 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     socketService.joinMenu(targetBizId);
 
     const unsubOrder = socketService.subscribeToOrders((updatedOrder) => {
-      const targetOrderId = activeOrder?.id || successOrderData?.id;
-      if (targetOrderId && updatedOrder.id === targetOrderId) {
+      const targetOrderId = activeOrder?.id || successOrderData?.id || lastTargetOrderIdRef.current;
+      const cleanParamTable = cleanTableNumber(tableParams.tableNumber).toLowerCase();
+      const cleanOrderTable = cleanTableNumber(updatedOrder.table_number).toLowerCase();
+      const isOurOrder = Boolean(
+        (targetOrderId && updatedOrder.id === targetOrderId) ||
+        (tableParams.tableId && updatedOrder.table_id === tableParams.tableId) ||
+        (cleanParamTable && cleanOrderTable && cleanParamTable === cleanOrderTable)
+      );
+
+      if (isOurOrder) {
         setActiveOrder((prev) => (prev ? { ...prev, ...updatedOrder } : (updatedOrder as any)));
         setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updatedOrder } : (updatedOrder as any)));
         if (updatedOrder.bill_requested) {
@@ -936,19 +1006,38 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         if (tableData.status === 'ACTIVE' && (!tableData.current_session_id || (tableParams.sessionId && tableData.current_session_id !== tableParams.sessionId))) {
           sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
           setSessionExpired(true);
-          setSessionExpiredReason('This dining table session was reset by staff. Please re-scan table QR to start a new order.');
-          setIsTableBillConcluded(false);
-          setIsFinalBillPageOpen(false);
-          setSettledPaymentInfo(null);
+
+          let cachedActiveOrder: TableOrder | null = null;
           try {
-            localStorage.removeItem('serveflow_last_settled_payment');
-            localStorage.removeItem('serveflow_table_bill_concluded');
+            const bId = tableParams.businessId || user?.business?.id || 'biz';
+            const tKey = tableParams.tableNumber || tableParams.tableId || 'default';
+            const stored = localStorage.getItem(`serveflow_active_order_${bId}_${tKey}`);
+            if (stored) cachedActiveOrder = JSON.parse(stored);
           } catch {}
 
-          const isPaidOrder = activeOrder && (activeOrder.payment_status === 'PAID' || activeOrder.status === 'COMPLETED');
-          if (isPaidOrder) {
-            handleOrderSettled(activeOrder.id, tableParams.tableNumber, activeOrder);
+          const existingOrder = activeOrder || successOrderData || cachedActiveOrder;
+          const hasOrderItems = existingOrder && (
+            (Array.isArray(existingOrder.items) && existingOrder.items.length > 0) ||
+            (existingOrder.total_amount !== undefined && Number(existingOrder.total_amount) > 0) ||
+            (existingOrder.subtotal !== undefined && Number(existingOrder.subtotal) > 0)
+          );
+
+          if (hasOrderItems) {
+            setIsTableBillConcluded(true);
+            setIsFinalBillPageOpen(false);
+            setSessionExpiredReason(
+              'Your table order and billing process has been concluded. Thank you for dining with us!'
+            );
+            handleOrderSettled(existingOrder.id, tableParams.tableNumber, existingOrder);
           } else {
+            setSessionExpiredReason('This dining table session was reset by staff. Please re-scan table QR to start a new order.');
+            setIsTableBillConcluded(false);
+            setIsFinalBillPageOpen(false);
+            setSettledPaymentInfo(null);
+            try {
+              localStorage.removeItem('serveflow_last_settled_payment');
+              localStorage.removeItem('serveflow_table_bill_concluded');
+            } catch {}
             setActiveOrder(null);
             setIsTrackerOpen(false);
             setIsCartOpen(false);
@@ -1156,6 +1245,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   };
 
   const handleUpdateSpecialInstructions = (itemKeyOrId: string, note: string) => {
+    if (!isHost) return;
     setCartItems((prev) =>
       prev.map((ci) => {
         const key = ci.selected_variant ? `${ci.menuItem.id}_${ci.selected_variant.id}` : ci.menuItem.id;
@@ -1167,6 +1257,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   };
 
   const handleClearCart = () => {
+    if (!isHost) return;
     setCartItems([]);
   };
 
@@ -1336,6 +1427,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     return sum + price * item.quantity;
   }, 0);
 
+  const activeOrderItemsCount = useMemo(() => {
+    if (!activeOrder?.items || !Array.isArray(activeOrder.items)) return 0;
+    return activeOrder.items
+      .filter((i) => i.status !== 'CANCELLED')
+      .reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+  }, [activeOrder?.items]);
+
+  const effectiveCartCount = isHost ? totalCartCount : activeOrderItemsCount;
+
   // Get Theme Engine settings
   const theme = getThemeClasses(businessProfile?.menu_theme_config);
 
@@ -1426,7 +1526,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                 ) : settledPaymentInfo?.mode ? (
                   `Payment received via ${settledPaymentInfo.mode}`
                 ) : (
-                  'Dining Session Concluded'
+                  'Payment received successfully'
                 )}
               </p>
             </div>
@@ -1458,6 +1558,8 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     return (
       <FinalTableBillPage
         order={activeOrder}
+        isHost={isHost}
+        hostToken={hostToken}
         businessId={tableParams.businessId || user?.business?.id || activeOrder.business_id}
         businessName={businessProfile?.name || 'Restaurant Dining Service'}
         dateFormatBilling={businessProfile?.date_format_billing || user?.business?.date_format_billing || 'ENGLISH'}
@@ -1507,7 +1609,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             </span>
           </div>
 
-          {/* Action Buttons: Order Tracker & View Cart (Only rendered for ordering Host) */}
+          {/* Action Buttons: Order Tracker & View Cart */}
           {isHost && !isReadOnlyMode ? (
             <div className="flex items-center gap-2 shrink-0">
               {/* Order Tracker button */}
@@ -1530,18 +1632,18 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               </button>
 
               {/* View Cart button */}
-              
-                <button
-                  id="btn-call-waiter"
-                  type="button"
-                  onClick={handleCallWaiter}
-                  className="px-2.5 py-1 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
-                  title="Call Waiter"
-                >
-                  <Bell className="w-3.5 h-3.5" />
-                  <span className="whitespace-nowrap">Call Waiter</span>
-                </button>
-                <button id="btn-topbar-view-cart"
+              <button
+                id="btn-call-waiter"
+                type="button"
+                onClick={handleCallWaiter}
+                className="px-2.5 py-1 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
+                title="Call Waiter"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span className="whitespace-nowrap">Call Waiter</span>
+              </button>
+              <button
+                id="btn-topbar-view-cart"
                 type="button"
                 onClick={() => setIsCartOpen(true)}
                 className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
@@ -1556,9 +1658,40 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             </div>
           ) : (
             <div className="flex items-center gap-2 shrink-0">
-              <span className="px-2.5 py-1 text-[11px] font-semibold text-zinc-400 bg-white/5 border border-white/10 rounded-lg">
-                View-Only
+              <span className="px-2 py-0.5 text-[10px] sm:text-[11px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-center gap-1">
+                <Lock className="w-2.5 h-2.5 text-amber-400" />
+                <span>View-Only</span>
               </span>
+
+              {/* Order Tracker for View-Only Guest if activeOrder exists */}
+              {activeOrder && (
+                <button
+                  id="btn-topbar-track-order"
+                  type="button"
+                  onClick={handleOpenOrderTracker}
+                  className="px-2.5 py-1 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 border bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40"
+                  title="Track live order preparation status"
+                >
+                  <ChefHat className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="whitespace-nowrap hidden sm:inline">Track Order</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                </button>
+              )}
+
+              {/* View Cart button for View-Only Guest */}
+              <button
+                id="btn-topbar-view-cart"
+                type="button"
+                onClick={() => setIsCartOpen(true)}
+                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
+                title="View Table Cart"
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
+                <span className="whitespace-nowrap">View Cart</span>
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-white text-zinc-950 rounded-full font-mono text-xs font-black shadow-xs leading-none">
+                  {effectiveCartCount}
+                </span>
+              </button>
             </div>
           )}
         </div>
@@ -1621,16 +1754,29 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
               <div>
                 <span className="font-extrabold text-amber-950 block sm:inline mr-1">
-                  Table #{cleanTableNumber(tableParams.tableNumber)} ? View-Only Mode:
+                  Table #{cleanTableNumber(tableParams.tableNumber)} • View-Only Mode:
                 </span>
                 <span className="text-amber-800">
                   You are browsing this menu in view-only mode. Ordering authority is reserved for the first guest who scanned this table's QR code.
                 </span>
               </div>
             </div>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-200/80 text-amber-900 border border-amber-300 shrink-0">
-              <Lock className="w-3 h-3 text-amber-700" />
-              <span>Guest (View-Only)</span>
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                id="btn-banner-view-cart"
+                type="button"
+                onClick={() => setIsCartOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-zinc-950 border border-amber-600/30 transition cursor-pointer shadow-xs active:scale-95"
+              >
+                <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
+                <span>
+                  View Table Cart {effectiveCartCount > 0 ? `(${effectiveCartCount})` : ''}
+                </span>
+              </button>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-200/80 text-amber-900 border border-amber-300 shrink-0">
+                <Lock className="w-3 h-3 text-amber-700" />
+                <span>Guest (View-Only)</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1793,6 +1939,28 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                     <span>Kitchen preparing</span>
                   </span>
                 )}
+              </div>
+            ) : !isHost && activeOrder ? (
+              <div className="flex items-center gap-2 flex-wrap shrink-0">
+                <button
+                  id="btn-hero-view-cart"
+                  type="button"
+                  onClick={() => setIsCartOpen(true)}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
+                  <span>View Table Cart {activeOrderItemsCount > 0 ? `(${activeOrderItemsCount})` : ''}</span>
+                </button>
+                <button
+                  id="btn-hero-track-order"
+                  type="button"
+                  onClick={handleOpenOrderTracker}
+                  className="px-3 py-1.5 bg-zinc-900/90 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md cursor-pointer group active:scale-95"
+                >
+                  <ChefHat className={`w-3.5 h-3.5 ${theme.accent}`} />
+                  <span>Track Order</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                </button>
               </div>
             ) : null}
           </div>
@@ -2787,6 +2955,57 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         )}
       </div>
 
+      {/* Floating Bottom Cart Bar for Active Order / Table Cart (visible when modal is closed) */}
+      {!isCartOpen && !isTrackerOpen && !isFinalBillPageOpen && !sessionExpired && (
+        (isHost && totalCartCount > 0) ||
+        (!isHost && activeOrderItemsCount > 0) ||
+        (activeOrder && activeOrderItemsCount > 0)
+      ) && (
+        <div className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 pointer-events-none animate-in slide-in-from-bottom-3 duration-200">
+          <button
+            id="btn-floating-view-cart"
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="pointer-events-auto max-w-md w-full bg-zinc-950 hover:bg-zinc-900 text-white p-3 rounded-2xl shadow-2xl border border-amber-500/40 flex items-center justify-between gap-3 cursor-pointer transition active:scale-[0.98] ring-1 ring-black/10 backdrop-blur-md"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-amber-500 text-zinc-950 flex items-center justify-center font-bold shrink-0">
+                <ShoppingBag className="w-4 h-4" />
+              </div>
+              <div className="text-left min-w-0 truncate">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-extrabold text-white truncate">
+                    {!isHost ? 'Live Table Cart' : (totalCartCount > 0 ? 'Your Order Cart' : 'Live Table Order')}
+                  </span>
+                  {!isHost && (
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      View-Only
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-zinc-400 truncate">
+                  {!isHost
+                    ? `${activeOrderItemsCount} ${activeOrderItemsCount === 1 ? 'item' : 'items'} ordered by table host`
+                    : (totalCartCount > 0 ? `${totalCartCount} items in cart` : `${activeOrderItemsCount} items ordered`)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {activeOrder && (
+                <span className="text-xs font-mono font-bold text-amber-400">
+                  {businessProfile?.currency || 'Rs.'} {(activeOrder.total_amount || activeOrder.subtotal || 0).toLocaleString()}
+                </span>
+              )}
+              <span className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg transition flex items-center gap-1">
+                <span>View Cart</span>
+                <ArrowRight className="w-3 h-3" />
+              </span>
+            </div>
+          </button>
+        </div>
+      )}
+
       <MenuItemDetailModal
         isOpen={isDetailModalOpen}
         item={selectedDetailItem}
@@ -2812,6 +3031,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
         items={cartItems}
+        activeOrder={activeOrder}
         tableInfo={{
           tableId: tableParams.tableId,
           tableNumber: tableParams.tableNumber,
@@ -2831,13 +3051,8 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         isHost={isHost}
         hostToken={hostToken}
         onUpdateQuantity={handleUpdateQuantity}
-          onUpdateSpecialInstructions={handleUpdateSpecialInstructions}
-        
+        onUpdateSpecialInstructions={handleUpdateSpecialInstructions}
         onClearCart={handleClearCart}
-        
-        
-        
-        
         onOrderConfirmed={(orderData) => {
           setIsCartOpen(false);
           setSuccessOrderData(orderData);
@@ -2849,6 +3064,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       {(successOrderData || (isTrackerOpen && activeOrder)) && (
         <OrderSuccessModal
           isOpen={true}
+          isHost={isHost}
           kdsPrintMode={businessProfile?.kds_print_mode || 'DISPLAY_ONLY'}
           onClose={() => {
             setSuccessOrderData(null);

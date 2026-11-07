@@ -166,7 +166,7 @@ router.post('/categories', authenticate, requireResourceAccess('menus', 'write')
 router.put('/categories/reorder', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
     const businessId = await resolveBusinessId(req);
-    const { order } = req.body;
+    const order = req.body.order || req.body.orderedIds;
 
     if (!Array.isArray(order) || order.length === 0) {
       return res.status(400).json({
@@ -704,12 +704,18 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
     const { status, is_available } = req.body;
 
     const updates: any = {};
-    if (status) {
-      updates.status = status;
-      updates.is_available = status === 'available';
+    if (status !== undefined && is_available !== undefined) {
+      const normStatus = String(status).toLowerCase();
+      const isAvail = Boolean(is_available) && normStatus !== 'out_of_stock' && normStatus !== 'unavailable';
+      updates.is_available = isAvail;
+      updates.status = isAvail ? 'available' : normStatus;
+    } else if (status !== undefined) {
+      const normStatus = String(status).toLowerCase();
+      updates.status = normStatus;
+      updates.is_available = normStatus === 'available' || normStatus === 'in_stock';
     } else if (is_available !== undefined) {
       updates.is_available = Boolean(is_available);
-      updates.status = is_available ? 'available' : 'unavailable';
+      updates.status = is_available ? 'available' : 'out_of_stock';
     } else {
       return res.status(400).json({
         success: false,
@@ -908,6 +914,8 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
 
     return res.json({
       success: true,
+      createdCount,
+      updatedCount,
       data: { createdCount, updatedCount, totalProcessed: createdCount + updatedCount },
       message: `Menu import complete: ${createdCount} created, ${updatedCount} updated.`,
     });

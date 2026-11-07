@@ -57,6 +57,15 @@ export function determineItemStation(
   item: { name?: string; category?: string; additional_categories?: string[]; station?: 'KITCHEN' | 'BAR' | 'BOTH' }
 ): 'KITCHEN' | 'BAR' | 'BOTH' {
   if (item?.station) return item.station;
-  return 'KITCHEN';
+  const DRINK_KEYWORDS = [
+    'drink', 'beverage', 'beverages', 'bar', 'cocktail', 'cocktails', 'mocktail', 'mocktails',
+    'wine', 'beer', 'juice', 'juices', 'shake', 'shakes', 'smoothie', 'smoothies', 'soda',
+    'soft drink', 'tea', 'coffee', 'liquor', 'whiskey', 'vodka', 'rum', 'gin', 'champagne',
+    'cider', 'cooler', 'espresso', 'latte', 'brew'
+  ];
+  const categories = getAllItemCategories(item as any);
+  const combinedText = [item?.name || '', item?.category || '', ...categories].join(' ').toLowerCase();
+  const isDrink = DRINK_KEYWORDS.some((kw) => combinedText.includes(kw));
+  return isDrink ? 'BAR' : 'KITCHEN';
 }
 

@@ -54,6 +54,7 @@ model Business {
   operational_days OperationalDay[]
   check_ins        CheckIn[]
   cashier_sessions CashierRegisterSession[]
+  comp_records     CompRecord[]
 
   @@index([parent_business_id])
   @@map("businesses")
@@ -177,6 +178,7 @@ model RestaurantTable {
   credit_gl_account_id String?
   credit_gl_account_number String?
   credit_gl_account_name String?
+  comp_enabled         Boolean   @default(false)
   qr_code_url        String?
   last_scanned_at    DateTime?
   current_session_id String?
@@ -192,6 +194,31 @@ model RestaurantTable {
   @@unique([business_id, table_number])
   @@index([business_id])
   @@map("restaurant_tables")
+}
+
+// -------------------------------------------------------------
+// 4b. Complementary Ledger
+// -------------------------------------------------------------
+model CompRecord {
+  id               String   @id @default(cuid())
+  business_id      String
+  sale_id          String?
+  table_id         String?
+  table_number     String
+  staff_id         String?
+  staff_name       String
+  reason           String?
+  items            Json
+  total_comp_value Decimal  @db.Decimal(12, 2)
+  currency         String   @default("Rs.")
+  settled_at       DateTime @default(now())
+  date_string      String
+
+  business Business @relation(fields: [business_id], references: [id], onDelete: Cascade)
+
+  @@index([business_id])
+  @@index([date_string])
+  @@map("comp_records")
 }
 
 // -------------------------------------------------------------

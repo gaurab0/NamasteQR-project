@@ -173,7 +173,8 @@ async function runCreditOnlyTableWorkflowTest() {
 
     // 7. Test Requirement 5: Non-Credit payment on Credit-Only Table
     console.log('\n💵 7. Requirement 5: Cash Payment on Credit Table Passes as Normal Order');
-    // Start a new session for the table
+    // Reset previous order & start a new session for the table
+    await rbacService.resetTableToDefault(testBizId, createdTable.id, createdTable.table_number);
     const checkIn2 = await rbacService.scanTableCheckIn(testBizId, createdTable.id, {
       tableNumber: createdTable.table_number,
       customerName: 'John Doe',

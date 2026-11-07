@@ -6,7 +6,8 @@
  * Run: node ./node_modules/tsx/dist/cli.mjs server/test/credit_gl.test.ts
  */
 import { rbacService } from '../src/services/rbac.service';
-import { firestoreDb, collection, doc, getDocs, getDoc, deleteDoc } from '../src/config/firebase';
+import { prisma } from '../src/lib/prisma';
+import { db } from '../src/services/db.service';
 import { buildSalesWorkbookData } from '../../src/utils/excelExport';
 
 const BIZ = `test-credit-gl-${Date.now()}`;
@@ -57,8 +58,8 @@ async function main() {
       sparse.customer_name === null && sparse.customer_address === null && sparse.customer_phone === null &&
       sparse.customer_extension === null && sparse.customer_office_name === null && sparse.customer_designation === null);
 
-    const rawDoc = await getDoc(doc(firestoreDb, 'businesses', BIZ, 'gl_accounts', sparse.id));
-    check('Firestore document has real null (not undefined/missing)', rawDoc.data()?.customer_phone === null, rawDoc.data());
+    const rawDoc = await prisma.gLAccount.findUnique({ where: { id: sparse.id } });
+    check('Database document has real null (not undefined/missing)', rawDoc?.customer_phone === null, rawDoc);
 
     const dupErr = await rejects(rbacService.createGLAccount(BIZ, {
       account_number: '1121', account_name: 'Duplicate', category: 'ASSET', mapping_key: 'CREDIT_SETTLEMENT',
@@ -98,8 +99,8 @@ async function main() {
     check('client-supplied GL name is overridden by server truth', s1.credit_gl_account_name !== undefined);
     check('CASH sale is unaffected and carries no credit fields',
       sCash.payment_method === 'CASH' && !(sCash as any).credit_gl_account_id);
-    const persisted = await getDoc(doc(firestoreDb, 'businesses', BIZ, 'sales', s1.id));
-    check('credit sale persisted in Firestore with GL id', persisted.data()?.credit_gl_account_id === full.id);
+    const persisted = await prisma.sale.findUnique({ where: { id: s1.id } });
+    check('credit sale persisted in Database with GL id', persisted?.credit_gl_account_id === full.id);
 
     console.log('\n📊 4. Excel workbook');
     const allSales = [s1, s2, s3, sCash] as any[];
@@ -138,12 +139,12 @@ async function main() {
     check('update keeps fields that were not sent', upd.customer_name === 'Ram Sharma' && upd.customer_office_name === 'ABC Pvt. Ltd.');
   } finally {
     // Cleanup the throwaway business
-    for (const col of ['sales', 'gl_accounts', 'sequences', 'settings', 'tax_config']) {
-      try {
-        const snap = await getDocs(collection(firestoreDb, 'businesses', BIZ, col));
-        await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
-      } catch { /* collection may not exist */ }
-    }
+    try {
+      await prisma.sale.deleteMany({ where: { business_id: BIZ } });
+      await prisma.gLAccount.deleteMany({ where: { business_id: BIZ } });
+      await prisma.counter.deleteMany({ where: { business_id: BIZ } });
+      await prisma.business.deleteMany({ where: { id: BIZ } });
+    } catch { /* ignore */ }
     console.log(`\n🧹 Cleaned up throwaway business ${BIZ}`);
   }
 

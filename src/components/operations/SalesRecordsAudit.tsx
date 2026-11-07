@@ -21,7 +21,7 @@ import {
   CheckCircle2,
   X
 } from 'lucide-react';
-import { SaleRecord, SalesTimeFilter, GLAccountLink, BusinessTaxConfig } from '../../types/rbac';
+import { SaleRecord, SalesTimeFilter, GLAccountLink, BusinessTaxConfig, CompRecord } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import { rbacService } from '../../services/rbac.service';
 import { renderFormattedDate } from '../../utils/dateFormatter';
@@ -193,7 +193,7 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
   }, [filteredSales]);
 
   // Excel handlers
-  const handleOpenExcelPreview = (scope: 'filtered' | 'all' = 'filtered') => {
+  const handleOpenExcelPreview = async (scope: 'filtered' | 'all' = 'filtered') => {
     try {
       const dataToExport = scope === 'filtered' ? filteredSales : sales;
       if (!dataToExport || dataToExport.length === 0) {
@@ -211,7 +211,20 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
           ? customDate
           : 'All';
       const prefix = scope === 'filtered' ? `Sales_${filterLabel}_Register` : 'Sales_All_Register';
-      const sheets = buildSalesWorkbookData(dataToExport, glAccounts, currencySymbol);
+      let compRecords: CompRecord[] = [];
+      try {
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        if (scope === 'filtered' && filteredSales.length > 0) {
+          const dates = filteredSales.map((s) => s.date_string).filter(Boolean).sort();
+          startDate = dates[0];
+          endDate = dates[dates.length - 1];
+        }
+        compRecords = await rbacService.getCompRecordsApi(business.id, { start_date: startDate, end_date: endDate });
+      } catch (e) {
+        // non-fatal
+      }
+      const sheets = buildSalesWorkbookData(dataToExport, glAccounts, currencySymbol, compRecords);
       setExcelPreviewSheets(sheets);
       setExcelPreviewPrefix(prefix);
       setExcelPreviewOpen(true);
@@ -221,7 +234,7 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
     }
   };
 
-  const handleExportToExcel = (scope: 'filtered' | 'all') => {
+  const handleExportToExcel = async (scope: 'filtered' | 'all') => {
     try {
       setIsExportingExcel(true);
       const dataToExport = scope === 'filtered' ? filteredSales : sales;
@@ -240,7 +253,20 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
           ? customDate
           : 'All';
       const prefix = scope === 'filtered' ? `Sales_${filterLabel}_Register` : 'Sales_All_Register';
-      exportSalesToExcel(dataToExport, glAccounts, prefix, business.name);
+      let compRecords: CompRecord[] = [];
+      try {
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        if (scope === 'filtered' && filteredSales.length > 0) {
+          const dates = filteredSales.map((s) => s.date_string).filter(Boolean).sort();
+          startDate = dates[0];
+          endDate = dates[dates.length - 1];
+        }
+        compRecords = await rbacService.getCompRecordsApi(business.id, { start_date: startDate, end_date: endDate });
+      } catch (e) {
+        // non-fatal
+      }
+      exportSalesToExcel(dataToExport, glAccounts, prefix, business.name, compRecords);
       showStatus(
         `Successfully exported ${dataToExport.length} sales record${dataToExport.length === 1 ? '' : 's'} and GL links to Excel (.xlsx)!`,
         'success'
@@ -797,7 +823,14 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
                       {/* Items Summary */}
                       <td className="py-3 px-4 max-w-xs">
                         <span className="text-zinc-600 truncate block">
-                          {sale.items.map((i) => `${i.name} (x${i.quantity})`).join(', ')}
+                          {sale.items.map((i) => {
+                            const compQty = Number(i.comp_qty) || 0;
+                            if (compQty > 0) {
+                              const isComp = Boolean(i.is_comp || compQty >= i.quantity);
+                              return `${i.name} (${isComp ? 'COMP' : `x${i.quantity - compQty} + ${compQty} COMP`})`;
+                            }
+                            return `${i.name} (x${i.quantity})`;
+                          }).join(', ')}
                         </span>
                         <span className="text-[10px] text-zinc-400">
                           {sale.items.length} item(s) • Cashier: {sale.cashier_name}

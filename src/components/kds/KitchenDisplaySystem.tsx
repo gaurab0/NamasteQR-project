@@ -47,6 +47,29 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
+export const formatKdsTableName = (tableNum?: string | null): string => {
+  if (!tableNum || !tableNum.trim()) return 'Counter / Takeaway';
+  const trimmed = tableNum.trim();
+  // Strip repeated redundant prefixes like "Table #Table 6" -> "6" or "#12" -> "12"
+  const core = trimmed.replace(/^((table\s*#?|#)\s*)+/i, '').trim();
+  if (!core) return trimmed;
+
+  // Preserve non-table designations without adding redundant "Table "
+  if (/^(room|takeaway|takeout|delivery|counter|quick\s*pos|drive-?thru|bar)\b/i.test(core)) {
+    return core;
+  }
+
+  // Ensure clean spacing before parentheses, e.g. Complementary(Yadab) -> Complementary (Yadab)
+  const cleanedCore = core.replace(/([^\s])\(/g, '$1 (');
+
+  return `Table ${cleanedCore}`;
+};
+
+export const cleanKdsTableNum = (num?: string | null): string => {
+  if (!num) return '';
+  return num.replace(/^((table\s*#?|#)\s*)+/i, '').trim().toLowerCase();
+};
+
 export type KDSViewMode = 'KITCHEN' | 'BAR' | 'WAITER';
 
 interface KitchenDisplaySystemProps {
@@ -261,15 +284,22 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
     // 0. Tables Listener
     const unsubTables = socketService.subscribeToTables((updatedTable: any) => {
-      if (!updatedTable || !updatedTable.id) return;
+      if (!updatedTable) return;
       setTables((prev) => {
-        const idx = prev.findIndex((t) => t.id === updatedTable.id);
+        const idx = prev.findIndex((t) =>
+          (updatedTable.id && t.id === updatedTable.id) ||
+          (updatedTable.table_number && t.table_number === updatedTable.table_number) ||
+          (updatedTable.table_number && cleanKdsTableNum(t.table_number) === cleanKdsTableNum(updatedTable.table_number))
+        );
         if (idx >= 0) {
           const next = [...prev];
           next[idx] = { ...next[idx], ...updatedTable };
           return next;
         }
-        return [...prev, updatedTable];
+        if (updatedTable.id) {
+          return [...prev, updatedTable];
+        }
+        return prev;
       });
     });
 
@@ -298,9 +328,18 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         const idx = prev.findIndex((o) => o.id === updatedOrder.id);
         let next: TableOrder[];
         if (idx >= 0) {
+          const oldOrder = prev[idx];
+          const hasNewlyReadyItem = (formattedOrder.items || []).some((it: any) =>
+            it.status === 'READY' &&
+            !((oldOrder.items || []).find((oldIt: any) => (oldIt.item_key || oldIt.item_id) === (it.item_key || it.item_id))?.status === 'READY')
+          );
+          if ((formattedOrder.status === 'READY' && oldOrder.status !== 'READY') || hasNewlyReadyItem) {
+            playChime();
+          }
           next = [...prev];
           next[idx] = { ...next[idx], ...formattedOrder };
         } else {
+          playChime();
           next = [formattedOrder, ...prev];
           // KOT printing for new orders
           if (effectiveKdsPrintMode !== 'DISPLAY_ONLY') {
@@ -316,15 +355,22 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
     // 2. Service Requests Listener
     const unsubRequests = socketService.subscribeToServiceRequests((updatedReq: any) => {
-      if (!updatedReq || !updatedReq.id) return;
+      if (!updatedReq) return;
       setServiceRequests((prev) => {
-        const idx = prev.findIndex((r) => r.id === updatedReq.id);
-        let next: ServiceRequest[];
-        if (idx >= 0) {
-          next = [...prev];
-          next[idx] = { ...next[idx], ...updatedReq };
-        } else {
-          next = [updatedReq, ...prev];
+        let matched = false;
+        const next = prev.map((r) => {
+          const isMatch =
+            (updatedReq.id && r.id === updatedReq.id) ||
+            (!updatedReq.id && updatedReq.table_id && r.table_id === updatedReq.table_id) ||
+            (!updatedReq.id && updatedReq.table_number && cleanKdsTableNum(r.table_number) === cleanKdsTableNum(updatedReq.table_number));
+          if (isMatch) {
+            matched = true;
+            return { ...r, ...updatedReq };
+          }
+          return r;
+        });
+        if (!matched && updatedReq.id) {
+          next.unshift(updatedReq);
         }
         next.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         prevBillPingsRef.current = next.filter((r) => r.status === 'PENDING' && r.type === 'BILL_REQUEST').length;
@@ -701,7 +747,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
       // Filter by table assignment if user is a waiter
       if (activeStation === 'WAITER' && currentStaffId) {
-        const table = tables.find((t) => t.id === order.table_id);
+        const table = tables.find((t) => (order.table_id && t.id === order.table_id) || (order.table_number && String(t.table_number).trim() === String(order.table_number).trim()));
         if (table && table.assigned_waiter_ids && table.assigned_waiter_ids.length > 0) {
           if (!table.assigned_waiter_ids.includes(currentStaffId)) {
             return false;
@@ -800,12 +846,58 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       });
   }, [tables, orders, activeStation, currentStaffId]);
 
-  const handleAcknowledgeTableCall = async (tableId: string) => {
+  const handleAcknowledgeTableCall = async (tableId: string, tableNumber?: string) => {
     try {
       setActionInProgress(tableId);
-      await rbacService.acknowledgeTablePingApi(tableId, businessId);
+
+      // Optimistic update: instantly dismiss call card from KDS queue
+      setTables((prev) =>
+        prev.map((t) => {
+          const isMatch =
+            t.id === tableId ||
+            (tableNumber && t.table_number === tableNumber) ||
+            (tableNumber && cleanKdsTableNum(t.table_number) === cleanKdsTableNum(tableNumber)) ||
+            (tableId && cleanKdsTableNum(t.table_number) === cleanKdsTableNum(tableId));
+          if (isMatch) {
+            return {
+              ...t,
+              waiter_ping: {
+                active: false,
+                timestamp: t.waiter_ping?.timestamp || new Date().toISOString(),
+              },
+            };
+          }
+          return t;
+        })
+      );
+
+      setServiceRequests((prev) =>
+        prev.map((sr) => {
+          const isMatch =
+            sr.table_id === tableId ||
+            (tableNumber && sr.table_number === tableNumber) ||
+            (tableNumber && cleanKdsTableNum(sr.table_number) === cleanKdsTableNum(tableNumber)) ||
+            (tableId && cleanKdsTableNum(sr.table_number) === cleanKdsTableNum(tableId));
+          if (isMatch) {
+            return {
+              ...sr,
+              status: 'ATTENDED',
+              resolved_at: new Date() as any,
+            };
+          }
+          return sr;
+        })
+      );
+
+      await rbacService.acknowledgeTablePingApi(tableId, businessId, tableNumber);
     } catch (err: any) {
       alert(`Could not acknowledge table call: ${err.message}`);
+      // Re-sync tables on error
+      if (businessId) {
+        rbacService.getTablesApi(businessId).then((tbls) => {
+          if (tbls && Array.isArray(tbls)) setTables(tbls);
+        }).catch(() => {});
+      }
     } finally {
       setActionInProgress(null);
     }
@@ -1185,7 +1277,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         <div>
                           <div className="flex items-center gap-2">
                             <span className={`text-base font-black ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
-                              Table #{table.table_number}
+                              {formatKdsTableName(table.table_number)}
                             </span>
                             {(table.floor || table.building) && (
                               <span
@@ -1249,7 +1341,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                           <span>Guest called for waiter service</span>
                         </div>
                         <p className="text-[11px] text-zinc-500 leading-relaxed">
-                          Table #{table.table_number} needs staff assistance. Click below once attended to clear this card from the queue.
+                          {formatKdsTableName(table.table_number)} needs staff assistance. Click below once attended to clear this card from the queue.
                         </p>
                         {table.waiter_ping?.timestamp && (
                           <div className="mt-2 text-[10px] font-mono text-zinc-400">
@@ -1280,7 +1372,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         variant="primary"
                         size="md"
                         disabled={isProcessing}
-                        onClick={() => handleAcknowledgeTableCall(table.id)}
+                        onClick={() => handleAcknowledgeTableCall(table.id, table.table_number)}
                         leftIcon={<BellOff className="w-4 h-4" />}
                         className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xs py-2.5 shadow-sm active:scale-95 transition"
                       >
@@ -1361,7 +1453,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         <div>
                           <div className="flex items-center gap-2">
                             <span className={`text-base font-black ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
-                              Table #{req.table_number}
+                              {formatKdsTableName(req.table_number)}
                             </span>
                             {(req.floor || req.building || targetOrder?.floor || targetOrder?.building) && (
                               <span
@@ -1471,7 +1563,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         <div className={`p-3 rounded-xl border text-xs leading-relaxed ${
                           isFullScreenMode ? 'bg-zinc-800/40 border-zinc-800 text-zinc-400' : 'bg-zinc-50 border-zinc-200 text-zinc-500'
                         }`}>
-                          <span>Guest requested bill folio folder at Table #{req.table_number}. Please bring bill check and cash folio / terminal.</span>
+                          <span>Guest requested bill folio folder at {formatKdsTableName(req.table_number)}. Please bring bill check and cash folio / terminal.</span>
                         </div>
                       )}
 
@@ -1643,15 +1735,17 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                     : 'bg-zinc-50/80 border-zinc-100'
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-base font-black ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
+                {/* Redesigned Multi-Row Card Header: Prevents Any Clipping & Displays Prominent Table Name */}
+                <div className="space-y-2">
+                  {/* Row 1: Order # & Badges (Left) | Print Button & Elapsed Time (Right) */}
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                      <span className={`text-base font-black tracking-tight ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
                         Order #{order.order_number || order.id.slice(0, 8)}
                       </span>
                       {isAdditionalRound && (
                         <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border shrink-0 ${
                             isFullScreenMode
                               ? 'text-amber-300 bg-amber-950/80 border-amber-800'
                               : 'text-amber-800 bg-amber-100 border-amber-300'
@@ -1662,7 +1756,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                       )}
                       {(order.floor || order.building) && (
                         <span
-                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border shrink-0 ${
                             isFullScreenMode
                               ? 'text-zinc-300 bg-zinc-800 border-zinc-700'
                               : 'text-zinc-500 bg-white border-zinc-200'
@@ -1672,74 +1766,104 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className={`text-xs mt-0.5 flex items-center gap-1.5 ${isFullScreenMode ? 'text-zinc-400' : 'text-zinc-600'}`}>
-                      <span className={`font-semibold ${isFullScreenMode ? 'text-zinc-200' : 'text-zinc-800'}`}>
-                        {order.customer_name || 'Guest'}
-                      </span>
-                      <span className="text-zinc-500">•</span>
-                      <span className="font-mono text-[11px] text-zinc-400">Table #{order.table_number}</span>
-                    </div>
-                    <div className={`text-[10px] font-mono mt-0.5 kds-order-timestamp ${isFullScreenMode ? 'text-amber-300/80' : 'text-zinc-500'}`}>
-                      {renderFormattedDate(order.created_at, billingFormat)}
-                    </div>
-                  </div>
 
-                  {/* Timer & Status Pill */}
-                  <div className="text-right space-y-1 flex flex-col items-end">
-                    <div className="flex items-center gap-2">
+                    {/* Top Right: Print Button & Elapsed Time (Strictly shrink-0, always visible) */}
+                    <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
                       <button
+                        type="button"
                         onClick={() => dispatchPrint('KOT', { ...order, date_format_billing: billingFormat })}
                         title="Print Kitchen Ticket"
-                        className={`p-1.5 rounded-lg border flex items-center justify-center ${isFullScreenMode ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700' : 'bg-white border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50'} transition`}
+                        className={`p-1.5 rounded-lg border flex items-center justify-center shrink-0 ${
+                          isFullScreenMode
+                            ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700'
+                            : 'bg-white border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50'
+                        } transition cursor-pointer`}
                       >
                         <Printer className="w-3.5 h-3.5" />
                       </button>
                       <div
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold font-mono ${
-                        isLate
-                          ? 'bg-rose-950 text-rose-300 border border-rose-800 animate-pulse'
-                          : isWarning
-                          ? 'bg-amber-950 text-amber-300 border border-amber-800'
-                          : isFullScreenMode
-                          ? 'bg-zinc-800 text-zinc-300 border border-zinc-700'
-                          : 'bg-zinc-100 text-zinc-700'
-                      }`}
-                    >
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>{elapsed}m ago</span>
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold font-mono shrink-0 ${
+                          isLate
+                            ? 'bg-rose-950 text-rose-300 border border-rose-800 animate-pulse'
+                            : isWarning
+                            ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                            : isFullScreenMode
+                            ? 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+                            : 'bg-zinc-100 text-zinc-700 border border-zinc-200'
+                        }`}
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>{elapsed}m ago</span>
+                      </div>
                     </div>
+                  </div>
+
+                  {/* Row 2: Table Name (Big, prominent, almost as big as Order #) | Status Badge (Right) */}
+                  <div className="flex items-center justify-between gap-2.5 min-w-0 flex-wrap">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span
+                        title={formatKdsTableName(order.table_number)}
+                        className={`text-[15px] sm:text-base font-black tracking-tight ${
+                          isFullScreenMode ? 'text-amber-400' : 'text-zinc-900'
+                        }`}
+                      >
+                        {formatKdsTableName(order.table_number)}
+                      </span>
+                      {order.customer_name && order.customer_name.trim() !== 'Guest' && (
+                        <span
+                          title={order.customer_name}
+                          className={`text-xs font-medium truncate ${
+                            isFullScreenMode ? 'text-zinc-400' : 'text-zinc-500'
+                          }`}
+                        >
+                          • {order.customer_name}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="text-[11px] font-extrabold uppercase">
+                    {/* Status Badge: Strictly shrink-0, always 100% visible, never clipped */}
+                    <div className="shrink-0 text-[11px] font-extrabold uppercase whitespace-nowrap">
                       {effectiveKdsPrintMode === 'PRINT_ONLY' && order.status !== 'SERVED' && order.status !== 'COMPLETED' ? (
-                        <span className="text-amber-200 bg-amber-900/90 border border-amber-600 px-2 py-0.5 rounded-md flex items-center gap-1 font-bold animate-pulse">
+                        <span className="text-amber-200 bg-amber-900/90 border border-amber-600 px-2.5 py-1 rounded-md flex items-center gap-1 font-bold animate-pulse">
                           <Printer className="w-3 h-3 text-amber-400" /> KOT Printed • Pending Delivery
                         </span>
                       ) : (
                         <>
                           {order.status === 'RECEIVED' && (
-                            <span className="text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2 py-0.5 rounded-md">
+                            <span className="text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2.5 py-1 rounded-md inline-block">
                               Received
                             </span>
                           )}
                           {order.status === 'PREPARING' && (
-                            <span className="text-amber-200 bg-amber-900/90 border border-amber-700 px-2 py-0.5 rounded-md flex items-center gap-1">
+                            <span className="text-amber-200 bg-amber-900/90 border border-amber-700 px-2.5 py-1 rounded-md flex items-center gap-1 inline-flex">
                               <Flame className="w-3 h-3 text-amber-400 animate-pulse" /> Preparing
                             </span>
                           )}
                           {order.status === 'READY' && (
-                            <span className="text-blue-200 bg-blue-900/90 border border-blue-600 px-2 py-0.5 rounded-md flex items-center gap-1">
+                            <span className="text-blue-200 bg-blue-900/90 border border-blue-600 px-2.5 py-1 rounded-md flex items-center gap-1 inline-flex">
                               <Bell className="w-3 h-3 text-blue-400 animate-bounce" /> Prepared!
                             </span>
                           )}
                           {(order.status === 'SERVED' || order.status === 'COMPLETED') && (
-                            <span className="text-emerald-300 bg-emerald-950/90 border border-emerald-800 px-2 py-0.5 rounded-md flex items-center gap-1">
+                            <span className="text-emerald-300 bg-emerald-950/90 border border-emerald-800 px-2.5 py-1 rounded-md flex items-center gap-1 inline-flex">
                               <CheckCheck className="w-3 h-3 text-emerald-400" /> Served
                             </span>
                           )}
                         </>
                       )}
                     </div>
+                  </div>
+
+                  {/* Row 3: Timestamp & Customer Info (Subtle metadata) */}
+                  <div className="flex items-center justify-between gap-2 text-[10px] font-mono min-w-0">
+                    <div className={`truncate min-w-0 flex-1 kds-order-timestamp ${isFullScreenMode ? 'text-amber-300/80' : 'text-zinc-500'}`}>
+                      {renderFormattedDate(order.created_at, billingFormat)}
+                    </div>
+                    {(!order.customer_name || order.customer_name.trim() === 'Guest') && (
+                      <span className={`text-[11px] font-medium shrink-0 ${isFullScreenMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                        Guest
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -1987,7 +2111,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         }`}
                       >
                         <CheckCheck className="w-4 h-4 text-emerald-400" />
-                        All {activeStation === 'BAR' ? 'Drinks' : 'Dishes'} Delivered to Table #{order.table_number}
+                        All {activeStation === 'BAR' ? 'Drinks' : 'Dishes'} Delivered to {formatKdsTableName(order.table_number)}
                       </div>
                     ) : (
                       <div
@@ -2024,8 +2148,8 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                         {isProcessing
                           ? 'Updating...'
                           : effectiveKdsPrintMode === 'PRINT_ONLY'
-                          ? `Mark Delivered to Table #${order.table_number}`
-                          : `Deliver All to Table #${order.table_number}`}
+                          ? `Mark Delivered to ${formatKdsTableName(order.table_number)}`
+                          : `Deliver All to ${formatKdsTableName(order.table_number)}`}
                       </Button>
                     ) : order.status === 'SERVED' || order.status === 'COMPLETED' ? (
                       <div

@@ -56,7 +56,8 @@ import {
   Bell,
   Activity,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  Gift
 } from 'lucide-react';
 import { LiveStationOrdersModal } from '../dashboard/LiveStationOrdersModal';
 import { 
@@ -80,7 +81,8 @@ import {
   TableOrder,
   GLAccountLink,
   MenuItem,
-  FoodType
+  FoodType,
+  CompRecord
 } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import {
@@ -271,9 +273,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       updated_at: parseOrderDate(d.updated_at),
     } as TableOrder));
 
-    const unsettled = liveOrders.filter(
-      (o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && !(o as any).settled && o.status !== 'AWAITING_PAYMENT' && !(o.pay_first && o.payment_status === 'PAID')
-    );
+    const unsettled = liveOrders.filter((o) => {
+      const statusUpper = (o.status || '').toUpperCase();
+      const paymentStatusUpper = (o.payment_status || '').toUpperCase();
+      if (o.pay_first) return false;
+      if (statusUpper === 'AWAITING_PAYMENT') return false;
+      if (statusUpper === 'COMPLETED' || statusUpper === 'CANCELLED') return false;
+      if ((o as any).settled || paymentStatusUpper === 'PAID' || Boolean(o.sale_id)) return false;
+      return true;
+    });
     const awaitingPayment = liveOrders.filter(
       (o) => o.status === 'AWAITING_PAYMENT'
     ).sort((a, b) => {
@@ -377,21 +385,29 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       setPendingOrders((prev) => {
         const idx = prev.findIndex((o) => o.id === updatedOrder.id);
         const existingOrder = idx >= 0 ? prev[idx] : null;
-        const effectiveStatus = parsedUpdatedOrder.status !== undefined ? parsedUpdatedOrder.status : existingOrder?.status;
+        const rawStatus = parsedUpdatedOrder.status !== undefined ? parsedUpdatedOrder.status : existingOrder?.status;
+        const effectiveStatus = (rawStatus || '').toUpperCase();
 
         // An order that is awaiting payment belongs strictly in payFirstOrders, never pendingOrders
         if (effectiveStatus === 'AWAITING_PAYMENT') {
           return prev.filter((o) => o.id !== updatedOrder.id);
         }
 
-        const isPayFirst = parsedUpdatedOrder.pay_first ?? existingOrder?.pay_first ?? false;
-        const paymentStatus = parsedUpdatedOrder.payment_status ?? existingOrder?.payment_status;
+        const isPayFirst = Boolean(parsedUpdatedOrder.pay_first ?? existingOrder?.pay_first ?? false);
+        if (isPayFirst) {
+          return prev.filter((o) => o.id !== updatedOrder.id);
+        }
+
+        const paymentStatus = ((parsedUpdatedOrder.payment_status ?? existingOrder?.payment_status ?? '') as string).toUpperCase();
+        const saleId = parsedUpdatedOrder.sale_id ?? existingOrder?.sale_id;
+        const isSettled = Boolean((parsedUpdatedOrder as any).settled || (existingOrder as any)?.settled);
 
         const isClosed =
           effectiveStatus === 'COMPLETED' ||
           effectiveStatus === 'CANCELLED' ||
-          Boolean((parsedUpdatedOrder as any).settled || (existingOrder as any)?.settled) ||
-          (isPayFirst && paymentStatus === 'PAID');
+          isSettled ||
+          paymentStatus === 'PAID' ||
+          Boolean(saleId);
 
         if (isClosed) {
           return prev.filter((o) => o.id !== updatedOrder.id);
@@ -401,8 +417,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         if (idx >= 0) {
           next = [...prev];
           next[idx] = { ...prev[idx], ...parsedUpdatedOrder };
-        } else if (effectiveStatus && !isPayFirst) {
-          // Only add a brand new active table order if it is NOT a pay_first order awaiting payment
+        } else if (!isClosed && effectiveStatus) {
           next = [parsedUpdatedOrder as TableOrder, ...prev];
         } else {
           return prev;
@@ -719,7 +734,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   };
 
   // Excel (.xlsx) Export Handler
-  const handleExportToExcel = (scope: 'filtered' | 'all') => {
+  const handleExportToExcel = async (scope: 'filtered' | 'all') => {
     try {
       setIsExportingExcel(true);
       const dataToExport = scope === 'filtered' ? filteredSales : sales;
@@ -738,7 +753,20 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           ? customDate
           : 'All';
       const prefix = scope === 'filtered' ? `Sales_${filterLabel}_Register` : 'Sales_All_Register';
-      exportSalesToExcel(dataToExport, glAccounts, prefix, business.name);
+      let compRecords: CompRecord[] = [];
+      try {
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        if (scope === 'filtered' && filteredSales.length > 0) {
+          const dates = filteredSales.map((s) => s.date_string).filter(Boolean).sort();
+          startDate = dates[0];
+          endDate = dates[dates.length - 1];
+        }
+        compRecords = await rbacService.getCompRecordsApi(business.id, { start_date: startDate, end_date: endDate });
+      } catch (e) {
+        // non-fatal, ledger sheet will be omitted
+      }
+      exportSalesToExcel(dataToExport, glAccounts, prefix, business.name, compRecords);
       showStatus(
         `Successfully exported ${dataToExport.length} sales record${dataToExport.length === 1 ? '' : 's'} and GL links to Excel (.xlsx)!`,
         'success'
@@ -823,7 +851,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const isOwner = !isViewOnly;
 
   // Open interactive Excel spreadsheet editor & preview
-  const handleOpenExcelPreview = (scope: 'filtered' | 'all' = 'filtered') => {
+  const handleOpenExcelPreview = async (scope: 'filtered' | 'all' = 'filtered') => {
     try {
       const dataToExport = scope === 'filtered' ? filteredSales : sales;
       if (!dataToExport || dataToExport.length === 0) {
@@ -841,7 +869,20 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           ? customDate
           : 'All';
       const prefix = scope === 'filtered' ? `Sales_${filterLabel}_Register` : 'Sales_All_Register';
-      const sheets = buildSalesWorkbookData(dataToExport, glAccounts, currencySymbol);
+      let compRecords: CompRecord[] = [];
+      try {
+        let startDate: string | undefined = undefined;
+        let endDate: string | undefined = undefined;
+        if (scope === 'filtered' && filteredSales.length > 0) {
+          const dates = filteredSales.map((s) => s.date_string).filter(Boolean).sort();
+          startDate = dates[0];
+          endDate = dates[dates.length - 1];
+        }
+        compRecords = await rbacService.getCompRecordsApi(business.id, { start_date: startDate, end_date: endDate });
+      } catch (e) {
+        // non-fatal, ledger sheet will be omitted
+      }
+      const sheets = buildSalesWorkbookData(dataToExport, glAccounts, currencySymbol, compRecords);
       setExcelPreviewSheets(sheets);
       setExcelPreviewPrefix(prefix);
       setExcelPreviewOpen(true);
@@ -1649,11 +1690,32 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           onGlAccountCreated={(acc) => setGlAccounts(prev => { if (!prev.some(a => a.id === acc.id)) return [...prev, acc]; return prev; })}
           onSaleCreated={(newSale) => {
             setSales((prev) => [newSale, ...prev]);
+            if (newSale.order_id) {
+              setPendingOrders((prev) => prev.filter((o) => o.id !== newSale.order_id));
+              setPayFirstOrders((prev) => prev.filter((o) => o.id !== newSale.order_id));
+            }
+            if (newSale.table_id) {
+              setPendingOrders((prev) => prev.filter((o) => o.table_id !== newSale.table_id));
+            }
             setShowNewSaleModal(false);
             setSelectedOrderToSettle(undefined);
             setSelectedTableIdToOrder(undefined);
             setSelectedSaleForView(newSale); // Automatically preview the new receipt
             showStatus(`Invoice #${newSale.invoice_number} generated successfully!`);
+            loadBillingData();
+          }}
+          onOrderSettledConflict={(orderId, tableId) => {
+            if (orderId) {
+              setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
+              setPayFirstOrders((prev) => prev.filter((o) => o.id !== orderId));
+            }
+            if (tableId) {
+              setPendingOrders((prev) => prev.filter((o) => o.table_id !== tableId));
+            }
+            setShowNewSaleModal(false);
+            setSelectedOrderToSettle(undefined);
+            setSelectedTableIdToOrder(undefined);
+            loadBillingData();
           }}
         />
       )}
@@ -2036,6 +2098,7 @@ interface NewSaleModalProps {
   initialTableId?: string;
   onClose: () => void;
   onSaleCreated: (sale: SaleRecord) => void;
+  onOrderSettledConflict?: (orderId?: string, tableId?: string) => void;
   onGlAccountCreated: (acc: any) => void;
 }
 
@@ -2062,6 +2125,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   initialTableId,
   onClose,
   onSaleCreated,
+  onOrderSettledConflict,
   onGlAccountCreated,
 }) => {
   const [saleType, setSaleType] = useState<SaleType>('DINE_IN');
@@ -2087,6 +2151,15 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     description: string;
   } | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
+  const [compReason, setCompReason] = useState<string>('');
+
+  const compModeActive = useMemo(() => {
+    if (saleType !== 'DINE_IN') return false;
+    const tableId = selectedTableId || (selectedOrderId ? pendingOrders.find((o) => o.id === selectedOrderId)?.table_id : undefined);
+    if (!tableId) return false;
+    const tbl = tables.find((t) => t.id === tableId);
+    return Boolean(tbl?.comp_enabled);
+  }, [saleType, selectedTableId, selectedOrderId, pendingOrders, tables]);
 
   // Line items
   const [items, setItems] = useState<SaleItem[]>([
@@ -2097,6 +2170,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       quantity: 1,
       price: 0,
       unit_price: '' as any,
+      comp_qty: 0,
+      is_comp: false,
+      comp_value: 0,
       subtotal: 0,
       total_price: 0,
     },
@@ -2124,6 +2200,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             quantity: i.quantity,
             price: i.price,
             unit_price: i.price,
+            comp_qty: 0,
+            is_comp: false,
+            comp_value: 0,
             subtotal: i.price * i.quantity,
             total_price: i.price * i.quantity,
           }))
@@ -2318,6 +2397,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       const current: Partial<SaleItem> = copy[rowIdx] || {};
       const qty = Math.max(1, Number(current.quantity) || 1);
       const unitPrice = Number(candidate.price) || 0;
+      const compQty = Math.max(0, Math.min(qty, Number(current.comp_qty) || 0));
+      const billedQty = Math.max(0, qty - compQty);
       copy[rowIdx] = {
         ...current,
         id: current.id || `item-${Date.now()}-${rowIdx}`,
@@ -2327,8 +2408,11 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         price: unitPrice,
         unit_price: unitPrice,
         quantity: qty,
-        subtotal: qty * unitPrice,
-        total_price: qty * unitPrice,
+        comp_qty: compQty,
+        is_comp: compQty >= qty,
+        comp_value: compQty * unitPrice,
+        subtotal: billedQty * unitPrice,
+        total_price: billedQty * unitPrice,
         category: candidate.category || current.category,
         food_type: candidate.food_type,
         variant_id: candidate.variant_id,
@@ -2346,6 +2430,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           quantity: 1,
           price: 0,
           unit_price: '' as any,
+          comp_qty: 0,
+          is_comp: false,
+          comp_value: 0,
           subtotal: 0,
           total_price: 0,
         });
@@ -2411,20 +2498,56 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
     setItems((prev) => {
       const copy = [...prev];
       const target = { ...copy[index], [field]: val };
-      if (field === 'quantity' || field === 'unit_price' || field === 'price') {
+      if (field === 'quantity' || field === 'unit_price' || field === 'price' || (field as string) === 'comp_qty') {
         const qty = field === 'quantity' && val === '' ? 1 : Math.max(1, Number(target.quantity) || 1);
-        const price = val === '' ? 0 : (Number(target.unit_price ?? target.price) || 0);
+        const price = (field === 'unit_price' || field === 'price') && val === '' ? 0 : (Number(target.unit_price ?? target.price) || 0);
+        const compQty = Math.max(0, Math.min(qty, Number(target.comp_qty) || 0));
+        const billedQty = Math.max(0, qty - compQty);
         if (field !== 'quantity' || val !== '') {
           target.quantity = qty;
         }
         target.price = price;
-        target.unit_price = val === '' ? ('' as any) : val;
-        target.subtotal = qty * price;
-        target.total_price = qty * price;
+        target.unit_price = (field === 'unit_price' || field === 'price') && val === '' ? ('' as any) : (target.unit_price ?? price);
+        target.comp_qty = (field as string) === 'comp_qty' && val === '' ? ('' as any) : compQty;
+        target.is_comp = compQty >= qty;
+        target.comp_value = compQty * price;
+        target.subtotal = billedQty * price;
+        target.total_price = billedQty * price;
       }
       copy[index] = target;
       return copy;
     });
+  };
+
+  const handleCompQtyInputChange = (
+    idx: number,
+    raw: string,
+    currentCompQty: any,
+    itemQuantity: any
+  ) => {
+    if (raw === '') {
+      handleItemChange(idx, 'comp_qty' as any, '' as any);
+      return;
+    }
+    let clean = raw;
+    const prevVal = Number(currentCompQty) || 0;
+    // When previous value was 0, typing any digit (either before or after the 0) cleanly replaces the 0
+    if (prevVal === 0 && raw.length === 2) {
+      if (raw.endsWith('0')) {
+        clean = raw[0];
+      } else if (raw.startsWith('0')) {
+        clean = raw.slice(1);
+      }
+    }
+    // Strip any remaining leading zeros before digits (e.g. '001' -> '1')
+    clean = clean.replace(/^0+(?=\d)/, '');
+    const val = parseInt(clean, 10);
+    const maxQty = Number(itemQuantity) || 1;
+    handleItemChange(
+      idx,
+      'comp_qty' as any,
+      isNaN(val) ? 0 : Math.min(Math.max(0, val), maxQty)
+    );
   };
 
   const handleAddItem = () => {
@@ -2439,6 +2562,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         quantity: 1,
         price: 0,
         unit_price: 0,
+        comp_qty: 0,
+        is_comp: false,
+        comp_value: 0,
         subtotal: 0,
         total_price: 0,
       },
@@ -2464,6 +2590,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           quantity: 1,
           price: 0,
           unit_price: '' as any,
+          comp_qty: 0,
+          is_comp: false,
+          comp_value: 0,
           subtotal: 0,
           total_price: 0,
         },
@@ -2681,18 +2810,25 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       .filter((item) => (item.name || '').trim().length > 0)
       .map((item) => {
         const qty = Math.max(1, Number(item.quantity) || 1);
+        const compQty = compModeActive ? Math.max(0, Math.min(qty, Number(item.comp_qty) || 0)) : 0;
+        const billedQty = Math.max(0, qty - compQty);
         const price = Number(item.unit_price ?? item.price) || 0;
         return {
           ...item,
           quantity: qty,
           price,
           unit_price: price,
-          subtotal: qty * price,
-          total_price: qty * price,
+          comp_qty: compQty,
+          is_comp: compQty >= qty,
+          comp_value: compQty * price,
+          subtotal: billedQty * price,
+          total_price: billedQty * price,
         };
       });
 
-    if (validItems.length === 0 || subtotal <= 0) {
+    const hasCompItems = validItems.some((i) => (i.comp_qty ?? 0) > 0);
+
+    if (validItems.length === 0 || (subtotal <= 0 && !hasCompItems)) {
       alert('Please add at least one dish with a valid name and price.');
       return;
     }
@@ -2759,6 +2895,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       cashier_name: user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier'),
       cashier_id: user?.id,
       notes,
+      comp_reason: compModeActive && compReason.trim() ? compReason.trim() : undefined,
     };
 
     try {
@@ -2767,13 +2904,15 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
       // Instant server-side resolution of table waiter pings & service requests
       if (selectedTableId) {
-        rbacService.acknowledgeTablePingApi(selectedTableId, business.id).catch(() => {});
+        const tableObj = tables.find((t) => t.id === selectedTableId);
+        rbacService.acknowledgeTablePingApi(selectedTableId, business.id, tableObj?.table_number).catch(() => {});
       }
 
       onSaleCreated(created);
     } catch (err: any) {
-      alert(err.message || 'Failed to record sale');
-      if (err.message && err.message.includes('already been settled')) {
+      alert(err?.message || 'Failed to record sale');
+      if (err?.message && /already been settled/i.test(err.message)) {
+        onOrderSettledConflict?.(selectedOrderId || undefined, selectedTableId || undefined);
         onClose();
       }
     } finally {
@@ -3005,6 +3144,75 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   )}
                 </div>
 
+                {compModeActive && (
+                  <div className="flex items-center justify-between gap-1.5 mt-1.5 py-1 px-2 rounded-lg bg-amber-50/80 border border-amber-200">
+                    <div className="flex items-center gap-1.5">
+                      <Gift className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span className="text-[10px] text-amber-800 font-bold">Comp Qty:</span>
+                    </div>
+                    <div className="inline-flex items-center justify-center border border-amber-300 rounded-lg bg-white shadow-2xs overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = Number(item.comp_qty) || 0;
+                          handleItemChange(idx, 'comp_qty' as any, Math.max(0, current - 1));
+                        }}
+                        disabled={(Number(item.comp_qty) || 0) <= 0}
+                        className="w-7 h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
+                        title="Decrease comp quantity"
+                        aria-label="Decrease comp quantity"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        max={Number(item.quantity) || 1}
+                        inputMode="numeric"
+                        value={item.comp_qty ?? 0}
+                        onFocus={(e) => {
+                          const t = e.currentTarget;
+                          t.select();
+                          setTimeout(() => t.select(), 0);
+                        }}
+                        onClick={(e) => e.currentTarget.select()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                        }}
+                        onChange={(e) =>
+                          handleCompQtyInputChange(idx, e.target.value, item.comp_qty, item.quantity)
+                        }
+                        onBlur={() => {
+                          const val = parseInt(String(item.comp_qty), 10);
+                          const maxQty = Number(item.quantity) || 1;
+                          handleItemChange(
+                            idx,
+                            'comp_qty' as any,
+                            isNaN(val) || val < 0 ? 0 : Math.min(val, maxQty)
+                          );
+                        }}
+                        className="w-9 py-1 text-center font-bold text-xs bg-white text-amber-950 border-x border-amber-200 focus:outline-none focus:ring-1 focus:ring-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none select-all"
+                        placeholder="0"
+                        title="Comp qty (0 = fully charged)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = Number(item.comp_qty) || 0;
+                          const maxQty = Number(item.quantity) || 1;
+                          handleItemChange(idx, 'comp_qty' as any, Math.min(maxQty, current + 1));
+                        }}
+                        disabled={(Number(item.comp_qty) || 0) >= (Number(item.quantity) || 1)}
+                        className="w-7 h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
+                        title="Increase comp quantity"
+                        aria-label="Increase comp quantity"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Row 2: Qty Stepper, Price, Subtotal */}
                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-zinc-200/60">
                   {/* Quantity Stepper */}
@@ -3127,6 +3335,11 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   <th className="py-2 px-2.5 sm:px-3 rounded-tl-xl min-w-[130px]">Item Description</th>
                   <th className="py-2 px-1 sm:px-2 w-24 sm:w-28 text-center">Qty</th>
                   <th className="py-2 px-1.5 sm:px-2 w-20 sm:w-24 text-right">Price ({currency})</th>
+                  {compModeActive && (
+                    <th className="py-2 px-1 sm:px-2 w-24 sm:w-28 text-center text-amber-700 bg-amber-50 text-[10px]">
+                      Comp Qty
+                    </th>
+                  )}
                   <th className="py-2 px-1.5 sm:px-2 w-20 sm:w-24 text-right">Total ({currency})</th>
                   <th className="py-2 px-1 w-8 sm:w-10 text-center rounded-tr-xl"></th>
                 </tr>
@@ -3250,6 +3463,70 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         className="w-20 sm:w-24 px-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                       />
                     </td>
+                    {compModeActive && (
+                      <td className="p-2 text-center">
+                        <div className="inline-flex items-center justify-center border border-amber-300 rounded-lg bg-white shadow-2xs overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = Number(item.comp_qty) || 0;
+                              handleItemChange(idx, 'comp_qty' as any, Math.max(0, current - 1));
+                            }}
+                            disabled={(Number(item.comp_qty) || 0) <= 0}
+                            className="w-7 h-7 sm:w-7 sm:h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
+                            title="Decrease comp quantity"
+                            aria-label="Decrease comp quantity"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <input
+                            type="number"
+                            min="0"
+                            max={Number(item.quantity) || 1}
+                            inputMode="numeric"
+                            value={item.comp_qty ?? 0}
+                            onFocus={(e) => {
+                              const t = e.currentTarget;
+                              t.select();
+                              setTimeout(() => t.select(), 0);
+                            }}
+                            onClick={(e) => e.currentTarget.select()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') e.currentTarget.blur();
+                            }}
+                            onChange={(e) =>
+                              handleCompQtyInputChange(idx, e.target.value, item.comp_qty, item.quantity)
+                            }
+                            onBlur={() => {
+                              const val = parseInt(String(item.comp_qty), 10);
+                              const maxQty = Number(item.quantity) || 1;
+                              handleItemChange(
+                                idx,
+                                'comp_qty' as any,
+                                isNaN(val) || val < 0 ? 0 : Math.min(val, maxQty)
+                              );
+                            }}
+                            className="w-10 sm:w-11 py-1 text-center font-bold text-xs bg-white text-amber-950 border-x border-amber-200 focus:outline-none focus:ring-1 focus:ring-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none select-all"
+                            placeholder="0"
+                            title="Comp qty (0 = fully charged)"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const current = Number(item.comp_qty) || 0;
+                              const maxQty = Number(item.quantity) || 1;
+                              handleItemChange(idx, 'comp_qty' as any, Math.min(maxQty, current + 1));
+                            }}
+                            disabled={(Number(item.comp_qty) || 0) >= (Number(item.quantity) || 1)}
+                            className="w-7 h-7 sm:w-7 sm:h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
+                            title="Increase comp quantity"
+                            aria-label="Increase comp quantity"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                     <td className="p-2 text-right font-bold text-zinc-900">
                       {(item.total_price || 0).toFixed(2)}
                     </td>
@@ -3271,6 +3548,19 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               </tbody>
             </table>
           </div>
+
+          {compModeActive && items.some((i) => ((i.comp_qty ?? 0) > 0)) && (
+            <div className="flex items-center gap-2 mt-2 px-1">
+              <Gift className="w-4 h-4 text-amber-500 shrink-0" />
+              <input
+                type="text"
+                value={compReason}
+                onChange={(e) => setCompReason(e.target.value)}
+                placeholder="Comp reason (optional) — e.g. Manager Treat, Quality Issue, Guest Complaint"
+                className="flex-1 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50/60 text-xs font-medium focus:ring-2 focus:ring-amber-400 focus:outline-none"
+              />
+            </div>
+          )}
         </div>
 
         {/* Bill Calculations & Payment Options */}

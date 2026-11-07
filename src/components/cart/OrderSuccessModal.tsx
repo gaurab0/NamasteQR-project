@@ -38,6 +38,7 @@ import { Button } from '../ui/Button';
 interface OrderSuccessModalProps {
   order: TableOrder | null;
   isOpen?: boolean;
+  isHost?: boolean;
   onClose: () => void;
   onOrderMore: () => void;
   onOpenFinalBillPage?: (order?: TableOrder) => void;
@@ -51,6 +52,7 @@ interface OrderSuccessModalProps {
 export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   order,
   isOpen = true,
+  isHost = true,
   onClose,
   onOrderMore,
   onOpenFinalBillPage,
@@ -953,17 +955,24 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               )}
 
               <div className="flex flex-col sm:flex-row items-center gap-2">
-                <Button
-                  id="btn-order-more-items"
-                  type="button"
-                  variant="outline"
-                  size="md"
-                  onClick={onOrderMore}
-                  className="w-full sm:flex-1 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <UtensilsCrossed className="w-3.5 h-3.5 text-zinc-600" />
-                  <span>Order More</span>
-                </Button>
+                {isHost ? (
+                  <Button
+                    id="btn-order-more-items"
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    onClick={onOrderMore}
+                    className="w-full sm:flex-1 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <UtensilsCrossed className="w-3.5 h-3.5 text-zinc-600" />
+                    <span>Order More</span>
+                  </Button>
+                ) : (
+                  <div className="w-full sm:flex-1 py-2 px-3 bg-amber-50 rounded-xl text-center border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>View-Only Guest</span>
+                  </div>
+                )}
 
                 <Button
                   id="btn-call-waiter"
@@ -997,7 +1006,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                     className="w-full sm:flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition"
                   >
                     <Receipt className="w-4 h-4 text-white" />
-                    <span>{liveOrder?.pay_first ? 'View Paid Receipt' : 'Check and confirm final bill'}</span>
+                    <span>{liveOrder?.pay_first ? 'View Paid Receipt' : isHost ? 'Check and confirm final bill' : 'View Final Bill Folio'}</span>
                   </Button>
                 )}
               </div>

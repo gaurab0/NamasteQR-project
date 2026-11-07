@@ -310,10 +310,20 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const res = await fetch('/api/print/test-connection', {
         method: 'POST',
         headers,
+        credentials: 'include',
         body: JSON.stringify({ host, port, timeout: 3500 }),
       });
-      const data = await res.json();
-      return data;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errMsg = typeof data.error === 'object' && data.error !== null
+          ? data.error.message || data.error.code || 'Connection test failed'
+          : (data.error || `HTTP ${res.status}: Connection test failed`);
+        return { success: false, reachable: false, error: errMsg };
+      }
+      const finalError = typeof data.error === 'object' && data.error !== null
+        ? data.error.message || data.error.code
+        : data.error;
+      return { ...data, error: finalError };
     } catch (err: any) {
       return { success: false, reachable: false, error: err.message || 'Network error' };
     }

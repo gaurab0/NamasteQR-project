@@ -990,7 +990,7 @@ router.post('/orders', customerDiningLimiter, async (req: Request, res: Response
 
     const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
     const order = await rbacService.createTableOrder(targetBusinessId, {
-      table_id: table_id || 'table-general',
+      table_id: table_id || undefined,
       table_number: table_number || 'Table 1',
       floor: floor || null,
       building: building || null,
@@ -1059,7 +1059,7 @@ router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Re
 
     const targetBusinessId = business_id || businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
     const order = await rbacService.createTableOrder(targetBusinessId, {
-      table_id: table_id || 'table-general',
+      table_id: table_id || undefined,
       table_number: table_number || 'Table 1',
       floor: floor || null,
       building: building || null,
@@ -1490,7 +1490,7 @@ router.post(['/orders/:id/acknowledge-bill', '/orders/:id/folio-delivered'], opt
 
 router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
-    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
+    const businessId = (req.query.businessId as string) || (req.headers['x-business-id'] as string) || req.body.businessId || req.body.business_id;
     const orderId = req.params.id;
     const { payment_method, promo_code, promo_discount, total_amount, currency, notes } = req.body;
 
@@ -1505,6 +1505,23 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
         success: false,
         error: { code: 'TENANT_MISMATCH', message: 'Order does not belong to specified business' }
       });
+    }
+
+    // For dine-in table orders without staff credentials: only the table host can request final bill
+    if (!(req as any).user && existingOrder.table_id) {
+      const tableSnap = await prisma.restaurantTable.findUnique({ where: { id: existingOrder.table_id } });
+      if (tableSnap && tableSnap.host_token) {
+        const providedToken = (req.headers['x-host-token'] as string) || req.body.host_token || (req.query.host_token as string);
+        if (!providedToken || providedToken !== tableSnap.host_token) {
+          return res.status(403).json({
+            success: false,
+            error: {
+              code: 'VIEW_ONLY_GUEST',
+              message: 'Bill request authority reserved: Only the Table Host who first scanned the table QR code can request the final bill.'
+            }
+          });
+        }
+      }
     }
 
     // Server-side validation of pricing and totals to prevent client tampering
@@ -1892,6 +1909,18 @@ router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), asy
 }));
 
 /**
+ * GET /api/rbac/comp-records
+ * Fetch complementary ledger records with optional date filters
+ */
+router.get('/comp-records', authenticate, requireResourceAccess('billing', 'read'),
+  asyncHandler('COMP_RECORDS_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
+    const { start_date, end_date } = req.query as { start_date?: string; end_date?: string };
+    const records = await rbacService.getCompRecords(businessId, { start_date, end_date });
+    return res.json({ success: true, data: records });
+  })
+);
+
+/**
  * POST /api/rbac/sales
  * Create a new POS / Table sale record
  */
@@ -2239,45 +2268,242 @@ router.get('/service-requests', authenticate, requireResourceAccess('orders', 'r
   }
 });
 
+export function getTableNumberVariations(raw?: string | null): string[] {
+  if (!raw || typeof raw !== 'string') return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  const set = new Set<string>();
+  set.add(trimmed);
+
+  // Strip prefixes like "Table #", "Table ", "#"
+  const strippedPrefix = trimmed.replace(/^((table\s*#?|#)\s*)+/i, '').trim();
+  if (strippedPrefix) {
+    set.add(strippedPrefix);
+    set.add(`Table ${strippedPrefix}`);
+    set.add(`Table #${strippedPrefix}`);
+    set.add(`#${strippedPrefix}`);
+  }
+
+  // Strip parentheses suffix e.g. " (VIP)", "(VIP)", " (AC)"
+  const withoutParens = trimmed.replace(/\s*\([^)]*\)\s*$/i, '').trim();
+  if (withoutParens && withoutParens !== trimmed) {
+    set.add(withoutParens);
+    const strippedParensPrefix = withoutParens.replace(/^((table\s*#?|#)\s*)+/i, '').trim();
+    if (strippedParensPrefix) {
+      set.add(strippedParensPrefix);
+      set.add(`Table ${strippedParensPrefix}`);
+      set.add(`Table #${strippedParensPrefix}`);
+      set.add(`#${strippedParensPrefix}`);
+    }
+  }
+
+  // If strippedPrefix also had parens:
+  if (strippedPrefix) {
+    const strippedBoth = strippedPrefix.replace(/\s*\([^)]*\)\s*$/i, '').trim();
+    if (strippedBoth && strippedBoth !== strippedPrefix) {
+      set.add(strippedBoth);
+      set.add(`Table ${strippedBoth}`);
+      set.add(`Table #${strippedBoth}`);
+      set.add(`#${strippedBoth}`);
+    }
+  }
+
+  return Array.from(set).filter(Boolean);
+}
+
 /**
  * POST /api/rbac/tables/:tableId/acknowledge-ping
  * Acknowledge / dismiss active waiter ping on a table
  */
 router.post('/tables/:tableId/acknowledge-ping', customerDiningLimiter, optionalAuthenticate, async (req: Request, res: Response) => {
   try {
-    const { tableId } = req.params;
-    const businessId = (req.query.businessId as string) || req.body.businessId || req.body.business_id;
+    const { tableId: paramTableId } = req.params;
+    let businessId =
+      (req.query.businessId as string) ||
+      (req.headers['x-business-id'] as string) ||
+      req.body.businessId ||
+      req.body.business_id ||
+      (req as any).user?.business?.id ||
+      (req as any).user?.businessId;
+    let tableId = paramTableId && paramTableId !== 'undefined' && paramTableId !== 'null' && paramTableId !== 'active'
+      ? paramTableId
+      : undefined;
+    const tableNumber = (req.query.tableNumber as string) || req.body.tableNumber || req.body.table_number;
 
+    if (!tableId && req.body.tableId && req.body.tableId !== 'undefined' && req.body.tableId !== 'null') {
+      tableId = req.body.tableId;
+    }
+
+    // Auto-discover businessId from tableId if not passed explicitly
+    if (!businessId && tableId) {
+      const foundTable = await prisma.restaurantTable.findUnique({ where: { id: tableId } }).catch(() => null);
+      if (foundTable?.business_id) {
+        businessId = foundTable.business_id;
+      }
+    }
+
+    const allTableNumberCandidates = [
+      ...getTableNumberVariations(tableNumber),
+      ...(tableId ? getTableNumberVariations(tableId) : []),
+    ];
+
+    const searchConditions: any[] = [];
     if (tableId) {
-      await prisma.restaurantTable.updateMany({
+      searchConditions.push({ id: tableId, ...(businessId ? { business_id: businessId } : {}) });
+      searchConditions.push({ id: tableId });
+    }
+    for (const num of allTableNumberCandidates) {
+      searchConditions.push({ table_number: num, ...(businessId ? { business_id: businessId } : {}) });
+      searchConditions.push({ table_number: num });
+
+      // Descriptive suffix variations e.g. "Table 4 (VIP)" or "4 (VIP)"
+      searchConditions.push({ table_number: { startsWith: `${num} (` }, ...(businessId ? { business_id: businessId } : {}) });
+      searchConditions.push({ table_number: { startsWith: `${num} (` } });
+      searchConditions.push({ table_number: { startsWith: `${num} -` }, ...(businessId ? { business_id: businessId } : {}) });
+      searchConditions.push({ table_number: { startsWith: `${num} -` } });
+    }
+    if (req.body.tableId && req.body.tableId !== tableId) {
+      searchConditions.push({ id: req.body.tableId, ...(businessId ? { business_id: businessId } : {}) });
+      searchConditions.push({ id: req.body.tableId });
+    }
+
+    let matchingTables = searchConditions.length > 0
+      ? await prisma.restaurantTable.findMany({
+          where: {
+            OR: searchConditions,
+          },
+        })
+      : [];
+
+    // Filter to businessId if businessId is specified and we found multiple tables
+    if (businessId && matchingTables.length > 1) {
+      const bizSpecific = matchingTables.filter((t) => t.business_id === businessId);
+      if (bizSpecific.length > 0) {
+        matchingTables = bizSpecific;
+      }
+    }
+
+    // Swapped argument fallback detection:
+    // If no tables found, but tableId matches a business and businessId matches a table in that business:
+    if (matchingTables.length === 0 && businessId) {
+      const swappedCandidates = [
+        businessId,
+        ...getTableNumberVariations(businessId),
+      ];
+      const swappedConditions: any[] = [{ id: businessId }];
+      for (const num of swappedCandidates) {
+        swappedConditions.push({ table_number: num, ...(tableId ? { business_id: tableId } : {}) });
+        swappedConditions.push({ table_number: { startsWith: `${num} (` }, ...(tableId ? { business_id: tableId } : {}) });
+        swappedConditions.push({ table_number: { startsWith: `${num} -` }, ...(tableId ? { business_id: tableId } : {}) });
+      }
+      const swappedTables = await prisma.restaurantTable.findMany({
         where: {
-          OR: [
-            { id: tableId },
-            { table_number: tableId, ...(businessId ? { business_id: businessId } : {}) },
-          ],
+          OR: swappedConditions,
         },
+      });
+      if (swappedTables.length > 0) {
+        matchingTables = swappedTables;
+        businessId = tableId; // tableId in route was actually the businessId
+      }
+    }
+
+    if (matchingTables.length > 0) {
+      const matchedIds = matchingTables.map((t) => t.id);
+      await prisma.restaurantTable.updateMany({
+        where: { id: { in: matchedIds } },
         data: { waiter_ping: { active: false } },
       }).catch(() => {});
 
-      if (businessId) {
-        await prisma.serviceRequest.updateMany({
+      if (!businessId && matchingTables[0].business_id) {
+        businessId = matchingTables[0].business_id;
+      }
+    } else if (tableId) {
+      const fallbackConditions: any[] = [{ id: tableId }];
+      for (const num of allTableNumberCandidates) {
+        fallbackConditions.push({ table_number: num, ...(businessId ? { business_id: businessId } : {}) });
+        fallbackConditions.push({ table_number: { startsWith: `${num} (` }, ...(businessId ? { business_id: businessId } : {}) });
+        fallbackConditions.push({ table_number: { startsWith: `${num} -` }, ...(businessId ? { business_id: businessId } : {}) });
+      }
+      await prisma.restaurantTable.updateMany({
+        where: {
+          OR: fallbackConditions,
+        },
+        data: { waiter_ping: { active: false } },
+      }).catch(() => {});
+    }
+
+    if (businessId) {
+      const serviceRequestConditions: any[] = [];
+      if (tableId) {
+        serviceRequestConditions.push({ table_id: tableId });
+      }
+      for (const num of allTableNumberCandidates) {
+        serviceRequestConditions.push({ table_number: num });
+        serviceRequestConditions.push({ table_number: { startsWith: `${num} (` } });
+        serviceRequestConditions.push({ table_number: { startsWith: `${num} -` } });
+      }
+      for (const t of matchingTables) {
+        serviceRequestConditions.push({ table_id: t.id });
+        serviceRequestConditions.push({ table_number: t.table_number });
+      }
+
+      if (serviceRequestConditions.length > 0) {
+        const pendingReqs = await prisma.serviceRequest.findMany({
           where: {
-            OR: [
-              { table_id: tableId },
-              { table_number: tableId },
-            ],
             business_id: businessId,
-            type: 'CALL_WAITER',
+            OR: serviceRequestConditions,
+            type: { in: ['CALL_WAITER', 'WAITER_CALL'] },
             status: 'PENDING',
           },
-          data: {
-            status: 'ATTENDED',
-            resolved_at: new Date(),
-          },
-        }).catch(() => {});
+          select: { id: true, table_id: true, table_number: true },
+        }).catch(() => []);
 
-        realtimeEmitter.tableUpdated(businessId, { id: tableId, waiter_ping: { active: false } });
+        if (pendingReqs.length > 0) {
+          const reqIds = pendingReqs.map((r) => r.id);
+          const resolvedAt = new Date();
+          await prisma.serviceRequest.updateMany({
+            where: { id: { in: reqIds } },
+            data: {
+              status: 'ATTENDED',
+              resolved_at: resolvedAt,
+            },
+          }).catch(() => {});
+
+          for (const req of pendingReqs) {
+            realtimeEmitter.serviceRequestUpdated(businessId, {
+              id: req.id,
+              table_id: req.table_id,
+              table_number: req.table_number,
+              status: 'ATTENDED',
+              resolved_at: resolvedAt,
+            });
+          }
+        }
       }
+
+      if (matchingTables.length > 0) {
+        for (const t of matchingTables) {
+          realtimeEmitter.tableUpdated(businessId, {
+            id: t.id,
+            table_number: t.table_number,
+            waiter_ping: { active: false },
+          });
+        }
+      } else {
+        realtimeEmitter.tableUpdated(businessId, {
+          id: tableId,
+          table_number: tableNumber || tableId,
+          waiter_ping: { active: false },
+        });
+      }
+
+      // Also broadcast general service request update
+      realtimeEmitter.serviceRequestUpdated(businessId, {
+        table_id: tableId,
+        table_number: tableNumber || tableId,
+        status: 'ATTENDED',
+      });
     }
 
     return res.json({ success: true, message: 'Waiter ping acknowledged' });
