@@ -34,6 +34,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
   );
   const [currency, setCurrency] = useState<string>(taxConfig.currency || 'Rs.');
   const [currencySymbol, setCurrencySymbol] = useState<string>(taxConfig.currency_symbol || 'Rs.');
+  const [packagingFee, setPackagingFee] = useState<number>(Number(taxConfig.packaging_fee) || 10);
   const [invoicePrefix, setInvoicePrefix] = useState<string>(taxConfig.invoice_prefix || 'INV-');
   const [orderResetInterval, setOrderResetInterval] = useState<'MANUAL' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'>(taxConfig.order_reset_interval || 'MANUAL');
   const [panVatNumber, setPanVatNumber] = useState<string>(taxConfig.pan_vat_number || '');
@@ -65,6 +66,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
     );
     setCurrency(taxConfig.currency || 'Rs.');
     setCurrencySymbol(taxConfig.currency_symbol || 'Rs.');
+    setPackagingFee(Number(taxConfig.packaging_fee) || 10);
     setInvoicePrefix(taxConfig.invoice_prefix || 'INV-');
     setOrderResetInterval(taxConfig.order_reset_interval || 'MANUAL');
     setPanVatNumber(taxConfig.pan_vat_number || '');
@@ -156,6 +158,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
         tax_inclusive: taxInclusive,
         currency,
         currency_symbol: currencySymbol,
+        packaging_fee: Number(packagingFee) || 10,
         invoice_prefix: invoicePrefix,
         order_reset_interval: orderResetInterval,
         pan_vat_number: panVatNumber,
@@ -395,6 +398,25 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
             />
             <span className="text-[10px] text-zinc-500 mt-0.5 block">
               Prefix for sequential invoice numbers only (e.g. {invoicePrefix || 'INV-'}01)
+            </span>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-bold text-zinc-700 block mb-1">
+              Takeaway Packaging Fee ({currencySymbol} / dish)
+            </label>
+            <input
+              id="input-packaging-fee"
+              type="number"
+              min="0"
+              step="any"
+              value={packagingFee}
+              onChange={(e) => setPackagingFee(Number(e.target.value) || 0)}
+              placeholder="10"
+              className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+            <span className="text-[10px] text-zinc-500 mt-0.5 block">
+              Default packaging charge added per packed dish
             </span>
           </div>
 

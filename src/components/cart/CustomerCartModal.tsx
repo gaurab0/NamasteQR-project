@@ -22,7 +22,8 @@ import {
   AlertTriangle,
   QrCode,
   Lock,
-  CreditCard
+  CreditCard,
+  Package
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -51,13 +52,19 @@ interface CustomerCartModalProps {
     creditGlAccountId?: string | null;
     creditGlAccountNumber?: string | null;
     creditGlAccountName?: string | null;
+    compEnabled?: boolean;
+    compOrdererName?: string | null;
+    compOrdererPhone?: string | null;
   };
   isHost?: boolean;
   hostToken?: string | null;
   onUpdateQuantity: (itemId: string, newQuantity: number) => void;
   onUpdateSpecialInstructions: (itemId: string, note: string) => void;
+  onUpdatePackaging?: (itemId: string, packQty: number) => void;
+  packagingFee?: number;
   onClearCart: () => void;
   onOrderConfirmed: (order: TableOrder) => void;
+  onRequestCompConfirmation?: (cartItems: CartItem[], generalNotes?: string) => void;
   currencySymbol?: string;
 }
 
@@ -71,8 +78,11 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
   hostToken: hostTokenProp,
   onUpdateQuantity,
   onUpdateSpecialInstructions,
+  onUpdatePackaging,
+  packagingFee = 10,
   onClearCart,
   onOrderConfirmed,
+  onRequestCompConfirmation,
   currencySymbol = 'Rs.',
 }) => {
   const [generalNotes, setGeneralNotes] = useState('');
@@ -116,17 +126,37 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
     activeNonCancelledItems.reduce((sum, i) => sum + Number(i.price) * (Number(i.quantity) || 1), 0)
   );
 
-  const displaySubtotal = isHost ? draftSubtotal : (hasLiveOrder ? liveSubtotal : 0);
+  const packagingFeeRate = Number(packagingFee) || 10;
+  const draftPackagingQty = items.reduce((sum, ci) => {
+    if (ci.menuItem.is_packageable === false) return sum;
+    const pQty = Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0);
+    return sum + Math.max(0, Math.min(ci.quantity, pQty));
+  }, 0);
+  const draftPackagingCharge = draftPackagingQty * packagingFeeRate;
+
+  const livePackagingQty = Number(activeOrder?.packaging_qty || 0);
+  const livePackagingCharge = Number(activeOrder?.packaging_charge || 0);
+  const liveTotalAmount = Number(activeOrder?.total_amount) || (liveSubtotal + livePackagingCharge);
+
+  const displayPackagingQty = isHost ? draftPackagingQty : livePackagingQty;
+  const displayPackagingCharge = isHost ? draftPackagingCharge : livePackagingCharge;
+
+  const displaySubtotal = (isHost ? draftSubtotal : (hasLiveOrder ? liveSubtotal : 0)) + displayPackagingCharge;
   const displayTax = (!isHost && hasLiveOrder) ? Number(activeOrder?.tax_amount || 0) : 0;
   const displayTotal = (!isHost && hasLiveOrder)
     ? Number(activeOrder?.total_amount || (displaySubtotal + displayTax))
-    : (isHost ? draftSubtotal : 0);
-  const subtotal = draftSubtotal;
+    : (isHost ? displaySubtotal : 0);
+  const subtotal = draftSubtotal + draftPackagingCharge;
   const totalAmount = subtotal;
 
   const handleConfirmOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (items.length === 0) return;
+
+    if (tableInfo.compEnabled && onRequestCompConfirmation) {
+      onRequestCompConfirmation(items, generalNotes.trim() || undefined);
+      return;
+    }
 
     if (!isHost) {
       setErrorMsg('Ordering authority reserved: Only the Table Host who first scanned the table QR code can submit orders.');
@@ -182,6 +212,8 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
           const station = determineItemStation(ci.menuItem);
           const finalPrice = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
           const variantName = ci.selected_variant?.name;
+          const isPkg = ci.menuItem.is_packageable !== false;
+          const pQty = isPkg ? Math.max(0, Math.min(ci.quantity, Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0))) : 0;
           return {
             item_id: ci.menuItem.id,
             name: ci.menuItem.name,
@@ -195,9 +227,15 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
             category: ci.menuItem.category,
             additional_categories: itemCategories,
             station,
+            is_packageable: isPkg,
+            is_packaged: pQty > 0,
+            pack_qty: pQty,
+            packaging_charge: pQty * packagingFeeRate,
             ordered_at: new Date().toISOString(),
           };
         }),
+        packaging_charge: draftPackagingCharge,
+        packaging_qty: draftPackagingQty,
         subtotal,
         total_amount: totalAmount,
         currency: currencySymbol,
@@ -245,7 +283,11 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                   {!isHost ? (hasLiveOrder ? 'Table Live Order Cart' : 'Table Cart') : 'Your Order Cart'}
                 </h3>
                 <span className="text-[11px] bg-zinc-800 text-amber-400 font-bold px-2 py-0.5 rounded-full border border-zinc-700">
-                  {totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'}
+                  {hasLiveOrder && draftItemsCount === 0
+                  ? `${liveItemsCount} in kitchen`
+                  : hasLiveOrder && draftItemsCount > 0
+                  ? `${draftItemsCount} new (+${liveItemsCount} in kitchen)`
+                  : `${draftItemsCount} ${draftItemsCount === 1 ? 'item' : 'items'}`}
                 </span>
                 {!isHost && (
                   <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/40 flex items-center gap-1">
@@ -604,6 +646,63 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                                 className="w-full text-[11px] px-2 py-0.5 bg-zinc-50 border border-zinc-200 rounded-md text-zinc-700 placeholder:text-zinc-400 focus:outline-hidden focus:ring-1 focus:ring-amber-500"
                               />
                             </div>
+
+                            {item.is_packageable !== false && (
+                              <div className="pl-5.5 pt-0.5">
+                                {cartItem.quantity === 1 ? (
+                                  <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 hover:text-zinc-900 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(cartItem.is_packaged || (Number(cartItem.pack_qty) || 0) > 0)}
+                                      onChange={(e) => onUpdatePackaging?.(itemKey, e.target.checked ? 1 : 0)}
+                                      className="w-3.5 h-3.5 rounded text-amber-600 border-zinc-300 focus:ring-amber-500 cursor-pointer"
+                                    />
+                                    <span className="flex items-center gap-1">
+                                      <Package className="w-3 h-3 text-amber-600" />
+                                      <span>Pack this dish for takeaway (+{currencySymbol}{packagingFeeRate})</span>
+                                    </span>
+                                  </label>
+                                ) : (
+                                  <div className="flex items-center justify-between text-[11px] bg-amber-50/60 px-2 py-1 rounded-lg border border-amber-200/60">
+                                    <div className="flex items-center gap-1.5 text-zinc-700 font-medium">
+                                      <Package className="w-3 h-3 text-amber-600 shrink-0" />
+                                      <span>Takeaway Packing (+{currencySymbol}{packagingFeeRate}/dish):</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] text-zinc-500 font-medium mr-1">Pack:</span>
+                                      <div className="inline-flex items-center border border-zinc-200 rounded-md bg-white shadow-2xs overflow-hidden">
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const cur = Math.max(0, Math.min(cartItem.quantity, Number(cartItem.pack_qty) || (cartItem.is_packaged ? cartItem.quantity : 0)));
+                                            onUpdatePackaging?.(itemKey, Math.max(0, cur - 1));
+                                          }}
+                                          disabled={(Number(cartItem.pack_qty) || (cartItem.is_packaged ? cartItem.quantity : 0)) <= 0}
+                                          className="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-30 cursor-pointer"
+                                        >
+                                          <Minus className="w-2.5 h-2.5" />
+                                        </button>
+                                        <span className="w-5 text-center font-bold text-[11px] text-zinc-900 font-mono">
+                                          {Math.max(0, Math.min(cartItem.quantity, Number(cartItem.pack_qty) || (cartItem.is_packaged ? cartItem.quantity : 0)))}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const cur = Math.max(0, Math.min(cartItem.quantity, Number(cartItem.pack_qty) || (cartItem.is_packaged ? cartItem.quantity : 0)));
+                                            onUpdatePackaging?.(itemKey, Math.min(cartItem.quantity, cur + 1));
+                                          }}
+                                          disabled={(Number(cartItem.pack_qty) || (cartItem.is_packaged ? cartItem.quantity : 0)) >= cartItem.quantity}
+                                          className="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-30 cursor-pointer"
+                                        >
+                                          <Plus className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                      <span className="text-[10px] text-zinc-500 ml-1">of {cartItem.quantity}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -613,7 +712,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                     <div className="pt-2.5 border-t border-zinc-200 space-y-2">
                       <div>
                         <label className="block text-[11px] font-bold text-zinc-800 mb-0.5">
-                          Additional Instructions for the Kitchen
+                          Additional Instructions
                         </label>
                         <textarea
                           id="order-general-notes"
@@ -702,6 +801,11 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                           <div className="min-w-0 pr-2">
                             <span className="font-bold text-zinc-900">{item.name}</span>
                             {item.variant_name && <span className="ml-1 text-[10px] text-amber-800 font-bold">[{item.variant_name}]</span>}
+                            {Number(item.round_number) > 1 && (
+                              <span className="ml-1 text-[9px] px-1.5 py-0.2 rounded bg-purple-100 text-purple-900 border border-purple-300 font-bold">
+                                Round {item.round_number}
+                              </span>
+                            )}
                             <span className="text-zinc-500 ml-2">×{item.quantity}</span>
                           </div>
                           <span className="font-mono font-bold text-zinc-900 shrink-0">
@@ -720,29 +824,92 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
         {/* Footer with Price Breakdown and Confirm Button */}
         {(items.length > 0 || (hasLiveOrder && !isHost) || hasLiveOrder) && (
           <div className="px-4 py-2.5 sm:px-5 sm:py-3 bg-zinc-50 border-t border-zinc-200 space-y-2">
-            <div className="flex items-center justify-between text-sm font-extrabold text-zinc-900">
-              <span>{hasLiveOrder && !isHost ? 'Table Subtotal' : 'Subtotal Amount'}</span>
-              <span className="text-amber-700 font-mono text-base notranslate">
-                {currencySymbol} {displaySubtotal.toLocaleString()}
-              </span>
-            </div>
-
-            {displayTax > 0 && (
-              <div className="flex items-center justify-between text-xs font-semibold text-zinc-600">
-                <span>Taxes & Charges</span>
-                <span className="font-mono text-zinc-800 notranslate">
-                  +{currencySymbol} {displayTax.toLocaleString()}
-                </span>
+            {hasLiveOrder && isHost && draftItemsCount === 0 ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-sm font-extrabold text-zinc-900">
+                  <span className="flex items-center gap-1.5 text-zinc-800">
+                    <ChefHat className="w-4 h-4 text-amber-600" />
+                    <span>Current Table Total</span>
+                  </span>
+                  <span className="text-amber-700 font-mono text-base notranslate">
+                    {currencySymbol} {liveTotalAmount.toFixed(2)}
+                  </span>
+                </div>
+                <div className="text-[11px] text-zinc-500 font-medium">
+                  {liveItemsCount} {liveItemsCount === 1 ? 'dish' : 'dishes'} already sent to kitchen & bar
+                </div>
               </div>
-            )}
-
-            {hasLiveOrder && !isHost && (
-              <div className="flex items-center justify-between text-sm font-black text-zinc-950 pt-1 border-t border-zinc-200">
-                <span>Table Total</span>
-                <span className="text-zinc-950 font-mono text-base notranslate">
-                  {currencySymbol} {displayTotal.toLocaleString()}
-                </span>
+            ) : hasLiveOrder && isHost && draftItemsCount > 0 ? (
+              <div className="space-y-1.5">
+                {draftPackagingCharge > 0 && (
+                  <div className="flex items-center justify-between text-xs font-semibold text-zinc-600">
+                    <span className="flex items-center gap-1.5 text-zinc-700">
+                      <Package className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Packaging ({draftPackagingQty} @ {currencySymbol}{packagingFeeRate})</span>
+                    </span>
+                    <span className="font-mono text-zinc-900 font-bold notranslate">
+                      +{currencySymbol} {draftPackagingCharge.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-xs font-semibold text-zinc-600">
+                  <span>New Order Subtotal</span>
+                  <span className="font-mono text-zinc-900 font-bold notranslate">
+                    {currencySymbol} {subtotal.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-semibold text-zinc-500">
+                  <span>Dishes Already in Kitchen</span>
+                  <span className="font-mono text-zinc-600 notranslate">
+                    +{currencySymbol} {liveTotalAmount.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm font-black text-zinc-950 pt-1.5 border-t border-zinc-200">
+                  <span>Updated Table Total</span>
+                  <span className="text-amber-700 font-mono text-base notranslate">
+                    {currencySymbol} {(subtotal + liveTotalAmount).toFixed(2)}
+                  </span>
+                </div>
               </div>
+            ) : (
+              <>
+                {displayPackagingQty > 0 && (
+                  <div className="flex items-center justify-between text-xs font-semibold text-zinc-600 pb-0.5">
+                    <span className="flex items-center gap-1.5 text-zinc-700">
+                      <Package className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Packaging ({displayPackagingQty} {displayPackagingQty === 1 ? 'item' : 'items'} @ {currencySymbol}{packagingFeeRate})</span>
+                    </span>
+                    <span className="font-mono text-zinc-900 font-bold notranslate">
+                      +{currencySymbol} {displayPackagingCharge.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between text-sm font-extrabold text-zinc-900">
+                  <span>{hasLiveOrder && !isHost ? 'Table Subtotal' : 'Subtotal Amount'}</span>
+                  <span className="text-amber-700 font-mono text-base notranslate">
+                    {currencySymbol} {displaySubtotal.toLocaleString()}
+                  </span>
+                </div>
+
+                {displayTax > 0 && (
+                  <div className="flex items-center justify-between text-xs font-semibold text-zinc-600">
+                    <span>Taxes & Charges</span>
+                    <span className="font-mono text-zinc-800 notranslate">
+                      +{currencySymbol} {displayTax.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
+                {hasLiveOrder && !isHost && (
+                  <div className="flex items-center justify-between text-sm font-black text-zinc-950 pt-1 border-t border-zinc-200">
+                    <span>Table Total</span>
+                    <span className="text-zinc-950 font-mono text-base notranslate">
+                      {currencySymbol} {displayTotal.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </>
             )}
 
             {/* View-Only Guest Notice */}
@@ -786,7 +953,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
               </div>
             )}
 
-            {!isHost ? (
+            {(!isHost && !tableInfo.compEnabled) ? (
               <div
                 id="btn-confirm-table-order"
                 className="w-full py-3.5 px-4 bg-zinc-100 border border-zinc-200 rounded-xl flex items-center justify-center gap-2 text-zinc-600 font-bold select-none cursor-not-allowed shadow-none"
@@ -800,14 +967,23 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                 type="button"
                 onClick={handleConfirmOrder}
                 disabled={loading || items.length === 0 || Boolean(tableInfo.isSessionExpired) || !tableInfo.tableNumber}
-                className="w-full py-3.5 px-4 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 disabled:bg-zinc-300 disabled:cursor-not-allowed text-white font-extrabold shadow-md rounded-xl flex items-center justify-center gap-2.5 transition-all duration-150 cursor-pointer select-none active:scale-[0.99]"
+                className={`w-full py-3.5 px-4 font-extrabold shadow-md rounded-xl flex items-center justify-center gap-2.5 transition-all duration-150 select-none active:scale-[0.99] ${
+                  items.length === 0
+                    ? 'bg-zinc-200 text-zinc-500 cursor-not-allowed border border-zinc-300'
+                    : 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white cursor-pointer'
+                }`}
               >
                 {loading ? (
-                  <span className="text-sm sm:text-base font-bold">{tableInfo.existingOrderId ? 'Updating Bill & Sending to Kitchen...' : 'Placing Your Order...'}</span>
+                  <span className="text-sm sm:text-base font-bold">{hasLiveOrder ? 'Sending Follow-up to Kitchen...' : 'Placing Your Order...'}</span>
                 ) : tableInfo.isSessionExpired ? (
                   <span className="text-sm sm:text-base font-bold">Session Ended • Scan Table QR</span>
                 ) : !tableInfo.tableNumber ? (
                   <span className="text-sm sm:text-base font-bold">Scan Table QR to Order</span>
+                ) : items.length === 0 && hasLiveOrder ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <UtensilsCrossed className="w-4 h-4 text-zinc-500" />
+                    <span className="text-sm sm:text-base font-bold text-zinc-600">Add dishes to order more</span>
+                  </div>
                 ) : (
                   <div className="flex items-center justify-center gap-2.5 w-full">
                     <ChefHat className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 text-white" />

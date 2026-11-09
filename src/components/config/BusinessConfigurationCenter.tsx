@@ -48,6 +48,9 @@ import {
   Filter,
   CheckCircle2,
   Sparkles,
+  Gift,
+  Copy,
+  EyeOff,
   ExternalLink,
   Save,
   RotateCcw,
@@ -517,6 +520,67 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
     phone: business?.phone || phoneE164 || '',
   });
   const [savingBizProfile, setSavingBizProfile] = useState(false);
+  // Universal Complementary Password State
+  const [compPassword, setCompPassword] = useState('');
+  const [showCompPassword, setShowCompPassword] = useState(false);
+  const [hasCompPassword, setHasCompPassword] = useState(false);
+  const [compPasswordSaving, setCompPasswordSaving] = useState(false);
+  const [compPasswordSuccess, setCompPasswordSuccess] = useState<string | null>(null);
+  const [compPasswordError, setCompPasswordError] = useState<string | null>(null);
+  const [compPasswordCopied, setCompPasswordCopied] = useState(false);
+
+  useEffect(() => {
+    if (activeDomain === 'business_profile' && (user?.business?.id || businessProfile?.id)) {
+      const bizId = user?.business?.id || businessProfile?.id;
+      rbacService.getCompPasswordApi(bizId).then((res) => {
+        if (res) {
+          setCompPassword(res.comp_password || '');
+          setHasCompPassword(Boolean(res.has_comp_password));
+        }
+      }).catch(() => {});
+    }
+  }, [activeDomain, user?.business?.id, businessProfile?.id]);
+
+  const handleGenerateCompPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = 'COMP-';
+    for (let i = 0; i < 4; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setCompPassword(code);
+    setShowCompPassword(true);
+  };
+
+  const handleCopyCompPassword = async () => {
+    if (!compPassword) return;
+    try {
+      await navigator.clipboard.writeText(compPassword);
+      setCompPasswordCopied(true);
+      setTimeout(() => setCompPasswordCopied(false), 2000);
+    } catch {}
+  };
+
+  const handleSaveCompPassword = async () => {
+    if (!compPassword.trim()) {
+      setCompPasswordError('Password cannot be empty');
+      return;
+    }
+    const bizId = user?.business?.id || businessProfile?.id;
+    setCompPasswordSaving(true);
+    setCompPasswordError(null);
+    setCompPasswordSuccess(null);
+    try {
+      await rbacService.updateCompPasswordApi(compPassword.trim(), bizId);
+      setHasCompPassword(true);
+      setCompPasswordSuccess('Universal complementary password saved and active.');
+      setTimeout(() => setCompPasswordSuccess(null), 3000);
+    } catch (err: any) {
+      setCompPasswordError(err?.message || 'Failed to save complementary password');
+    } finally {
+      setCompPasswordSaving(false);
+    }
+  };
+
   const [bizSaveSuccessMsg, setBizSaveSuccessMsg] = useState<string | null>(null);
 
   const handleSaveBusinessProfile = async (e: React.FormEvent) => {
@@ -1447,6 +1511,102 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                   </div>
                 </form>
               </div>
+
+              {/* Universal Complementary Password Section */}
+              <div className="bg-white rounded-3xl p-6 sm:p-8 border border-zinc-200 shadow-xs space-y-5">
+                <div className="flex items-start justify-between gap-4 border-b border-zinc-100 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 shadow-xs">
+                      <Gift className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-zinc-900 flex items-center gap-2">
+                        Universal Complementary Password
+                        {hasCompPassword && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Active
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-xs text-zinc-500">
+                        Universal password used by managers/owners on mobile to authorize complementary table orders directly to the kitchen.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4 max-w-md">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                      <span>Complementary Password</span>
+                      <button
+                        type="button"
+                        onClick={handleGenerateCompPassword}
+                        className="text-xs font-bold text-amber-600 hover:text-amber-800 flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Regenerate</span>
+                      </button>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showCompPassword ? 'text' : 'password'}
+                        value={compPassword}
+                        onChange={(e) => setCompPassword(e.target.value)}
+                        placeholder="Enter password (e.g. COMP-8492)"
+                        className="w-full px-3.5 py-2.5 pr-20 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono font-bold tracking-wider text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
+                      />
+                      <div className="absolute right-2 top-2 flex items-center gap-1 text-zinc-400">
+                        <button
+                          type="button"
+                          onClick={handleCopyCompPassword}
+                          className="p-1 hover:text-zinc-700 cursor-pointer"
+                          title="Copy password to clipboard"
+                        >
+                          {compPasswordCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowCompPassword(!showCompPassword)}
+                          className="p-1 hover:text-zinc-700 cursor-pointer"
+                          title={showCompPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showCompPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 mt-1">
+                      Staff or managers scanning a complementary table QR must enter this code to finalize comp items.
+                    </p>
+                  </div>
+
+                  {compPasswordSuccess && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-bold flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>{compPasswordSuccess}</span>
+                    </div>
+                  )}
+
+                  {compPasswordError && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{compPasswordError}</span>
+                    </div>
+                  )}
+
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="md"
+                    disabled={compPasswordSaving || !compPassword.trim()}
+                    onClick={handleSaveCompPassword}
+                    className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
+                  >
+                    {compPasswordSaving ? 'Saving Password...' : 'Save Complementary Password'}
+                  </Button>
+                </div>
+              </div>
+
             </div>
           )}
 

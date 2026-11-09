@@ -53,6 +53,7 @@ import {
   Minimize2,
   XCircle,
   ChefHat,
+  Package,
   Bell,
   Activity,
   ChevronRight,
@@ -992,10 +993,12 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
                 {payFirstOrders.map((order) => {
                   const pfActiveItems = (order.items || []).filter((i: any) => i.status !== 'CANCELLED');
-                  const pfMenuTotal = pfActiveItems.reduce(
-                    (s: number, i: any) => s + (Number(i.price) || 0) * (Number(i.quantity) || 1),
-                    0
-                  );
+                  const pfMenuTotal = pfActiveItems.reduce((s: number, i: any) => {
+                    const qty = Number(i.quantity) || 1;
+                    const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+                    const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
+                    return s + (Number(i.price) || 0) * billedQty;
+                  }, 0);
                   const pfBill = calculateBillTotals({
                     itemsMenuTotal: pfMenuTotal,
                     taxConfig,
@@ -1068,12 +1071,22 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                     </div>
                     
                     <div className="text-[11px] text-zinc-600 bg-zinc-50 p-2 rounded-lg border border-zinc-100 max-h-24 overflow-y-auto space-y-1">
-                      {pfActiveItems.map((item: any, idx: number) => (
-                         <div key={idx} className="flex justify-between">
-                            <span className="truncate pr-2">{item.quantity}x {item.name}</span>
-                            <span className="shrink-0 font-mono">{(item.price * item.quantity).toFixed(2)}</span>
-                         </div>
-                      ))}
+                      {pfActiveItems.map((item: any, idx: number) => {
+                        const qty = Number(item.quantity) || 1;
+                        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+                        const isComp = Boolean(item.is_comp || compQty >= qty);
+                        const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                        const linePrice = isComp ? 0 : billedQty * (Number(item.price) || 0);
+                        return (
+                          <div key={idx} className="flex justify-between items-center gap-1">
+                            <span className="truncate pr-2">
+                              {item.quantity}x {item.name}
+                              {isComp ? ' (🎁 Comp)' : compQty > 0 ? ` (${compQty}x Comp)` : ''}
+                            </span>
+                            <span className="shrink-0 font-mono">{linePrice.toFixed(2)}</span>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     <div className="flex gap-2 mt-auto">
@@ -1262,7 +1275,12 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   const tableName = table ? `Table ${table.table_number}` : (order.table_number ? `Table ${order.table_number}` : 'Table');
                   const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
                   const orderSubtotal = calculateBillTotals({
-                    itemsMenuTotal: activeItems.reduce((sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 1), 0),
+                    itemsMenuTotal: activeItems.reduce((sum, i) => {
+                      const qty = Number(i.quantity) || 1;
+                      const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+                      const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
+                      return sum + (Number(i.price) || 0) * billedQty;
+                    }, 0),
                     taxConfig,
                     flatDiscountAmount: Number(order.promo_discount) || 0,
                   }).grandTotal;
@@ -1321,11 +1339,37 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                             {(order.items || []).map((i, idx) => {
                               const isCancelled = i.status === 'CANCELLED';
                               const isCancelling = cancellingItemKey === `${order.id}-${idx}`;
+                              const qty = Number(i.quantity) || 1;
+                              const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+                              const isComp = Boolean(i.is_comp || compQty >= qty);
+                              const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                              const linePrice = isComp ? 0 : billedQty * (Number(i.price) || 0);
+
                               return (
                                 <div key={idx} className={`pt-1 flex items-start justify-between gap-1.5 ${isCancelled ? 'opacity-40 line-through' : ''}`}>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="font-semibold text-zinc-900">{i.quantity}x {i.name}</span>
+                                      {isComp && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-200 text-amber-900">
+                                          🎁 Comp
+                                        </span>
+                                      )}
+                                      {!isComp && compQty > 0 && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800">
+                                          {compQty}x Comp
+                                        </span>
+                                      )}
+                                      {(Boolean(i.is_packaged) || (Number(i.pack_qty) || 0) > 0) && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-800 border border-amber-500/30 flex items-center gap-0.5">
+                                          <Package className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                          {(Number(i.pack_qty) || 0) > 1 && (Number(i.pack_qty) || 0) < (Number(i.quantity) || 1)
+                                            ? `${i.pack_qty} of ${i.quantity} Pack`
+                                            : (Number(i.pack_qty) || 0) > 1
+                                            ? `${i.pack_qty}x Pack`
+                                            : 'Pack'}
+                                        </span>
+                                      )}
                                       {i.station && (
                                         <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-zinc-200 text-zinc-700">
                                           {i.station}
@@ -1346,7 +1390,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                                   </div>
                                   <div className="flex items-center gap-1.5 shrink-0">
                                     <span className="font-mono text-zinc-600 font-semibold text-[11px]">
-                                      {currencySymbol} {(Number(i.price) * Number(i.quantity)).toFixed(2)}
+                                      {currencySymbol} {linePrice.toFixed(2)}
                                     </span>
                                     {!isCancelled && order.status !== 'COMPLETED' && (
                                       <button
@@ -1904,10 +1948,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                     const tableName = table ? `Table ${table.table_number}` : (order.table_number ? `Table ${order.table_number}` : 'Table');
                     const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
                     const orderSubtotal = calculateBillTotals({
-                    itemsMenuTotal: activeItems.reduce((sum, i) => sum + (Number(i.price) || 0) * (Number(i.quantity) || 1), 0),
-                    taxConfig,
-                    flatDiscountAmount: Number(order.promo_discount) || 0,
-                  }).grandTotal;
+                      itemsMenuTotal: activeItems.reduce((sum, i) => {
+                        const qty = Number(i.quantity) || 1;
+                        const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+                        const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
+                        return sum + (Number(i.price) || 0) * billedQty;
+                      }, 0),
+                      taxConfig,
+                      flatDiscountAmount: Number(order.promo_discount) || 0,
+                    }).grandTotal;
                     const isFolioDelivered = Boolean(order.folio_delivered || (order as any).bill_acknowledged);
                     return (
                       <div
@@ -1963,12 +2012,38 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                               {(order.items || []).map((i, idx) => {
                                 const isCancelled = i.status === 'CANCELLED';
                                 const isCancelling = cancellingItemKey === `${order.id}-${idx}`;
+                                const qty = Number(i.quantity) || 1;
+                                const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+                                const isComp = Boolean(i.is_comp || compQty >= qty);
+                                const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                                const linePrice = isComp ? 0 : billedQty * (Number(i.price) || 0);
+
                                 return (
                                   <div key={idx} className={`pt-1 flex items-start justify-between gap-1.5 ${isCancelled ? 'opacity-40 line-through' : ''}`}>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className="font-semibold text-zinc-900">{i.quantity}x {i.name}</span>
-                                        {i.station && (
+                                        {isComp && (
+                                          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-200 text-amber-900">
+                                            🎁 Comp
+                                          </span>
+                                        )}
+                                        {!isComp && compQty > 0 && (
+                                          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800">
+                                            {compQty}x Comp
+                                          </span>
+                                        )}
+                                        {(Boolean(i.is_packaged) || (Number(i.pack_qty) || 0) > 0) && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-800 border border-amber-500/30 flex items-center gap-0.5">
+                                          <Package className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                          {(Number(i.pack_qty) || 0) > 1 && (Number(i.pack_qty) || 0) < (Number(i.quantity) || 1)
+                                            ? `${i.pack_qty} of ${i.quantity} Pack`
+                                            : (Number(i.pack_qty) || 0) > 1
+                                            ? `${i.pack_qty}x Pack`
+                                            : 'Pack'}
+                                        </span>
+                                      )}
+                                      {i.station && (
                                           <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-zinc-200 text-zinc-700">
                                             {i.station}
                                           </span>
@@ -1988,7 +2063,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                                     </div>
                                     <div className="flex items-center gap-1.5 shrink-0">
                                       <span className="font-mono text-zinc-600 font-semibold text-[11px]">
-                                        {currencySymbol} {(Number(i.price) * Number(i.quantity)).toFixed(2)}
+                                        {currencySymbol} {linePrice.toFixed(2)}
                                       </span>
                                       {!isCancelled && order.status !== 'COMPLETED' && (
                                         <button
@@ -2189,23 +2264,42 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       if ((found as any).customer_pan) setCustomerPan((found as any).customer_pan);
       if (found.order_number) setCustomOrderNumber(found.order_number);
 
-      const activeItems = (found.items || []).filter((i) => i.status !== 'CANCELLED');
+      // Consolidate all unsettled orders for this table so all rounds are billed together!
+      const relatedOrders = pendingOrders.filter(
+        (o) =>
+          o.id === found.id ||
+          (found.table_id && o.table_id === found.table_id) ||
+          (found.table_number && o.table_number && String(o.table_number).trim().toLowerCase() === String(found.table_number).trim().toLowerCase())
+      );
+      const activeItems = relatedOrders.flatMap((ord) => ord.items || []).filter((i) => i.status !== 'CANCELLED');
       if (activeItems.length > 0) {
         setItems(
-          activeItems.map((i, idx) => ({
-            id: `item-${idx}`,
-            item_id: i.item_id || `item-${idx}`,
-            name: i.name,
-            category: i.category || (i.station === 'BAR' ? 'Beverages' : undefined),
-            quantity: i.quantity,
-            price: i.price,
-            unit_price: i.price,
-            comp_qty: 0,
-            is_comp: false,
-            comp_value: 0,
-            subtotal: i.price * i.quantity,
-            total_price: i.price * i.quantity,
-          }))
+          activeItems.map((i, idx) => {
+            const qty = Number(i.quantity) || 1;
+            const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+            const isComp = Boolean(i.is_comp || compQty >= qty);
+            const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+            const unitPrice = Number(i.price) || 0;
+            const isPkg = (i as any).is_packageable !== false;
+            const pQty = isPkg ? Math.max(0, Math.min(qty, Number(i.pack_qty) || (i.is_packaged ? qty : 0))) : 0;
+            return {
+              id: `item-${idx}`,
+              item_id: i.item_id || `item-${idx}`,
+              name: i.name,
+              category: i.category || (i.station === 'BAR' ? 'Beverages' : undefined),
+              quantity: qty,
+              price: unitPrice,
+              unit_price: unitPrice,
+              comp_qty: compQty,
+              is_comp: isComp,
+              comp_value: compQty * unitPrice,
+              is_packageable: isPkg,
+              is_packaged: pQty > 0,
+              pack_qty: pQty,
+              subtotal: billedQty * unitPrice,
+              total_price: billedQty * unitPrice,
+            };
+          })
         );
       }
 
@@ -2417,6 +2511,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         food_type: candidate.food_type,
         variant_id: candidate.variant_id,
         variant_name: candidate.variant_name,
+        is_packageable: (candidate as any).is_packageable !== false,
+        is_packaged: current.is_packaged,
+        pack_qty: current.pack_qty,
       } as any;
 
       // Automatically add another empty item space if this is the last row or no empty row exists at the end
@@ -2513,6 +2610,18 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         target.comp_value = compQty * price;
         target.subtotal = billedQty * price;
         target.total_price = billedQty * price;
+        if (target.pack_qty !== undefined && (target.pack_qty as any) !== '') {
+          target.pack_qty = Math.min(qty, Number(target.pack_qty) || 0);
+          target.is_packaged = Boolean(Number(target.pack_qty) > 0);
+        }
+      }
+      if ((field as string) === 'pack_qty' || field === 'is_packaged') {
+        const qty = Math.max(1, Number(target.quantity) || 1);
+        const pQty = field === 'is_packaged'
+          ? (val ? qty : 0)
+          : (val === '' ? ('' as any) : Math.max(0, Math.min(qty, Number(val) || 0)));
+        target.pack_qty = pQty;
+        target.is_packaged = Boolean(Number(pQty) > 0);
       }
       copy[index] = target;
       return copy;
@@ -2705,18 +2814,45 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   const itemsMenuTotal = useMemo(() => {
     return items
       .filter((item) => (item.name || '').trim().length > 0)
-      .reduce((sum, item) => sum + (Number(item.total_price ?? item.subtotal ?? (item.price * item.quantity)) || 0), 0);
+      .reduce((sum, item) => {
+        const qty = Number(item.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
+        const unitPrice = Number(item.unit_price ?? item.price) || 0;
+        return sum + billedQty * unitPrice;
+      }, 0);
+  }, [items]);
+
+  const packagingFeeRate = Number(taxConfig?.packaging_fee) || 10;
+  const packagingTotal = useMemo(() => {
+    return items
+      .filter((item) => (item.name || '').trim().length > 0 && item.is_packageable !== false)
+      .reduce((sum, item) => {
+        const qty = Number(item.quantity) || 1;
+        const pQty = Math.max(0, Math.min(qty, Number(item.pack_qty) || (item.is_packaged ? qty : 0)));
+        return sum + pQty * packagingFeeRate;
+      }, 0);
+  }, [items, packagingFeeRate]);
+
+  const packagingQtyTotal = useMemo(() => {
+    return items
+      .filter((item) => (item.name || '').trim().length > 0 && item.is_packageable !== false)
+      .reduce((sum, item) => {
+        const qty = Number(item.quantity) || 1;
+        return sum + Math.max(0, Math.min(qty, Number(item.pack_qty) || (item.is_packaged ? qty : 0)));
+      }, 0);
   }, [items]);
 
   const billCalc = useMemo(() => {
     return calculateBillTotals({
       itemsMenuTotal,
+      packagingTotal,
       taxConfig,
       manualDiscountPercent: Number(discountPercent) || 0,
       manualFlatDiscount: Number(flatDiscount) || 0,
       promoDiscountPercent: appliedPromo?.discountPercent || 0,
     });
-  }, [itemsMenuTotal, taxConfig, discountPercent, flatDiscount, appliedPromo]);
+  }, [itemsMenuTotal, packagingTotal, taxConfig, discountPercent, flatDiscount, appliedPromo]);
 
   const subtotal = billCalc.subtotal;
   const taxesList = billCalc.taxesList;
@@ -2810,9 +2946,11 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       .filter((item) => (item.name || '').trim().length > 0)
       .map((item) => {
         const qty = Math.max(1, Number(item.quantity) || 1);
-        const compQty = compModeActive ? Math.max(0, Math.min(qty, Number(item.comp_qty) || 0)) : 0;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
         const billedQty = Math.max(0, qty - compQty);
         const price = Number(item.unit_price ?? item.price) || 0;
+        const isPkg = item.is_packageable !== false;
+        const pQty = isPkg ? Math.max(0, Math.min(qty, Number(item.pack_qty) || (item.is_packaged ? qty : 0))) : 0;
         return {
           ...item,
           quantity: qty,
@@ -2821,6 +2959,10 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           comp_qty: compQty,
           is_comp: compQty >= qty,
           comp_value: compQty * price,
+          is_packageable: isPkg,
+          is_packaged: pQty > 0,
+          pack_qty: pQty,
+          packaging_charge: pQty * packagingFeeRate,
           subtotal: billedQty * price,
           total_price: billedQty * price,
         };
@@ -2877,6 +3019,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       order_number: customOrderNumber.trim() || undefined,
       sale_type: saleType,
       items: validItems,
+      packaging_charge: packagingTotal,
+      packaging_qty: packagingQtyTotal,
       subtotal,
       discount_percent: totalDiscountPercent,
       discount_amount: totalDiscountAmount,
@@ -2953,29 +3097,46 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               Settle Active Table Dine-In Order:
             </span>
             <div className="flex flex-wrap gap-2">
-              {pendingOrders.map((ord) => {
-                const ordActiveItems = (ord.items || []).filter((i) => i.status !== 'CANCELLED');
-                const ordPayable = calculateBillTotals({
-                  itemsMenuTotal: ordActiveItems.reduce((s, i) => s + (Number(i.price) || 0) * (Number(i.quantity) || 1), 0),
-                  taxConfig,
-                  flatDiscountAmount: Number(ord.promo_discount) || 0,
-                }).grandTotal;
-                return (
-                  <button
-                    key={ord.id}
-                    type="button"
-                    onClick={() => handleSelectPendingOrder(ord.id)}
-                    className={`px-3 py-1 rounded-lg font-bold border transition-colors cursor-pointer ${
-                      selectedOrderId === ord.id
-                        ? 'bg-amber-600 text-white border-amber-600'
-                        : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-100'
-                    }`}
-                  >
-                    Table {ord.table_number || ord.table_id} (
-                    {ord.currency || 'Rs.'} {ordPayable.toFixed(2)})
-                  </button>
-                );
-              })}
+              {(() => {
+                const tableMap = new Map<string, TableOrder[]>();
+                for (const ord of pendingOrders) {
+                  const key = ord.table_id || ord.table_number || ord.id;
+                  if (!tableMap.has(key)) tableMap.set(key, []);
+                  tableMap.get(key)!.push(ord);
+                }
+                return Array.from(tableMap.entries()).map(([key, ordList]) => {
+                  const primaryOrd = ordList[0];
+                  const allActive = ordList.flatMap((o) => o.items || []).filter((i) => i.status !== 'CANCELLED');
+                  const isMultiRound = ordList.length > 1;
+                  const totalPayable = calculateBillTotals({
+                    itemsMenuTotal: allActive.reduce((s, i) => {
+                      const qty = Number(i.quantity) || 1;
+                      const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
+                      const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
+                      return s + (Number(i.price) || 0) * billedQty;
+                    }, 0),
+                    taxConfig,
+                    flatDiscountAmount: ordList.reduce((s, o) => s + (Number(o.promo_discount) || 0), 0),
+                  }).grandTotal;
+                  const isSelected = ordList.some((o) => o.id === selectedOrderId);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleSelectPendingOrder(primaryOrd.id)}
+                      className={`px-3 py-1 rounded-lg font-bold border transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-100'
+                      }`}
+                    >
+                      Table {primaryOrd.table_number || primaryOrd.table_id}
+                      {isMultiRound ? ` (${ordList.length} Rounds)` : ''} (
+                      {primaryOrd.currency || 'Rs.'} {totalPayable.toFixed(2)})
+                    </button>
+                  );
+                });
+              })()}
             </div>
           </div>
         )}
@@ -3144,72 +3305,50 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   )}
                 </div>
 
-                {compModeActive && (
-                  <div className="flex items-center justify-between gap-1.5 mt-1.5 py-1 px-2 rounded-lg bg-amber-50/80 border border-amber-200">
-                    <div className="flex items-center gap-1.5">
-                      <Gift className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                      <span className="text-[10px] text-amber-800 font-bold">Comp Qty:</span>
-                    </div>
-                    <div className="inline-flex items-center justify-center border border-amber-300 rounded-lg bg-white shadow-2xs overflow-hidden">
+                {((Number(item.comp_qty) || 0) > 0 || item.is_comp) && (
+                  <div className="flex items-center gap-1.5 mt-1.5 py-1 px-2.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold w-fit">
+                    <Gift className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Complimentary (Qty: {item.comp_qty || item.quantity})</span>
+                  </div>
+                )}
+
+                {item.is_packageable !== false && (item.name || '').trim().length > 0 && (
+                  <div className="flex items-center gap-1.5 mt-1.5 py-1 px-2.5 rounded-lg bg-amber-50/70 border border-amber-200 text-amber-950 text-xs font-semibold w-fit">
+                    <Package className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                    <span>Pack:</span>
+                    <div className="inline-flex items-center border border-zinc-200 rounded-md bg-white shadow-2xs overflow-hidden">
                       <button
                         type="button"
                         onClick={() => {
-                          const current = Number(item.comp_qty) || 0;
-                          handleItemChange(idx, 'comp_qty' as any, Math.max(0, current - 1));
+                          const cur = Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)));
+                          handleItemChange(idx, 'pack_qty' as any, Math.max(0, cur - 1));
                         }}
-                        disabled={(Number(item.comp_qty) || 0) <= 0}
-                        className="w-7 h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
-                        title="Decrease comp quantity"
-                        aria-label="Decrease comp quantity"
+                        disabled={(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) <= 0}
+                        className="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-30 cursor-pointer"
                       >
-                        <Minus className="w-3 h-3" />
+                        <Minus className="w-2.5 h-2.5" />
                       </button>
-                      <input
-                        type="number"
-                        min="0"
-                        max={Number(item.quantity) || 1}
-                        inputMode="numeric"
-                        value={item.comp_qty ?? 0}
-                        onFocus={(e) => {
-                          const t = e.currentTarget;
-                          t.select();
-                          setTimeout(() => t.select(), 0);
-                        }}
-                        onClick={(e) => e.currentTarget.select()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') e.currentTarget.blur();
-                        }}
-                        onChange={(e) =>
-                          handleCompQtyInputChange(idx, e.target.value, item.comp_qty, item.quantity)
-                        }
-                        onBlur={() => {
-                          const val = parseInt(String(item.comp_qty), 10);
-                          const maxQty = Number(item.quantity) || 1;
-                          handleItemChange(
-                            idx,
-                            'comp_qty' as any,
-                            isNaN(val) || val < 0 ? 0 : Math.min(val, maxQty)
-                          );
-                        }}
-                        className="w-9 py-1 text-center font-bold text-xs bg-white text-amber-950 border-x border-amber-200 focus:outline-none focus:ring-1 focus:ring-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none select-all"
-                        placeholder="0"
-                        title="Comp qty (0 = fully charged)"
-                      />
+                      <span className="w-5 text-center font-bold text-[11px] text-zinc-900 font-mono">
+                        {Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)))}
+                      </span>
                       <button
                         type="button"
                         onClick={() => {
-                          const current = Number(item.comp_qty) || 0;
-                          const maxQty = Number(item.quantity) || 1;
-                          handleItemChange(idx, 'comp_qty' as any, Math.min(maxQty, current + 1));
+                          const cur = Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)));
+                          handleItemChange(idx, 'pack_qty' as any, Math.min(Number(item.quantity) || 1, cur + 1));
                         }}
-                        disabled={(Number(item.comp_qty) || 0) >= (Number(item.quantity) || 1)}
-                        className="w-7 h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
-                        title="Increase comp quantity"
-                        aria-label="Increase comp quantity"
+                        disabled={(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) >= (Number(item.quantity) || 1)}
+                        className="w-5 h-5 flex items-center justify-center text-zinc-500 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-30 cursor-pointer"
                       >
-                        <Plus className="w-3 h-3" />
+                        <Plus className="w-2.5 h-2.5" />
                       </button>
                     </div>
+                    <span className="text-[10px] text-zinc-500">of {item.quantity || 1}</span>
+                    {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) > 0 && (
+                      <span className="text-[10px] font-bold text-amber-700 font-mono">
+                        (+{currency} {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) * packagingFeeRate})
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -3335,11 +3474,6 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   <th className="py-2 px-2.5 sm:px-3 rounded-tl-xl min-w-[130px]">Item Description</th>
                   <th className="py-2 px-1 sm:px-2 w-24 sm:w-28 text-center">Qty</th>
                   <th className="py-2 px-1.5 sm:px-2 w-20 sm:w-24 text-right">Price ({currency})</th>
-                  {compModeActive && (
-                    <th className="py-2 px-1 sm:px-2 w-24 sm:w-28 text-center text-amber-700 bg-amber-50 text-[10px]">
-                      Comp Qty
-                    </th>
-                  )}
                   <th className="py-2 px-1.5 sm:px-2 w-20 sm:w-24 text-right">Total ({currency})</th>
                   <th className="py-2 px-1 w-8 sm:w-10 text-center rounded-tr-xl"></th>
                 </tr>
@@ -3377,6 +3511,53 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
                         {renderMenuDropdown(idx, false)}
                       </div>
+
+                      {((Number(item.comp_qty) || 0) > 0 || item.is_comp) && (
+                        <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-300 px-1.5 py-0.5 rounded-md w-fit">
+                          <Gift className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span>Complimentary (Qty: {item.comp_qty || item.quantity})</span>
+                        </div>
+                      )}
+
+                      {item.is_packageable !== false && (item.name || '').trim().length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-1 text-[10px] font-semibold text-zinc-700 bg-amber-50/70 border border-amber-200 px-1.5 py-0.5 rounded-md w-fit">
+                          <Package className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span>Pack:</span>
+                          <div className="inline-flex items-center border border-zinc-200 rounded-sm bg-white shadow-2xs">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const cur = Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)));
+                                handleItemChange(idx, 'pack_qty' as any, Math.max(0, cur - 1));
+                              }}
+                              disabled={(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) <= 0}
+                              className="w-4 h-4 flex items-center justify-center text-zinc-500 hover:text-amber-700 disabled:opacity-30 cursor-pointer"
+                            >
+                              <Minus className="w-2 h-2" />
+                            </button>
+                            <span className="w-4 text-center font-bold text-[10px] text-zinc-900 font-mono">
+                              {Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)))}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const cur = Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)));
+                                handleItemChange(idx, 'pack_qty' as any, Math.min(Number(item.quantity) || 1, cur + 1));
+                              }}
+                              disabled={(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) >= (Number(item.quantity) || 1)}
+                              className="w-4 h-4 flex items-center justify-center text-zinc-500 hover:text-amber-700 disabled:opacity-30 cursor-pointer"
+                            >
+                              <Plus className="w-2 h-2" />
+                            </button>
+                          </div>
+                          <span className="text-[9px] text-zinc-500">of {item.quantity || 1}</span>
+                          {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) > 0 && (
+                            <span className="text-[10px] font-bold text-amber-700 font-mono">
+                              (+{currency} {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) * packagingFeeRate})
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
 
                     <td className="p-2 text-center">
@@ -3463,70 +3644,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                         className="w-20 sm:w-24 px-2 py-1.5 rounded-lg border border-zinc-200 text-right font-bold text-xs focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white"
                       />
                     </td>
-                    {compModeActive && (
-                      <td className="p-2 text-center">
-                        <div className="inline-flex items-center justify-center border border-amber-300 rounded-lg bg-white shadow-2xs overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const current = Number(item.comp_qty) || 0;
-                              handleItemChange(idx, 'comp_qty' as any, Math.max(0, current - 1));
-                            }}
-                            disabled={(Number(item.comp_qty) || 0) <= 0}
-                            className="w-7 h-7 sm:w-7 sm:h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
-                            title="Decrease comp quantity"
-                            aria-label="Decrease comp quantity"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <input
-                            type="number"
-                            min="0"
-                            max={Number(item.quantity) || 1}
-                            inputMode="numeric"
-                            value={item.comp_qty ?? 0}
-                            onFocus={(e) => {
-                              const t = e.currentTarget;
-                              t.select();
-                              setTimeout(() => t.select(), 0);
-                            }}
-                            onClick={(e) => e.currentTarget.select()}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') e.currentTarget.blur();
-                            }}
-                            onChange={(e) =>
-                              handleCompQtyInputChange(idx, e.target.value, item.comp_qty, item.quantity)
-                            }
-                            onBlur={() => {
-                              const val = parseInt(String(item.comp_qty), 10);
-                              const maxQty = Number(item.quantity) || 1;
-                              handleItemChange(
-                                idx,
-                                'comp_qty' as any,
-                                isNaN(val) || val < 0 ? 0 : Math.min(val, maxQty)
-                              );
-                            }}
-                            className="w-10 sm:w-11 py-1 text-center font-bold text-xs bg-white text-amber-950 border-x border-amber-200 focus:outline-none focus:ring-1 focus:ring-amber-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none select-all"
-                            placeholder="0"
-                            title="Comp qty (0 = fully charged)"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const current = Number(item.comp_qty) || 0;
-                              const maxQty = Number(item.quantity) || 1;
-                              handleItemChange(idx, 'comp_qty' as any, Math.min(maxQty, current + 1));
-                            }}
-                            disabled={(Number(item.comp_qty) || 0) >= (Number(item.quantity) || 1)}
-                            className="w-7 h-7 sm:w-7 sm:h-7 flex items-center justify-center text-amber-700 hover:text-amber-900 hover:bg-amber-50 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all cursor-pointer select-none touch-manipulation"
-                            title="Increase comp quantity"
-                            aria-label="Increase comp quantity"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
+
                     <td className="p-2 text-right font-bold text-zinc-900">
                       {(item.total_price || 0).toFixed(2)}
                     </td>
@@ -3549,18 +3667,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </table>
           </div>
 
-          {compModeActive && items.some((i) => ((i.comp_qty ?? 0) > 0)) && (
-            <div className="flex items-center gap-2 mt-2 px-1">
-              <Gift className="w-4 h-4 text-amber-500 shrink-0" />
-              <input
-                type="text"
-                value={compReason}
-                onChange={(e) => setCompReason(e.target.value)}
-                placeholder="Comp reason (optional) — e.g. Manager Treat, Quality Issue, Guest Complaint"
-                className="flex-1 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50/60 text-xs font-medium focus:ring-2 focus:ring-amber-400 focus:outline-none"
-              />
-            </div>
-          )}
+
         </div>
 
         {/* Bill Calculations & Payment Options */}
@@ -3798,6 +3905,17 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </div>
 
             {/* Calculations */}
+            {packagingTotal > 0 && (
+              <div className="flex items-center justify-between text-zinc-600">
+                <span className="flex items-center gap-1 text-zinc-700 font-semibold">
+                  <Package className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Packaging ({packagingQtyTotal} {packagingQtyTotal === 1 ? 'item' : 'items'}):</span>
+                </span>
+                <span className="font-semibold text-zinc-800">
+                  +{currency} {packagingTotal.toFixed(2)}
+                </span>
+              </div>
+            )}
             <div className="flex items-center justify-between text-zinc-600">
               <span className="flex items-center gap-1.5">
                 <span>Subtotal:</span>
@@ -3910,17 +4028,20 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
   taxConfig,
   onClose,
 }) => {
-  const { dispatchPrint, printers } = usePrinter();
-
-  const handlePrint = async () => {
-    await dispatchPrint('BILL', order);
-  };
-
+  const { dispatchPrint } = usePrinter();
   const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
   const cancelledItems = (order.items || []).filter((i) => i.status === 'CANCELLED');
-  const itemsMenuTotal = activeItems.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+  const itemsMenuTotal = activeItems.reduce((sum, it) => {
+    const qty = Number(it.quantity) || 1;
+    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
+    const billedQty = it.is_comp ? 0 : Math.max(0, qty - compQty);
+    return sum + (Number(it.price) || 0) * billedQty;
+  }, 0);
+  const packagingCharge = Number(order.packaging_charge || 0);
+  const packagingQty = Number(order.packaging_qty || 0);
   const checkCalc = calculateBillTotals({
     itemsMenuTotal,
+    packagingTotal: packagingCharge,
     taxConfig,
     flatDiscountAmount: Number(order.promo_discount) || 0,
   });
@@ -3930,6 +4051,18 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
   const promoDiscount = checkCalc.totalDiscountAmount;
   const totalAmount = checkCalc.grandTotal;
   const currency = order.currency || taxConfig?.currency_symbol || taxConfig?.currency || 'Rs.';
+
+  const handlePrint = async () => {
+    const printableOrder = {
+      ...order,
+      items: activeItems,
+      subtotal,
+      tax_amount: taxAmount,
+      total_tax: taxAmount,
+      total_amount: totalAmount,
+    };
+    await dispatchPrint('BILL', printableOrder);
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -4016,19 +4149,46 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
 
           {/* Items List */}
           <div className="space-y-1.5 text-[11px]">
-            {activeItems.map((item, idx) => (
-              <div key={idx} className="flex justify-between items-start">
-                <div className="flex-1 pr-2">
-                  <span className="font-bold">{item.name}</span>
-                  <span className="text-[10px] text-zinc-500 block">
-                    {item.quantity} x {currency} {Number(item.price).toFixed(2)}
+            {activeItems.map((item, idx) => {
+              const qty = Number(item.quantity) || 1;
+              const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+              const isComp = Boolean(item.is_comp || compQty >= qty);
+              const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+              const unitPrice = Number(item.price) || 0;
+              const linePrice = isComp ? 0 : billedQty * unitPrice;
+
+              return (
+                <div key={idx} className="flex justify-between items-start">
+                  <div className="flex-1 pr-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold">{item.name}</span>
+                      {isComp && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800">
+                          🎁 Comp
+                        </span>
+                      )}
+                      {!isComp && compQty > 0 && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800">
+                          {compQty}x Comp
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-zinc-500 block">
+                      {isComp ? (
+                        `${item.quantity} x ${currency} 0.00 (Complimentary)`
+                      ) : compQty > 0 ? (
+                        `${billedQty} x ${currency} ${unitPrice.toFixed(2)} (+${compQty}x Comp)`
+                      ) : (
+                        `${item.quantity} x ${currency} ${unitPrice.toFixed(2)}`
+                      )}
+                    </span>
+                  </div>
+                  <span className="font-bold shrink-0">
+                    {currency} {linePrice.toFixed(2)}
                   </span>
                 </div>
-                <span className="font-bold shrink-0">
-                  {currency} {(Number(item.price) * Number(item.quantity)).toFixed(2)}
-                </span>
-              </div>
-            ))}
+              );
+            })}
 
             {cancelledItems.length > 0 && (
               <div className="pt-1 text-[10px] text-zinc-400 space-y-0.5">
@@ -4047,6 +4207,12 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
 
           {/* Calculations */}
           <div className="space-y-1 text-[11px]">
+            {packagingCharge > 0 && (
+              <div className="flex justify-between text-zinc-700 font-semibold">
+                <span>Packaging ({packagingQty} pkgs):</span>
+                <span>+{currency} {packagingCharge.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-zinc-600">
               <span>Subtotal:</span>
               <span>{currency} {subtotal.toFixed(2)}</span>

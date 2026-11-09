@@ -339,6 +339,7 @@ router.get('/', optionalAuthenticate, async (req: AuthenticatedRequest, res: Res
         food_type: (d.food_type as FoodType) || 'none',
         status: itemStatus,
         is_available: itemStatus === 'available',
+        is_packageable: (d as any).is_packageable !== false,
         has_variants: Boolean(d.has_variants),
         variants: (d.variants as any) || [],
         variant_group_name: d.variant_group_name || undefined,
@@ -491,6 +492,7 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
       preparation_time_mins,
       station,
       erp_item_code,
+      is_packageable,
     } = req.body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -544,6 +546,7 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
         food_type: validFoodType,
         status: itemStatus,
         is_available: itemStatus === 'available',
+        is_packageable: is_packageable !== false,
         has_variants: Boolean(has_variants && validVariants.length > 0),
         variants: validVariants as any,
         variant_group_name: variant_group_name ? String(variant_group_name).trim() : null,
@@ -617,6 +620,7 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
       preparation_time_mins,
       station,
       erp_item_code,
+      is_packageable,
     } = req.body;
 
     const updates: any = {};

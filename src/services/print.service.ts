@@ -257,6 +257,7 @@ class PrintService {
    */
   public generateHtml(taskType: PrinterRole, data: any): string {
     const isKot = taskType === 'KOT';
+    const isBar = taskType === 'BAR';
     const isBill = taskType === 'BILL';
 
     const orderNumber = data.order_number || (data.id ? String(data.id).slice(0, 8).toUpperCase() : 'ORD');
@@ -326,10 +327,19 @@ class PrintService {
         <body>
     `;
 
-    if (isKot) {
+    const roundMatch = String(orderNumber || data.id || '').match(/\(Round\s*(\d+)\)/i);
+    const roundNum = data.round_number || (roundMatch ? parseInt(roundMatch[1], 10) : (data.is_follow_up ? 2 : 1));
+    const isOrderMore = Boolean(data.is_follow_up || roundNum > 1 || roundMatch);
+
+    if (isKot || isBar) {
+      const ticketTitle = isBar
+        ? (isOrderMore ? `BAR ORDER TICKET (BOT - ROUND ${roundNum})` : 'BAR ORDER TICKET (BOT)')
+        : (isOrderMore ? `KITCHEN ORDER TICKET (KOT - ROUND ${roundNum})` : 'KITCHEN ORDER TICKET (KOT)');
+
       html += `
           <div class="header">
-            <h2>KITCHEN ORDER TICKET</h2>
+            <h2>${ticketTitle}</h2>
+            ${isOrderMore ? '<div style="font-weight: bold; font-size: 13px; color: #6b21a8; margin: 2px 0;">[ORDER MORE / FOLLOW-UP]</div>' : ''}
             <h1>Order #${escapeHtml(orderNumber)}</h1>
             <div>Table: ${escapeHtml(tableNo)}</div>
             <div>Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
@@ -341,10 +351,28 @@ class PrintService {
         html += `
           <div class="item">
             <span class="item-qty">${Number(item.quantity) || 1}x</span> ${escapeHtml(item.name)}
-            ${item.notes ? `<div class="notes">- ${escapeHtml(item.notes)}</div>` : ''}
+            ${(() => {
+              const q = Number(item.quantity) || 1;
+              const pq = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? q : 0)) || 0);
+              if (pq <= 0 && !item.is_packaged) return '';
+              const lbl = pq > 1 && pq < q ? `&gt;&gt;&gt; [PACKAGING REQUIRED: ${pq} of ${q}] &lt;&lt;&lt;` : pq > 1 ? `&gt;&gt;&gt; [PACKAGING REQUIRED: ${pq}x] &lt;&lt;&lt;` : '&gt;&gt;&gt; [PACKAGING REQUIRED] &lt;&lt;&lt;';
+              return `<div style="font-weight: bold; font-size: 11px; margin-left: 8px; color: #b45309;">${lbl}</div>`;
+            })()}
+            ${(item.special_instructions || item.notes) ? `<div class="notes" style="font-weight: bold; color: #1e293b;">* Request: ${escapeHtml(item.special_instructions || item.notes)}</div>` : ''}
           </div>
         `;
       });
+
+      const additionalInstructions = data.order_notes || data.general_notes || data.notes || '';
+      if (additionalInstructions) {
+        html += `
+          <div class="divider"></div>
+          <div style="margin-top: 6px; padding: 6px; border: 1px dashed #000; background: #fffbebee;">
+            <div style="font-weight: bold; font-size: 11px; text-transform: uppercase; color: #b45309;">Additional Instructions:</div>
+            <div style="font-size: 13px; font-weight: bold; margin-top: 2px; color: #000;">&gt;&gt;&gt; ${escapeHtml(additionalInstructions)} &lt;&lt;&lt;</div>
+          </div>
+        `;
+      }
     }
 
     if (isBill) {
@@ -360,25 +388,38 @@ class PrintService {
 
       const items = (data.items || []).filter((item: any) => item && (item.name || '').trim().length > 0);
       items.forEach((item: any) => {
+        const qty = Number(item.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+        const isComp = Boolean(item.is_comp || compQty >= qty);
+        const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+        const lineTotal = isComp ? 0 : (billedQty * (Number(item.price) || 0));
         html += `
           <div class="item">
             <div class="row">
-              <span>${Number(item.quantity) || 1}x ${escapeHtml(item.name)}</span>
-              <span>Rs ${(Number(item.quantity || 1) * (Number(item.price) || 0)).toFixed(2)}</span>
+              <span>${qty}x ${escapeHtml(item.name)}${isComp ? ' (🎁 Comp)' : compQty > 0 ? ` (${compQty}x Comp)` : ''}</span>
+              <span>${isComp ? 'Rs 0.00' : `Rs ${lineTotal.toFixed(2)}`}</span>
             </div>
-            ${item.notes ? `<div class="notes">- ${escapeHtml(item.notes)}</div>` : ''}
+            ${(item.special_instructions || item.notes) ? `<div class="notes" style="font-weight: bold; color: #1e293b;">* Request: ${escapeHtml(item.special_instructions || item.notes)}</div>` : ''}
           </div>
         `;
       });
 
       html += `<div class="divider"></div>`;
 
-      const subtotal = data.subtotal || 0;
+      const calculatedSubtotal = items.reduce((sum: number, it: any) => {
+        const qty = Number(it.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
+        const billedQty = it.is_comp ? 0 : Math.max(0, qty - compQty);
+        return sum + billedQty * (Number(it.price) || 0);
+      }, 0);
+
+      const subtotal = data.subtotal !== undefined && data.subtotal !== null ? Number(data.subtotal) : calculatedSubtotal;
       const tax = data.total_tax ?? data.tax_amount ?? data.tax ?? 0;
       const discount = data.discount_amount ?? data.promo_discount ?? 0;
-      const total = data.total_amount || 0;
+      const total = data.total_amount !== undefined && data.total_amount !== null ? Number(data.total_amount) : Math.max(0, subtotal + Number(tax) - Number(discount));
 
       html += `
+          ${Number(data.packaging_charge) > 0 ? `<div class="row"><span>Packaging (${Number(data.packaging_qty) || 1} pkgs):</span> <span>Rs ${Number(data.packaging_charge).toFixed(2)}</span></div>` : ''}
           <div class="row"><span>Subtotal:</span> <span>Rs ${Number(subtotal).toFixed(2)}</span></div>
           <div class="row"><span>Tax / VAT:</span> <span>Rs ${Number(tax).toFixed(2)}</span></div>
           ${Number(discount) > 0 ? `<div class="row"><span>Discount:</span> <span>-Rs ${Number(discount).toFixed(2)}</span></div>` : ''}

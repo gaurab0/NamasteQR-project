@@ -680,6 +680,50 @@ export class ClientRBACService {
     return data.data;
   }
 
+  
+  public async getCompPasswordApi(businessId?: string): Promise<{ comp_password: string | null; has_comp_password: boolean }> {
+    const query = businessId ? `?businessId=${encodeURIComponent(businessId)}` : '';
+    const res = await fetch(`/api/rbac/business/comp-password${query}`, {
+      headers: this.getAuthHeaders(undefined, businessId),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Failed to load complementary password');
+    return data.data;
+  }
+
+  public async updateCompPasswordApi(password: string, businessId?: string): Promise<{ comp_password: string }> {
+    const query = businessId ? `?businessId=${encodeURIComponent(businessId)}` : '';
+    const res = await fetch(`/api/rbac/business/comp-password${query}`, {
+      method: 'POST',
+      headers: {
+        ...this.getAuthHeaders(undefined, businessId),
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Failed to update complementary password');
+    return data.data;
+  }
+
+  public async verifyCompPasswordApi(password: string, businessId?: string): Promise<{ valid: boolean; message?: string }> {
+    const res = await fetch('/api/rbac/business/comp-password/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ business_id: businessId, password }),
+    });
+    const data = await res.json();
+    if (!res.ok && !data.error?.message && !data.message) {
+      throw new Error('Failed to verify complementary password');
+    }
+    return {
+      valid: Boolean(data.valid),
+      message: data.message || data.error?.message,
+    };
+  }
+
   // ==========================================
   // BILLING, POS SALES & TAX CONFIGURATION
   // ==========================================

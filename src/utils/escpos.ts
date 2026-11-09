@@ -240,6 +240,7 @@ export class EscPosEncoder {
     const role = options.role || (data.order_type === 'KOT' ? 'KOT' : 'BILL');
     const isKot = role === 'KOT';
     const isBar = role === 'BAR';
+    const isKotOrBar = isKot || isBar;
 
     const encoder = new EscPosEncoder();
 
@@ -250,7 +251,7 @@ export class EscPosEncoder {
 
     // Header
     encoder.align('center');
-    if (!isKot) {
+    if (!isKotOrBar) {
       const restName = data.restaurant_name || 'ServeFlow Restaurant';
       encoder.bold(true).size('double-both').line(restName).size('normal').bold(false);
       if (data.restaurant_address) encoder.line(data.restaurant_address);
@@ -259,12 +260,24 @@ export class EscPosEncoder {
       encoder.feed(1);
     }
 
+    const roundMatch = String(data.order_number || data.id || '').match(/\(Round\s*(\d+)\)/i);
+    const roundNum = data.round_number || (roundMatch ? parseInt(roundMatch[1], 10) : (data.is_follow_up ? 2 : 1));
+    const isOrderMore = Boolean(data.is_follow_up || roundNum > 1 || roundMatch);
+
     // Title banner
     encoder.bold(true).size('double-height');
     if (isKot) {
-      encoder.line('*** KITCHEN ORDER TICKET ***');
+      if (isOrderMore) {
+        encoder.line(`*** KOT (ROUND ${roundNum} - ORDER MORE) ***`);
+      } else {
+        encoder.line('*** KITCHEN ORDER TICKET (KOT) ***');
+      }
     } else if (isBar) {
-      encoder.line('*** BAR BEVERAGE TICKET ***');
+      if (isOrderMore) {
+        encoder.line(`*** BOT (ROUND ${roundNum} - ORDER MORE) ***`);
+      } else {
+        encoder.line('*** BAR ORDER TICKET (BOT) ***');
+      }
     } else {
       encoder.line('TAX INVOICE / RECEIPT');
     }
@@ -307,9 +320,9 @@ export class EscPosEncoder {
     // Items list header
     encoder.bold(true);
     if (cols === 32) {
-      encoder.row('ITEM (QTY)', isKot ? 'QTY' : 'AMT', cols);
+      encoder.row('ITEM (QTY)', isKotOrBar ? 'QTY' : 'AMT', cols);
     } else {
-      encoder.row('ITEM DESCRIPTION', isKot ? 'QUANTITY' : 'PRICE     TOTAL', cols);
+      encoder.row('ITEM DESCRIPTION', isKotOrBar ? 'QUANTITY' : 'PRICE     TOTAL', cols);
     }
     encoder.bold(false).divider('-', cols);
 
@@ -318,16 +331,25 @@ export class EscPosEncoder {
     );
     items.forEach((item: any) => {
       const qty = Number(item.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
+      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
       const isComp = Boolean(item.is_comp || compQty >= qty);
       const name = item.name || 'Dish';
       const price = Number(item.unit_price ?? item.price ?? 0);
       const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
-      const lineTotal = isComp ? 0 : Number(item.total_price ?? item.subtotal ?? (billedQty * price));
+      const lineTotal = isComp ? 0 : (billedQty * price);
 
-      encoder.bold(isKot);
-      if (isKot) {
+      encoder.bold(isKotOrBar);
+      if (isKotOrBar) {
         encoder.row(`${qty}x ${name}`, `[ ${qty} ]`, cols);
+        const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? qty : 0)) || 0);
+        if (packQty > 0 || item.is_packaged) {
+          const packLabel = packQty > 1 && packQty < qty
+            ? `  >>> [PACKAGING REQUIRED: ${packQty} of ${qty}] <<<`
+            : packQty > 1
+            ? `  >>> [PACKAGING REQUIRED: ${packQty}x] <<<`
+            : '  >>> [PACKAGING REQUIRED] <<<';
+          encoder.align('left').bold(true).text(packLabel).feed(1).bold(false);
+        }
       } else {
         if (cols === 32) {
           encoder.row(`${qty}x ${name}`, `Rs ${lineTotal.toFixed(2)}`, cols);
@@ -335,15 +357,16 @@ export class EscPosEncoder {
           const pricePart = `${price.toFixed(2)}  ${lineTotal.toFixed(2)}`;
           encoder.row(`${qty}x ${name}`, `Rs ${pricePart}`, cols);
         }
-        if (compQty > 0) {
+        if (compQty > 0 || isComp) {
           const badgeText = isComp ? '  [COMPLIMENTARY]' : `  [${compQty}x COMP]`;
           encoder.align('left').bold(true).text(badgeText).feed(1).bold(false);
         }
       }
       encoder.bold(false);
 
-      if (item.notes) {
-        encoder.align('left').text(`  * Note: ${item.notes}`).feed(1);
+      const itemNote = item.special_instructions || item.notes;
+      if (itemNote) {
+        encoder.align('left').bold(true).text(`  * Note: ${itemNote}`).feed(1).bold(false);
       }
       if (Array.isArray(item.modifiers) && item.modifiers.length > 0) {
         encoder.align('left').text(`  + ${item.modifiers.join(', ')}`).feed(1);
@@ -353,12 +376,23 @@ export class EscPosEncoder {
     encoder.divider('-', cols);
 
     // Totals section (for Bill)
-    if (!isKot) {
-      const subtotal = Number(data.subtotal || 0);
+    if (!isKotOrBar) {
+      const calculatedSubtotal = items.reduce((sum: number, it: any) => {
+        const q = Number(it.quantity) || 1;
+        const cq = Math.max(0, Math.min(q, Number(it.comp_qty) || (it.is_comp ? q : 0)));
+        const bq = it.is_comp ? 0 : Math.max(0, q - cq);
+        return sum + bq * Number(it.unit_price ?? it.price ?? 0);
+      }, 0);
+      const subtotal = data.subtotal !== undefined && data.subtotal !== null ? Number(data.subtotal) : calculatedSubtotal;
       const tax = Number(data.tax_amount ?? data.total_tax ?? data.tax ?? 0);
       const discount = Number(data.discount_amount ?? data.promo_discount ?? 0);
-      const total = Number(data.total_amount ?? subtotal + tax - discount);
+      const total = Number(data.total_amount ?? (subtotal + tax - discount));
 
+      const packagingCharge = Number(data.packaging_charge ?? 0);
+      const packagingQty = Number(data.packaging_qty ?? 0);
+      if (packagingCharge > 0) {
+        encoder.row(`Packaging (${packagingQty} pkgs):`, `Rs ${packagingCharge.toFixed(2)}`, cols);
+      }
       encoder.row('Subtotal:', `Rs ${subtotal.toFixed(2)}`, cols);
       if (tax > 0) encoder.row('Tax / VAT:', `Rs ${tax.toFixed(2)}`, cols);
       if (discount > 0) encoder.row('Discount:', `-Rs ${discount.toFixed(2)}`, cols);
@@ -383,7 +417,15 @@ export class EscPosEncoder {
       encoder.line('Thank you for dining with us!');
       encoder.line('Please visit again');
     } else {
-      if (data.notes) {
+      const additionalInstructions = data.order_notes || data.general_notes || data.notes || '';
+      if (additionalInstructions) {
+        encoder.align('left').bold(true);
+        encoder.line('================================');
+        encoder.line('ADDITIONAL INSTRUCTIONS:');
+        encoder.line(`>>> ${additionalInstructions.toUpperCase()} <<<`);
+        encoder.line('================================').bold(false);
+      }
+      if (false && data.notes) {
         encoder.align('left').bold(true).line(`KITCHEN INSTRUCTIONS: ${data.notes}`).bold(false);
       }
     }

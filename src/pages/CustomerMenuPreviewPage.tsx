@@ -8,6 +8,7 @@ import { rbacService } from '../services/rbac.service';
 import { socketService } from '../services/socket.service';
 import { getAllItemCategories, itemMatchesCategory } from '../utils/menuUtils';
 import { CustomerCartModal } from '../components/cart/CustomerCartModal';
+import { CompConfirmationPage } from '../components/cart/CompConfirmationPage';
 import { OrderSuccessModal } from '../components/cart/OrderSuccessModal';
 import { MenuItemDetailModal } from '../components/menu/MenuItemDetailModal';
 import { FinalTableBillPage } from '../components/billing/FinalTableBillPage';
@@ -208,6 +209,33 @@ const MinimalistScrollContainer: React.FC<MinimalistScrollContainerProps> = ({
   );
 };
 
+function consolidateTableOrders(orders: TableOrder[]): TableOrder | null {
+  const active = orders.filter((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED' && !(o as any).settled);
+  if (active.length === 0) return null;
+  if (active.length === 1) return active[0];
+
+  active.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  const root = active[0];
+  const allItems = active.flatMap((o) => o.items || []);
+  const subtotal = active.reduce((s, o) => s + (Number(o.subtotal) || 0), 0);
+  const pkgCharge = active.reduce((s, o) => s + (Number(o.packaging_charge) || 0), 0);
+  const pkgQty = active.reduce((s, o) => s + (Number(o.packaging_qty) || 0), 0);
+  const tax = active.reduce((s, o) => s + (Number(o.tax_amount) || 0), 0);
+  const total = active.reduce((s, o) => s + (Number(o.total_amount) || 0), 0);
+  const billReq = active.some((o) => o.bill_requested);
+
+  return {
+    ...root,
+    items: allItems,
+    subtotal,
+    packaging_charge: pkgCharge,
+    packaging_qty: pkgQty,
+    tax_amount: tax,
+    total_amount: total,
+    bill_requested: billReq,
+  };
+}
+
 export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = ({
   onNavigateBack,
   onNavigate,
@@ -250,7 +278,14 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     creditGlAccountId?: string | null;
     creditGlAccountNumber?: string | null;
     creditGlAccountName?: string | null;
+    compEnabled?: boolean;
+    compOrdererName?: string | null;
+    compOrdererPhone?: string | null;
   }>({});
+
+  const [isCompConfirmOpen, setIsCompConfirmOpen] = useState(false);
+  const [pendingCompCartItems, setPendingCompCartItems] = useState<CartItem[]>([]);
+  const [pendingCompNotes, setPendingCompNotes] = useState<string>('');
 
   // Session Security & Expiration States (Option A)
   const [sessionExpired, setSessionExpired] = useState<boolean>(false);
@@ -567,6 +602,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     setCartItems([]);
     setIsFinalBillPageOpen(false);
     setSuccessOrderData(null);
+    lastTargetOrderIdRef.current = null;
 
     // 2. Clear table session & order cache from storage
     try {
@@ -780,6 +816,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             creditGlAccountId: res.table?.credit_gl_account_id || null,
             creditGlAccountNumber: res.table?.credit_gl_account_number || null,
             creditGlAccountName: res.table?.credit_gl_account_name || null,
+            compEnabled: Boolean(res.table?.comp_enabled),
+            compOrdererName: res.table?.comp_orderer_name || null,
+            compOrdererPhone: res.table?.comp_orderer_phone || null,
           };
 
           try {
@@ -803,6 +842,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             creditGlAccountId: sessionPayload.creditGlAccountId,
             creditGlAccountNumber: sessionPayload.creditGlAccountNumber,
             creditGlAccountName: sessionPayload.creditGlAccountName,
+            compEnabled: sessionPayload.compEnabled,
+            compOrdererName: sessionPayload.compOrdererName,
+            compOrdererPhone: sessionPayload.compOrdererPhone,
           });
 
           // Successful table check-in clears any prior concluded flags from previous dining
@@ -878,6 +920,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               creditGlAccountId: savedSession.creditGlAccountId,
               creditGlAccountNumber: savedSession.creditGlAccountNumber,
               creditGlAccountName: savedSession.creditGlAccountName,
+              compEnabled: savedSession.compEnabled,
+              compOrdererName: savedSession.compOrdererName,
+              compOrdererPhone: savedSession.compOrdererPhone,
             });
 
             // Verify table session with backend in background
@@ -894,6 +939,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                     creditGlAccountId: table.credit_gl_account_id || null,
                     creditGlAccountNumber: table.credit_gl_account_number || null,
                     creditGlAccountName: table.credit_gl_account_name || null,
+                    compEnabled: Boolean(table.comp_enabled),
+                    compOrdererName: table.comp_orderer_name || null,
+                    compOrdererPhone: table.comp_orderer_phone || null,
                   }));
                 }
                 if (table && activeSessionId && table.current_session_id && table.current_session_id !== activeSessionId) {
@@ -1043,16 +1091,126 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             setIsCartOpen(false);
             setCartItems([]);
             setSuccessOrderData(null);
+            lastTargetOrderIdRef.current = null;
           }
         }
       }
     });
 
+    const unsubReconnect = socketService.onReconnect(async () => {
+      // Re-fetch on reconnect to catch missed events during socket downtime
+      const targetOrderId = activeOrder?.id || successOrderData?.id;
+      const effectiveBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
+      const tableId = tableParams.tableId || activeOrder?.table_id;
+      if (!targetOrderId || !tableId || !effectiveBizId) return;
+
+      try {
+        const orders = await rbacService.getTableOrdersApi(tableId, effectiveBizId);
+        const updated = orders.find((o) => o.id === targetOrderId);
+        if (updated) {
+          setActiveOrder((prev) => (prev ? { ...prev, ...updated } : updated));
+          setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updated } : updated));
+        }
+      } catch {}
+    });
+
     return () => {
       unsubOrder();
       unsubTable();
+      unsubReconnect();
     };
   }, [tableParams.businessId, user?.business?.id, activeOrder?.business_id, tableParams.tableId, activeOrder?.id, successOrderData?.id, tableParams.sessionId, tableParams.tableNumber]);
+
+  // Layer 1: Page Visibility API (handles mobile sleep & tab switching)
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      // Ensure socket reconnection is proactively triggered if dropped during sleep
+      if (!socketService.isConnected()) {
+        socketService.connect();
+      }
+
+      const targetOrderId = activeOrder?.id || successOrderData?.id;
+      const effectiveBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
+      const tableId = tableParams.tableId || activeOrder?.table_id;
+
+      // Only refetch if we have an active live order that hasn't been settled
+      if (!targetOrderId || !tableId || !effectiveBizId) return;
+      if (isTrackerOpen === false && successOrderData === null) return;
+
+      try {
+        const orders = await rbacService.getTableOrdersApi(tableId, effectiveBizId);
+        const updated = orders.find((o) => o.id === targetOrderId);
+        if (updated) {
+          setActiveOrder((prev) => (prev ? { ...prev, ...updated } : updated));
+          setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updated } : updated));
+        }
+      } catch {
+        // silent — socket will catch up if REST fails
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [
+    activeOrder?.id,
+    activeOrder?.business_id,
+    activeOrder?.table_id,
+    successOrderData?.id,
+    tableParams.tableId,
+    tableParams.businessId,
+    user?.business?.id,
+    isTrackerOpen,
+    Boolean(successOrderData),
+  ]);
+
+  // Layer 3: Periodic Polling Fallback (Safety Net)
+  useEffect(() => {
+    // Only poll for active, non-concluded orders
+    const targetOrderId = activeOrder?.id || successOrderData?.id;
+    const currentOrder = activeOrder || successOrderData;
+    const isPending = currentOrder &&
+      currentOrder.status !== 'COMPLETED' &&
+      currentOrder.status !== 'CANCELLED' &&
+      currentOrder.payment_status !== 'PAID';
+
+    const effectiveBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
+    const tableId = tableParams.tableId || activeOrder?.table_id;
+
+    if (!isPending || !targetOrderId || !tableId || !effectiveBizId) return;
+    if (isTrackerOpen === false && successOrderData === null) return;
+
+    const intervalId = setInterval(async () => {
+      // Skip if socket is live — no need to poll
+      if (socketService.isConnected()) return;
+
+      try {
+        const orders = await rbacService.getTableOrdersApi(tableId, effectiveBizId);
+        const updated = orders.find((o) => o.id === targetOrderId);
+        if (updated) {
+          setActiveOrder((prev) => (prev ? { ...prev, ...updated } : updated));
+          setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updated } : updated));
+        }
+      } catch {}
+    }, 45_000); // 45 seconds
+
+    return () => clearInterval(intervalId);
+  }, [
+    activeOrder?.id,
+    activeOrder?.status,
+    activeOrder?.payment_status,
+    activeOrder?.business_id,
+    activeOrder?.table_id,
+    successOrderData?.id,
+    successOrderData?.status,
+    successOrderData?.payment_status,
+    tableParams.tableId,
+    tableParams.businessId,
+    user?.business?.id,
+    isTrackerOpen,
+    Boolean(successOrderData),
+  ]);
 
   // Real-time Socket.io listener for Menu Items, Categories, and Business Profile
   useEffect(() => {
@@ -1238,7 +1396,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       }
       return prev.map((ci) => {
         return matchCartItem(ci, itemKeyOrId)
-          ? { ...ci, quantity: newQuantity }
+          ? { ...ci, quantity: newQuantity, pack_qty: Math.min(newQuantity, Number(ci.pack_qty) || 0), is_packaged: Math.min(newQuantity, Number(ci.pack_qty) || 0) > 0 }
           : ci;
       });
     });
@@ -1252,6 +1410,20 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         return (key === itemKeyOrId || ci.menuItem.id === itemKeyOrId)
           ? { ...ci, special_instructions: note }
           : ci;
+      })
+    );
+  };
+
+  const handleUpdatePackaging = (itemKeyOrId: string, packQty: number) => {
+    if (!isHost) return;
+    setCartItems((prev) =>
+      prev.map((ci) => {
+        const key = ci.selected_variant ? `${ci.menuItem.id}_${ci.selected_variant.id}` : ci.menuItem.id;
+        if (key === itemKeyOrId || ci.menuItem.id === itemKeyOrId) {
+          const validQty = Math.max(0, Math.min(ci.quantity, packQty));
+          return { ...ci, pack_qty: validQty, is_packaged: validQty > 0 };
+        }
+        return ci;
       })
     );
   };
@@ -3047,18 +3219,75 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           creditGlAccountId: tableParams.creditGlAccountId,
           creditGlAccountNumber: tableParams.creditGlAccountNumber,
           creditGlAccountName: tableParams.creditGlAccountName,
+          compEnabled: Boolean(tableParams.compEnabled),
+          compOrdererName: tableParams.compOrdererName,
+          compOrdererPhone: tableParams.compOrdererPhone,
         }}
         isHost={isHost}
         hostToken={hostToken}
         onUpdateQuantity={handleUpdateQuantity}
         onUpdateSpecialInstructions={handleUpdateSpecialInstructions}
+        onUpdatePackaging={handleUpdatePackaging}
         onClearCart={handleClearCart}
         onOrderConfirmed={(orderData) => {
           setIsCartOpen(false);
           setSuccessOrderData(orderData);
+          setActiveOrder((prev) => {
+            if (!prev) return orderData;
+            const combinedItems = [...(prev.items || []), ...(orderData.items || [])];
+            const combinedSubtotal = (Number(prev.subtotal) || 0) + (Number(orderData.subtotal) || 0);
+            const combinedPkg = (Number(prev.packaging_charge) || 0) + (Number(orderData.packaging_charge) || 0);
+            const combinedPkgQty = (Number(prev.packaging_qty) || 0) + (Number(orderData.packaging_qty) || 0);
+            const combinedTotal = (Number(prev.total_amount) || 0) + (Number(orderData.total_amount) || 0);
+            const combinedTax = (Number(prev.tax_amount) || 0) + (Number(orderData.tax_amount) || 0);
+            return {
+              ...prev,
+              order_number: prev.order_number || orderData.order_number,
+              items: combinedItems,
+              subtotal: combinedSubtotal,
+              packaging_charge: combinedPkg,
+              packaging_qty: combinedPkgQty,
+              total_amount: combinedTotal,
+              tax_amount: combinedTax,
+              bill_requested: prev.bill_requested || orderData.bill_requested,
+            };
+          });
+          setIsTrackerOpen(true);
+        }}
+        onRequestCompConfirmation={(itemsToComp, notes) => {
+          setIsCartOpen(false);
+          setPendingCompCartItems(itemsToComp);
+          setPendingCompNotes(notes || '');
+          setIsCompConfirmOpen(true);
+        }}
+      />
+
+      <CompConfirmationPage
+        isOpen={isCompConfirmOpen}
+        onClose={() => setIsCompConfirmOpen(false)}
+        cartItems={pendingCompCartItems.length > 0 ? pendingCompCartItems : cartItems}
+        generalNotes={pendingCompNotes}
+        tableInfo={{
+          tableId: tableParams.tableId,
+          tableNumber: tableParams.tableNumber,
+          floor: tableParams.floor,
+          building: tableParams.building,
+          businessId: tableParams.businessId,
+          businessName: businessProfile?.name,
+          existingOrderId: activeOrder?.id,
+          sessionId: tableParams.sessionId,
+          hostToken: hostToken,
+          compOrdererName: tableParams.compOrdererName,
+          compOrdererPhone: tableParams.compOrdererPhone,
+        }}
+        currencySymbol={businessProfile?.currency || 'Rs.'}
+        onOrderConfirmed={(orderData) => {
+          setIsCompConfirmOpen(false);
+          setSuccessOrderData(orderData);
           setActiveOrder(orderData);
           setIsTrackerOpen(true);
         }}
+        onClearCart={handleClearCart}
       />
 
       {(successOrderData || (isTrackerOpen && activeOrder)) && (

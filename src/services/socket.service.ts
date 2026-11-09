@@ -12,9 +12,25 @@ class RealtimeSocketService {
   private businessProfileListeners: Set<(data: any) => void> = new Set();
   private salesListeners: Set<(sale: any) => void> = new Set();
   private cashierSessionListeners: Set<(session: any) => void> = new Set();
+  private reconnectListeners: Set<() => void> = new Set();
+  private hasConnectedOnce = false;
+
+  public onReconnect(cb: () => void): () => void {
+    this.reconnectListeners.add(cb);
+    return () => {
+      this.reconnectListeners.delete(cb);
+    };
+  }
+
+  public isConnected(): boolean {
+    return Boolean(this.socket?.connected);
+  }
 
   public connect(): Socket {
-    if (this.socket && this.socket.connected) {
+    if (this.socket) {
+      if (this.socket.disconnected) {
+        this.socket.connect();
+      }
       return this.socket;
     }
 
@@ -49,6 +65,18 @@ class RealtimeSocketService {
       if (this.currentMenuBizId) {
         this.socket?.emit('join:menu', this.currentMenuBizId);
       }
+
+      if (this.hasConnectedOnce) {
+        // This is a reconnect — notify listeners
+        this.reconnectListeners.forEach((cb) => {
+          try {
+            cb();
+          } catch (e) {
+            console.error('Error in socket reconnect listener:', e);
+          }
+        });
+      }
+      this.hasConnectedOnce = true;
     });
 
     this.socket.on('socket:error', (err: any) => {

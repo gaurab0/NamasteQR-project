@@ -32,6 +32,7 @@ import {
   KeyRound,
   Wallet,
   Lock,
+  Package,
   RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -403,17 +404,38 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
 
   // Base Items Menu Sum (Non-cancelled items)
   const itemsMenuTotal = useMemo(() => {
-    return nonCancelledItems.reduce(
-      (acc, it) => acc + (Number(it.price) || 0) * (Number(it.quantity) || 0),
-      0
-    );
+    return nonCancelledItems.reduce((acc, it) => {
+      const qty = Number(it.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
+      const isComp = Boolean(it.is_comp || compQty >= qty);
+      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+      return acc + (Number(it.price) || 0) * billedQty;
+    }, 0);
   }, [nonCancelledItems]);
+
+  const packagingFeeRate = Number(taxConfig?.packaging_fee) || 10;
+  const packagingQty = useMemo(() => {
+    if (liveOrder?.packaging_qty !== undefined && Number(liveOrder.packaging_qty) > 0) {
+      return Number(liveOrder.packaging_qty);
+    }
+    return (liveOrder?.items || []).reduce((sum, it) => {
+      return sum + Math.max(0, Number(it.pack_qty) || (it.is_packaged ? Number(it.quantity) || 1 : 0));
+    }, 0);
+  }, [liveOrder?.packaging_qty, liveOrder?.items]);
+
+  const packagingCharge = useMemo(() => {
+    if (liveOrder?.packaging_charge !== undefined && Number(liveOrder.packaging_charge) > 0) {
+      return Number(liveOrder.packaging_charge);
+    }
+    return packagingQty * packagingFeeRate;
+  }, [liveOrder?.packaging_charge, packagingQty, packagingFeeRate]);
 
   const billCalc = useMemo(() => {
     const savedFlatPromo =
       !appliedPromo && !promoRemovedByUser ? Number(liveOrder?.promo_discount) || 0 : 0;
     return calculateBillTotals({
       itemsMenuTotal,
+      packagingTotal: packagingCharge,
       taxConfig,
       fallbackTaxes: liveOrder?.taxes,
       fallbackTaxAmount: liveOrder?.tax_amount,
@@ -422,6 +444,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     });
   }, [
     itemsMenuTotal,
+    packagingCharge,
     taxConfig,
     liveOrder?.taxes,
     liveOrder?.tax_amount,
@@ -828,6 +851,12 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                     const isServed = it.status === 'SERVED';
                     const isPreparing = it.status === 'PREPARING';
 
+                    const qty = Number(it.quantity) || 1;
+                    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
+                    const isComp = Boolean(it.is_comp || compQty >= qty);
+                    const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                    const lineTotal = isComp ? 0 : (billedQty * (Number(it.price) || 0));
+
                     return (
                       <div key={idx} className="py-1.5 first:pt-0 last:pb-0 flex items-start justify-between gap-2 text-xs">
                         <div className="space-y-0.5">
@@ -838,6 +867,27 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                             {it.variant_name && (
                               <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold">
                                 [{it.variant_name}]
+                              </span>
+                            )}
+                            {Number(it.round_number) > 1 && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-purple-100 text-purple-900 border border-purple-300 font-bold flex items-center gap-0.5">
+                                Round {it.round_number}
+                              </span>
+                            )}
+                            {isComp && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300 font-bold">
+                                🎁 Comp
+                              </span>
+                            )}
+                            {!isComp && compQty > 0 && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 border border-amber-300 font-bold">
+                                {compQty}x Comp
+                              </span>
+                            )}
+                            {(Boolean(it.is_packaged) || (Number(it.pack_qty) || 0) > 0) && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold flex items-center gap-0.5">
+                                <Package className="w-2.5 h-2.5 text-amber-700" />
+                                {(Number(it.pack_qty) || 0) > 1 ? `${it.pack_qty}x Pack` : 'Pack'}
                               </span>
                             )}
                             {it.station === 'BAR' ? (
@@ -889,7 +939,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                         </div>
 
                         <span className="font-mono font-bold text-zinc-800 shrink-0 notranslate">
-                          {it.currency || liveOrder.currency} {(it.price * it.quantity).toLocaleString()}
+                          {it.currency || liveOrder.currency} {lineTotal.toLocaleString()}
                         </span>
                       </div>
                     );
@@ -900,6 +950,17 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               {/* Total & Quick Bill Callout with Full VAT & Tax Breakdown */}
               <div className="px-3 py-2 sm:px-3.5 sm:py-2.5 bg-amber-50/80 border border-amber-200/90 rounded-xl space-y-1.5 notranslate">
                 <div className="space-y-0.5 text-xs">
+                  {packagingQty > 0 && (
+                    <div className="flex items-center justify-between text-amber-900/80 font-medium">
+                      <span className="flex items-center gap-1">
+                        <Package className="w-3.5 h-3.5 text-amber-700" />
+                        <span>Packaging ({packagingQty} {packagingQty === 1 ? 'item' : 'items'})</span>
+                      </span>
+                      <span className="font-mono font-bold text-amber-950">
+                        +{liveOrder.currency} {packagingCharge.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-amber-900/80 font-medium">
                     <span>Items Subtotal</span>
                     <span className="font-mono font-bold text-amber-950">
@@ -1260,12 +1321,20 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                      Order #{liveOrder?.order_number || (liveOrder?.id ? liveOrder.id.slice(0, 8).toUpperCase() : '')}
                    </span>
                  </div>
-                 {liveOrder?.items?.map((item, idx) => (
-                    <div key={idx} className="flex justify-between py-1.5 text-zinc-600">
-                      <span>{item.quantity}x {item.name}</span>
-                      <span className="font-medium text-zinc-900">{liveOrder.currency} {((item.price||0) * (item.quantity||1)).toFixed(2)}</span>
-                    </div>
-                 ))}
+                 {liveOrder?.items?.map((item, idx) => {
+                   const qty = Number(item.quantity) || 1;
+                   const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
+                   const isComp = Boolean(item.is_comp || compQty >= qty);
+                   const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                   const lineTotal = isComp ? 0 : (billedQty * (Number(item.price) || 0));
+
+                   return (
+                     <div key={idx} className="flex justify-between py-1.5 text-zinc-600">
+                       <span>{item.quantity}x {item.name}{isComp ? ' (🎁 Comp)' : compQty > 0 ? ` (${compQty}x Comp)` : ''}</span>
+                       <span className="font-medium text-zinc-900">{liveOrder.currency} {lineTotal.toFixed(2)}</span>
+                     </div>
+                   );
+                 })}
                  
                  <div className="border-t border-zinc-100 mt-2 pt-2 space-y-1.5 text-xs text-zinc-500">
                     <div className="flex justify-between">
@@ -1448,43 +1517,89 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                 </h4>
 
                 <div className="border border-zinc-200 rounded-xl overflow-hidden divide-y divide-zinc-100 bg-white">
-                  {liveOrder.items.map((it, idx) => (
-                    <div key={idx} className="px-3 py-1.5 flex items-start sm:items-center justify-between gap-2 text-xs hover:bg-zinc-50/50 transition">
-                      <div className="space-y-0.5 min-w-0 flex-1 pr-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-zinc-900 break-words">
-                            {it.name}
-                          </span>
-                          {it.station === 'BAR' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold shrink-0">
-                              Bar
+                  {liveOrder.items.map((it, idx) => {
+                    const qty = Number(it.quantity) || 1;
+                    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
+                    const isComp = Boolean(it.is_comp || compQty >= qty);
+                    const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                    const lineTotal = isComp ? 0 : (billedQty * (Number(it.price) || 0));
+
+                    return (
+                      <div key={idx} className="px-3 py-1.5 flex items-start sm:items-center justify-between gap-2 text-xs hover:bg-zinc-50/50 transition">
+                        <div className="space-y-0.5 min-w-0 flex-1 pr-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-zinc-900 break-words">
+                              {it.name}
                             </span>
-                          )}
-                          {it.status === 'READY' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200 shrink-0">
-                              Ready
-                            </span>
-                          )}
-                          {it.status === 'SERVED' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 font-medium shrink-0">
-                              Served
-                            </span>
-                          )}
+                            {Number(it.round_number) > 1 && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-purple-100 text-purple-900 border border-purple-300 font-bold flex items-center gap-0.5">
+                                Round {it.round_number}
+                              </span>
+                            )}
+                            {isComp && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-200/80 text-amber-900 border border-amber-300 font-bold">
+                                🎁 Comp
+                              </span>
+                            )}
+                            {!isComp && compQty > 0 && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 border border-amber-300 font-bold">
+                                {compQty}x Comp
+                              </span>
+                            )}
+                            {(Boolean(it.is_packaged) || (Number(it.pack_qty) || 0) > 0) && (
+                              <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-900 border border-amber-300 font-bold flex items-center gap-0.5">
+                                <Package className="w-2.5 h-2.5 text-amber-700" />
+                                {(Number(it.pack_qty) || 0) > 1 ? `${it.pack_qty}x Pack` : 'Pack'}
+                              </span>
+                            )}
+                            {it.station === 'BAR' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold shrink-0">
+                                Bar
+                              </span>
+                            )}
+                            {it.status === 'READY' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200 shrink-0">
+                                Ready
+                              </span>
+                            )}
+                            {it.status === 'SERVED' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 font-medium shrink-0">
+                                Served
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-zinc-500 notranslate">
+                            {isComp ? (
+                              <span className="font-semibold text-emerald-700">Complimentary (Rs. 0.00)</span>
+                            ) : compQty > 0 ? (
+                              <span>{billedQty} × {currencySymbol} {Number(it.price).toFixed(2)} (+{compQty}x Comp)</span>
+                            ) : (
+                              <span>{it.quantity} × {currencySymbol} {Number(it.price).toFixed(2)}</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-[11px] text-zinc-500 notranslate">
-                          {it.quantity} × {currencySymbol} {Number(it.price).toFixed(2)}
-                        </div>
+                        <span className="font-mono font-bold text-zinc-900 text-sm shrink-0 pt-0.5 sm:pt-0 notranslate">
+                          {currencySymbol} {lineTotal.toFixed(2)}
+                        </span>
                       </div>
-                      <span className="font-mono font-bold text-zinc-900 text-sm shrink-0 pt-0.5 sm:pt-0 notranslate">
-                        {currencySymbol} {(Number(it.price) * Number(it.quantity)).toFixed(2)}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               {/* Tax & Total Calculation Configured From Tax System */}
               <div className="px-3 py-2.5 bg-zinc-50 rounded-xl border border-zinc-200/80 space-y-1 text-xs notranslate">
+                {packagingQty > 0 && (
+                  <div className="flex items-center justify-between text-zinc-600">
+                    <span className="flex items-center gap-1 text-zinc-700 font-medium">
+                      <Package className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Packaging ({packagingQty} {packagingQty === 1 ? 'item' : 'items'})</span>
+                    </span>
+                    <span className="font-mono font-semibold text-zinc-800">
+                      +{currencySymbol} {packagingCharge.toFixed(2)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-zinc-600">
                   <span>Items Subtotal</span>
                   <span className="font-mono font-semibold text-zinc-800">

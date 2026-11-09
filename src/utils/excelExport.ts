@@ -187,7 +187,7 @@ export function buildSalesWorkbookData(
     'Sale Type', 'Table # / Room', 'Customer Name', 'Customer Phone', 'Customer PAN',
     'Items Summary', 'Total Items', 'Payment Method', 'Payment Status',
     'GL Account No.', 'GL Account Name', 'GL Category', 'Currency',
-    'Subtotal', 'Taxes Breakdown', 'Total Tax', 'Service Charge',
+    'Subtotal', 'Packaging (Rs.)', 'Taxes Breakdown', 'Total Tax', 'Service Charge',
     'Discount Amount', 'Promo Code', 'Grand Total', 'Cashier / Billed By', 'Notes'
   ];
 
@@ -205,20 +205,25 @@ export function buildSalesWorkbookData(
     const itemsSummary = Array.isArray(sale.items)
       ? sale.items
           .map((i: any) => {
-            const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
-            const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
-            if (billedQty <= 0) return null;
-            return `${i.name || i.item_name || 'Item'} (x${billedQty})`;
+            const qty = Number(i.quantity) || 1;
+            const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || 0));
+            const isComp = Boolean(i.is_comp || (compQty >= qty));
+            const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+            const pQty = Number(i.pack_qty) || (i.is_packaged ? qty : 0);
+            const pSuffix = pQty > 0 ? ` [x${pQty} Pack]` : '';
+            if (billedQty <= 0) {
+              return `${i.name || i.item_name || 'Item'} (x${qty} Comp)${pSuffix}`;
+            }
+            if (compQty > 0) {
+              return `${i.name || i.item_name || 'Item'} (x${billedQty}, +${compQty} Comp)${pSuffix}`;
+            }
+            return `${i.name || i.item_name || 'Item'} (x${billedQty})${pSuffix}`;
           })
           .filter(Boolean)
           .join('; ')
       : '';
     const totalItemsCount = Array.isArray(sale.items)
-      ? sale.items.reduce((sum: number, i: any) => {
-          const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
-          const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
-          return sum + billedQty;
-        }, 0)
+      ? sale.items.reduce((sum: number, i: any) => sum + (Number(i.quantity) || 1), 0)
       : 0;
 
     const taxesSummary = Array.isArray(sale.taxes)
@@ -291,6 +296,7 @@ export function buildSalesWorkbookData(
       glAccCategory,
       sale.currency || currency,
       Number((sale.subtotal || 0).toFixed(2)),
+      Number((sale.packaging_charge || 0).toFixed(2)),
       taxesSummary,
       Number((sale.total_tax || 0).toFixed(2)),
       Number((sale.service_charge || 0).toFixed(2)),
@@ -301,7 +307,7 @@ export function buildSalesWorkbookData(
       sale.notes || '',
     ];
   });
-  const salesColWidths = [6, 18, 14, 22, 16, 14, 16, 20, 16, 16, 45, 14, 16, 14, 16, 30, 16, 10, 14, 25, 12, 14, 15, 14, 15, 20, 25];
+  const salesColWidths = [6, 18, 14, 22, 16, 14, 16, 20, 16, 16, 45, 14, 16, 14, 16, 30, 16, 10, 14, 14, 25, 12, 14, 15, 14, 15, 20, 25];
 
   // -------------------------------------------------------------
   // 2. SHEET 2: Item Sales Register (Individual Line-Item Transactions)
@@ -317,7 +323,9 @@ export function buildSalesWorkbookData(
     'Category',
     'Station',
     'Quantity',
+    'Packaged Qty',
     'Unit Price',
+    'Packaging Charge (Rs.)',
     'Total Amount',
     'Payment Method',
     'Sale Type',
@@ -331,9 +339,12 @@ export function buildSalesWorkbookData(
   const itemRows: (string | number)[][] = [];
   let itemSn = 1;
   let totalItemUnits = 0;
+  let totalItemPackUnits = 0;
+  let totalItemPackagingCharge = 0;
   let totalItemRevenue = 0;
 
   for (const sale of sales || []) {
+    if (isAllCompSale(sale)) continue;
     let formattedDate = sale.date_string || '';
     if (sale.created_at) {
       try {
@@ -371,40 +382,130 @@ export function buildSalesWorkbookData(
 
         const qty = Number(item.quantity) || 1;
         const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || 0));
-        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
-
-        // If item is completely comped, it belongs exclusively to the Complementary Ledger
-        if (billedQty <= 0 && (item.is_comp || compQty > 0)) {
-          continue;
-        }
-
+        const isComp = Boolean(item.is_comp || (compQty >= qty));
+        const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
         const unitPrice = Number(item.unit_price ?? item.price ?? 0);
-        const lineTotal = Number(item.total_price ?? item.subtotal ?? (billedQty * unitPrice));
+        const itemPackQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? qty : 0)) || 0);
+        const itemPackCharge = Number(item.packaging_charge ?? (itemPackQty * 10)) || 0;
 
-        totalItemUnits += billedQty;
-        totalItemRevenue = Number((totalItemRevenue + lineTotal).toFixed(2));
+        if (isComp) {
+          totalItemUnits += qty;
+          totalItemPackUnits += itemPackQty;
+          totalItemPackagingCharge += itemPackCharge;
+          itemRows.push([
+            itemSn++,
+            sale.invoice_number || sale.id || '-',
+            sale.order_number || '-',
+            formattedDate,
+            dateYMD,
+            `${unifiedName} (Complimentary)`,
+            variantName,
+            item.category || 'General',
+            (item.station || 'KITCHEN').toUpperCase(),
+            qty,
+            itemPackQty,
+            Number(unitPrice.toFixed(2)),
+            Number(itemPackCharge.toFixed(2)),
+            0,
+            normalizedPayment,
+            sale.sale_type || 'DINE_IN',
+            sale.table_number || 'Counter / N/A',
+            sale.customer_name || 'Walk-in Guest',
+            sale.customer_phone || '-',
+            sale.customer_pan || '-',
+            sale.cashier_name || 'Staff',
+          ]);
+        } else if (compQty > 0 && billedQty > 0) {
+          const paidLineTotal = Number((billedQty * unitPrice).toFixed(2));
+          const billedPackQty = Math.min(billedQty, itemPackQty);
+          const billedPackCharge = billedPackQty * (itemPackQty > 0 ? (itemPackCharge / itemPackQty) : 10);
+          const compPackQty = Math.max(0, itemPackQty - billedPackQty);
+          const compPackCharge = Math.max(0, itemPackCharge - billedPackCharge);
 
-        itemRows.push([
-          itemSn++,
-          sale.invoice_number || sale.id || '-',
-          sale.order_number || '-',
-          formattedDate,
-          dateYMD,
-          unifiedName,
-          variantName,
-          item.category || 'General',
-          (item.station || 'KITCHEN').toUpperCase(),
-          billedQty,
-          Number(unitPrice.toFixed(2)),
-          Number(lineTotal.toFixed(2)),
-          normalizedPayment,
-          sale.sale_type || 'DINE_IN',
-          sale.table_number || 'Counter / N/A',
-          sale.customer_name || 'Walk-in Guest',
-          sale.customer_phone || '-',
-          sale.customer_pan || '-',
-          sale.cashier_name || 'Staff',
-        ]);
+          totalItemUnits += billedQty;
+          totalItemPackUnits += billedPackQty;
+          totalItemPackagingCharge += billedPackCharge;
+          totalItemRevenue = Number((totalItemRevenue + paidLineTotal).toFixed(2));
+          itemRows.push([
+            itemSn++,
+            sale.invoice_number || sale.id || '-',
+            sale.order_number || '-',
+            formattedDate,
+            dateYMD,
+            unifiedName,
+            variantName,
+            item.category || 'General',
+            (item.station || 'KITCHEN').toUpperCase(),
+            billedQty,
+            billedPackQty,
+            Number(unitPrice.toFixed(2)),
+            Number(billedPackCharge.toFixed(2)),
+            paidLineTotal,
+            normalizedPayment,
+            sale.sale_type || 'DINE_IN',
+            sale.table_number || 'Counter / N/A',
+            sale.customer_name || 'Walk-in Guest',
+            sale.customer_phone || '-',
+            sale.customer_pan || '-',
+            sale.cashier_name || 'Staff',
+          ]);
+
+          totalItemUnits += compQty;
+          totalItemPackUnits += compPackQty;
+          totalItemPackagingCharge += compPackCharge;
+          itemRows.push([
+            itemSn++,
+            sale.invoice_number || sale.id || '-',
+            sale.order_number || '-',
+            formattedDate,
+            dateYMD,
+            `${unifiedName} (Complimentary)`,
+            variantName,
+            item.category || 'General',
+            (item.station || 'KITCHEN').toUpperCase(),
+            compQty,
+            compPackQty,
+            Number(unitPrice.toFixed(2)),
+            Number(compPackCharge.toFixed(2)),
+            0,
+            normalizedPayment,
+            sale.sale_type || 'DINE_IN',
+            sale.table_number || 'Counter / N/A',
+            sale.customer_name || 'Walk-in Guest',
+            sale.customer_phone || '-',
+            sale.customer_pan || '-',
+            sale.cashier_name || 'Staff',
+          ]);
+        } else {
+          const lineTotal = Number(item.total_price ?? item.subtotal ?? (billedQty * unitPrice));
+          totalItemUnits += billedQty;
+          totalItemPackUnits += itemPackQty;
+          totalItemPackagingCharge += itemPackCharge;
+          totalItemRevenue = Number((totalItemRevenue + lineTotal).toFixed(2));
+          itemRows.push([
+            itemSn++,
+            sale.invoice_number || sale.id || '-',
+            sale.order_number || '-',
+            formattedDate,
+            dateYMD,
+            unifiedName,
+            variantName,
+            item.category || 'General',
+            (item.station || 'KITCHEN').toUpperCase(),
+            billedQty,
+            itemPackQty,
+            Number(unitPrice.toFixed(2)),
+            Number(itemPackCharge.toFixed(2)),
+            Number(lineTotal.toFixed(2)),
+            normalizedPayment,
+            sale.sale_type || 'DINE_IN',
+            sale.table_number || 'Counter / N/A',
+            sale.customer_name || 'Walk-in Guest',
+            sale.customer_phone || '-',
+            sale.customer_pan || '-',
+            sale.cashier_name || 'Staff',
+          ]);
+        }
       }
     }
   }
@@ -421,6 +522,8 @@ export function buildSalesWorkbookData(
       '-',
       '-',
       '-',
+      0,
+      0,
       0,
       0,
       0,
@@ -443,7 +546,9 @@ export function buildSalesWorkbookData(
       '',
       '',
       totalItemUnits,
+      totalItemPackUnits,
       '',
+      Number(totalItemPackagingCharge.toFixed(2)),
       Number(totalItemRevenue.toFixed(2)),
       '',
       '',
@@ -454,7 +559,7 @@ export function buildSalesWorkbookData(
     ]);
   }
 
-  const itemColWidths = [8, 16, 14, 22, 16, 28, 18, 16, 12, 10, 14, 16, 16, 14, 16, 18, 16, 18];
+  const itemColWidths = [8, 16, 14, 22, 16, 28, 18, 16, 12, 10, 12, 14, 16, 16, 16, 14, 16, 18, 16, 16, 18];
 
   // -------------------------------------------------------------
   // 3. SHEET 3: GL Links & Mapping
@@ -705,7 +810,8 @@ export function buildSalesWorkbookData(
   if (compRecords && compRecords.length > 0) {
     const compHeaders = [
       'Date', 'Time', 'Table', 'Staff Name', 'Item Name', 'Category',
-      'Comp Qty', 'Unit Price (Rs.)', 'Comp Value (Rs.)', 'Reason', 'Sale Ref'
+      'Comp Qty', 'Unit Price (Rs.)', 'Comp Value (Rs.)', 'Reason', 'Sale Ref',
+      'Orderer Name', 'Orderer Phone'
     ];
     const compRows: (string | number)[][] = [];
     for (const rec of compRecords) {
@@ -715,7 +821,7 @@ export function buildSalesWorkbookData(
           rec.date_string,
           rec.settled_at ? new Date(rec.settled_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '-',
           rec.table_number,
-          rec.staff_name,
+          rec.staff_name || '-',
           item.name ?? '',
           item.category ?? '',
           Number(item.comp_qty ?? 0),
@@ -723,10 +829,12 @@ export function buildSalesWorkbookData(
           Number(item.comp_value ?? 0).toFixed(2),
           rec.reason ?? '',
           rec.sale_id ?? '',
+          rec.orderer_name || '-',
+          rec.orderer_phone || '-',
         ]);
       }
     }
-    const compColWidths = [14, 12, 14, 20, 25, 16, 12, 16, 16, 25, 20];
+    const compColWidths = [14, 12, 14, 20, 25, 16, 12, 16, 16, 25, 20, 20, 16];
     sheets.push({ sheetName: 'Complementary Ledger', headers: compHeaders, rows: compRows, colWidths: compColWidths });
   }
 

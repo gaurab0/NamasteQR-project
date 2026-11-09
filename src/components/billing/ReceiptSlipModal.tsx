@@ -45,6 +45,28 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
     await dispatchPrint('BILL', sale);
   };
 
+  const computedItemsSubtotal = (sale.items || [])
+    .filter((item) => (item.name || '').trim().length > 0)
+    .reduce((sum, item) => {
+      const qty = Number(item.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+      const isComp = Boolean(item.is_comp || compQty >= qty);
+      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+      const uPrice = Number(item.unit_price ?? item.price ?? 0);
+      return sum + (billedQty * uPrice);
+    }, 0);
+
+  const packagingCharge = Number(sale.packaging_charge || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.packaging_charge) || 0), 0);
+  const packagingQty = Number(sale.packaging_qty || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.pack_qty) || (it.is_packaged ? Number(it.quantity) || 1 : 0)), 0);
+
+  const displaySubtotal = (sale.subtotal > 0 || computedItemsSubtotal === 0)
+    ? sale.subtotal
+    : computedItemsSubtotal;
+
+  const displayTotalAmount = (sale.total_amount > 0 || computedItemsSubtotal === 0)
+    ? sale.total_amount
+    : (displaySubtotal + (sale.total_tax || 0) - (sale.discount_amount || 0));
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-zinc-200 max-h-[90vh] overflow-y-auto">
@@ -164,20 +186,51 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
             {sale.items
               .filter((item) => (item.name || '').trim().length > 0)
               .map((item, idx) => {
-              const uPrice = item.unit_price ?? item.price ?? 0;
-              const isComp = Boolean(item.is_comp || ((item.comp_qty ?? 0) >= item.quantity));
-              const tPrice = isComp ? 0 : (item.total_price ?? item.subtotal ?? (uPrice * Math.max(0, item.quantity - (item.comp_qty ?? 0))));
-              return (
+              const qty = Number(item.quantity) || 1;
+              const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+              const isComp = Boolean(item.is_comp || compQty >= qty);
+              const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+              const uPrice = Number(item.unit_price ?? item.price ?? 0);
+              const tPrice = isComp ? 0 : billedQty * uPrice;
+              const computedItemsSubtotal = (sale.items || [])
+    .filter((item) => (item.name || '').trim().length > 0)
+    .reduce((sum, item) => {
+      const qty = Number(item.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+      const isComp = Boolean(item.is_comp || compQty >= qty);
+      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+      const uPrice = Number(item.unit_price ?? item.price ?? 0);
+      return sum + (billedQty * uPrice);
+    }, 0);
+
+  const packagingCharge = Number(sale.packaging_charge || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.packaging_charge) || 0), 0);
+  const packagingQty = Number(sale.packaging_qty || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.pack_qty) || (it.is_packaged ? Number(it.quantity) || 1 : 0)), 0);
+
+  const displaySubtotal = (sale.subtotal > 0 || computedItemsSubtotal === 0)
+    ? sale.subtotal
+    : computedItemsSubtotal;
+
+  const displayTotalAmount = (sale.total_amount > 0 || computedItemsSubtotal === 0)
+    ? sale.total_amount
+    : (displaySubtotal + (sale.total_tax || 0) - (sale.discount_amount || 0));
+
+  return (
                 <div key={idx} className="flex justify-between items-start">
                   <div className="flex-1 pr-2">
                     <span className="font-bold">{item.name}</span>
-                    {(item.comp_qty ?? 0) > 0 && (
+                    {(compQty > 0 || isComp) && (
                       <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold uppercase tracking-wider">
-                        {isComp ? 'COMPLIMENTARY' : `${item.comp_qty}× COMP`}
+                        {isComp ? 'COMPLIMENTARY' : `${compQty}× COMP`}
                       </span>
                     )}
                     <span className="text-[10px] text-zinc-500 block">
-                      {item.quantity} x {sale.currency} {uPrice.toFixed(2)}
+                      {isComp ? (
+                        `${qty} x ${sale.currency} 0.00 (Complimentary)`
+                      ) : compQty > 0 ? (
+                        `${billedQty} x ${sale.currency} ${uPrice.toFixed(2)} (+${compQty}x Comp)`
+                      ) : (
+                        `${qty} x ${sale.currency} ${uPrice.toFixed(2)}`
+                      )}
                     </span>
                   </div>
                   <span className="font-bold shrink-0">
@@ -192,10 +245,18 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
 
           {/* Calculations Breakdown */}
           <div className="space-y-1 text-[11px]">
+            {packagingCharge > 0 && (
+              <div className="flex justify-between text-zinc-700 font-semibold">
+                <span>Packaging ({packagingQty} pkgs):</span>
+                <span>
+                  +{sale.currency} {packagingCharge.toFixed(2)}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between text-zinc-600">
               <span>Subtotal:</span>
               <span>
-                {sale.currency} {sale.subtotal.toFixed(2)}
+                {sale.currency} {displaySubtotal.toFixed(2)}
               </span>
             </div>
 
@@ -235,7 +296,7 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
             <div className="flex justify-between text-sm font-black text-zinc-950">
               <span>TOTAL PAID:</span>
               <span>
-                {sale.currency} {sale.total_amount.toFixed(2)}
+                {sale.currency} {displayTotalAmount.toFixed(2)}
               </span>
             </div>
 

@@ -21,7 +21,9 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
-  Gift
+  Gift,
+  User,
+  Phone
 } from 'lucide-react';
 import { RestaurantTable } from '../../types/rbac';
 import { rbacService } from '../../services/rbac.service';
@@ -60,6 +62,8 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
 
   // Complementary Mode State
   const [isCompEnabled, setIsCompEnabled] = useState<boolean>(Boolean(table.comp_enabled));
+  const [compOrdererName, setCompOrdererName] = useState<string>(table.comp_orderer_name || '');
+  const [compOrdererPhone, setCompOrdererPhone] = useState<string>(table.comp_orderer_phone || '');
   const [compSaving, setCompSaving] = useState<boolean>(false);
   const [compSuccessMsg, setCompSuccessMsg] = useState<string | null>(null);
   const [compErrorMsg, setCompErrorMsg] = useState<string | null>(null);
@@ -190,19 +194,55 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
   };
 
   const handleToggleComp = async () => {
-    const newVal = !isCompEnabled;
-    setIsCompEnabled(newVal);
-    setCompSaving(true);
+    if (isCompEnabled) {
+      setCompSaving(true);
+      setCompErrorMsg(null);
+      setCompSuccessMsg(null);
+      try {
+        await rbacService.updateTableApi(table.id, { comp_enabled: false }, businessId);
+        setIsCompEnabled(false);
+        setCompSuccessMsg('Complementary mode disabled.');
+        if (onTableUpdated) onTableUpdated({ ...table, comp_enabled: false });
+        setTimeout(() => setCompSuccessMsg(null), 3000);
+      } catch (err: any) {
+        setCompErrorMsg(err?.message || 'Failed to update complementary setting.');
+      } finally {
+        setCompSaving(false);
+      }
+    } else {
+      setIsCompEnabled(true);
+      setCompErrorMsg(null);
+      setCompSuccessMsg(null);
+    }
+  };
+
+  const handleSaveCompConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
     setCompErrorMsg(null);
     setCompSuccessMsg(null);
+
+    if (!compOrdererName.trim()) {
+      setCompErrorMsg('Orderer Name is compulsory for Complementary Mode.');
+      return;
+    }
+    if (!compOrdererPhone.trim()) {
+      setCompErrorMsg('Orderer Phone Number is compulsory for Complementary Mode.');
+      return;
+    }
+
+    setCompSaving(true);
     try {
-      await rbacService.updateTableApi(table.id, { comp_enabled: newVal }, businessId);
-      setCompSuccessMsg(newVal ? 'Complementary mode enabled for this table.' : 'Complementary mode disabled.');
-      if (onTableUpdated) onTableUpdated({ ...table, comp_enabled: newVal });
+      const updates = {
+        comp_enabled: true,
+        comp_orderer_name: compOrdererName.trim(),
+        comp_orderer_phone: compOrdererPhone.trim(),
+      };
+      await rbacService.updateTableApi(table.id, updates, businessId);
+      setCompSuccessMsg('Complementary settings saved successfully! Table is ready for authorized comp orders.');
+      if (onTableUpdated) onTableUpdated({ ...table, ...updates });
       setTimeout(() => setCompSuccessMsg(null), 3000);
     } catch (err: any) {
-      setIsCompEnabled(!newVal); // revert optimistic update
-      setCompErrorMsg(err?.message || 'Failed to update complementary setting.');
+      setCompErrorMsg(err?.message || 'Failed to save complementary settings.');
     } finally {
       setCompSaving(false);
     }
@@ -727,16 +767,23 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
             </div>
 
             {/* Complementary Mode Card */}
-            <div className="border border-amber-200 bg-amber-50/40 rounded-2xl p-4 space-y-2">
+            <div className="border border-amber-200 bg-amber-50/40 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
                     <Gift className="w-5 h-5 text-amber-600" />
                   </div>
                   <div>
-                    <p className="text-sm font-bold text-zinc-900">Complementary Mode</p>
+                    <p className="text-sm font-bold text-zinc-900 flex items-center gap-2">
+                      Complementary Mode
+                      {table.comp_enabled && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-200 text-amber-900">
+                          Active
+                        </span>
+                      )}
+                    </p>
                     <p className="text-[11px] text-zinc-500 leading-tight">
-                      Allow staff to mark items as complimentary at billing
+                      Orderer authorizes complimentary dishes with universal password
                     </p>
                   </div>
                 </div>
@@ -756,6 +803,67 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
                   />
                 </button>
               </div>
+
+              {isCompEnabled && (
+                <form onSubmit={handleSaveCompConfig} className="pt-2 border-t border-amber-200/80 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] font-bold text-zinc-700 flex items-center gap-1 mb-1">
+                        <User className="w-3 h-3 text-amber-600" />
+                        Orderer Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={compOrdererName}
+                        onChange={(e) => setCompOrdererName(e.target.value)}
+                        placeholder="e.g. Owner / Manager John"
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-xl text-xs font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-zinc-700 flex items-center gap-1 mb-1">
+                        <Phone className="w-3 h-3 text-amber-600" />
+                        Orderer Phone <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        value={compOrdererPhone}
+                        onChange={(e) => setCompOrdererPhone(e.target.value)}
+                        placeholder="e.g. 9812345678"
+                        className="w-full px-3 py-2 bg-white border border-zinc-300 rounded-xl text-xs font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-zinc-500">
+                    Recorded in the dedicated Complementary Ledger alongside date and time of order.
+                  </p>
+
+                  <div className="pt-1">
+                    <button
+                      type="submit"
+                      disabled={compSaving}
+                      className="w-full py-2.5 px-4 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {compSaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving Complementary Settings...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Gift className="w-3.5 h-3.5" />
+                          <span>Save Complementary Settings</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {compSuccessMsg && (
                 <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700 flex items-center gap-2">
                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />

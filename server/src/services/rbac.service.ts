@@ -170,6 +170,7 @@ export class RBACService {
         station: (d.station as any) || 'KITCHEN',
         status: (d.status as any) || (d.is_available ? 'available' : 'unavailable'),
         is_available: d.is_available,
+        is_packageable: d.is_packageable !== false,
         order_index: d.order_index,
         preparation_time_mins: d.preparation_time_mins || 15,
         created_by: d.created_by || 'system',
@@ -339,6 +340,7 @@ export class RBACService {
       food_type?: FoodType;
       status?: MenuStatus;
       is_available?: boolean;
+      is_packageable?: boolean;
       has_variants?: boolean;
       variants?: MenuItemVariant[];
       display_style?: 'auto' | 'hero' | 'bento' | 'text_only';
@@ -382,6 +384,7 @@ export class RBACService {
       food_type: itemData.food_type || 'non-veg',
       status: itemStatus,
       is_available: isAvailable,
+      is_packageable: itemData.is_packageable !== false,
       has_variants: Boolean(itemData.has_variants),
       variants: Array.isArray(itemData.variants) ? itemData.variants : undefined,
       display_style: itemData.display_style,
@@ -411,6 +414,7 @@ export class RBACService {
           food_type: newItem.food_type || 'non-veg',
           status: newItem.status,
           is_available: newItem.is_available,
+          is_packageable: newItem.is_packageable !== false,
           has_variants: newItem.has_variants,
           variants: (newItem.variants as any) || [],
           variant_group_name: (itemData as any).variant_group_name || (itemData.name ? undefined : null),
@@ -483,6 +487,7 @@ export class RBACService {
       if (updates.promo_badge !== undefined) prismaData.promo_badge = updates.promo_badge;
       if (updates.station !== undefined) prismaData.station = updates.station;
       if (updates.order_index !== undefined) prismaData.order_index = updates.order_index;
+      if (updates.is_packageable !== undefined) prismaData.is_packageable = Boolean(updates.is_packageable);
       if (updates.preparation_time_mins !== undefined) prismaData.preparation_time_mins = updates.preparation_time_mins;
 
       await prisma.menuItem.update({
@@ -1146,6 +1151,7 @@ export class RBACService {
         food_type: d.food_type,
         status: d.status,
         is_available: d.is_available,
+        is_packageable: d.is_packageable !== false,
         preparation_time_mins: d.preparation_time_mins,
         created_by: userId,
         created_at: new Date(),
@@ -1164,6 +1170,7 @@ export class RBACService {
           food_type: d.food_type,
           status: d.status,
           is_available: d.is_available,
+        is_packageable: d.is_packageable !== false,
           preparation_time_mins: d.preparation_time_mins,
           created_by: userId,
         },
@@ -1260,6 +1267,8 @@ export class RBACService {
         credit_gl_account_number: d.credit_gl_account_number || null,
         credit_gl_account_name: d.credit_gl_account_name || null,
         comp_enabled: Boolean(d.comp_enabled),
+        comp_orderer_name: d.comp_orderer_name || null,
+        comp_orderer_phone: d.comp_orderer_phone || null,
         assigned_waiter_ids: d.assigned_waiter_ids || [],
         waiter_ping: (d.waiter_ping as any) || null,
         qr_code_url: d.qr_code_url || '',
@@ -1298,6 +1307,8 @@ export class RBACService {
       credit_gl_account_number?: string | null;
       credit_gl_account_name?: string | null;
       comp_enabled?: boolean;
+      comp_orderer_name?: string | null;
+      comp_orderer_phone?: string | null;
       assigned_waiter_ids?: string[];
     },
     user: { id: string; role?: string; email?: string }
@@ -1326,6 +1337,8 @@ export class RBACService {
       credit_gl_account_number: tableData.credit_gl_account_number?.trim() || null,
       credit_gl_account_name: tableData.credit_gl_account_name?.trim() || null,
       comp_enabled: Boolean(tableData.comp_enabled),
+      comp_orderer_name: tableData.comp_orderer_name?.trim() || null,
+      comp_orderer_phone: tableData.comp_orderer_phone?.trim() || null,
       assigned_waiter_ids: tableData.assigned_waiter_ids || [],
       waiter_ping: null,
       qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent(tableData.table_number.trim())}`,
@@ -1356,6 +1369,8 @@ export class RBACService {
           credit_gl_account_number: newTable.credit_gl_account_number || null,
           credit_gl_account_name: newTable.credit_gl_account_name || null,
           comp_enabled: newTable.comp_enabled || false,
+          comp_orderer_name: newTable.comp_orderer_name || null,
+          comp_orderer_phone: newTable.comp_orderer_phone || null,
           assigned_waiter_ids: newTable.assigned_waiter_ids || [],
           qr_code_url: newTable.qr_code_url,
         },
@@ -1374,6 +1389,8 @@ export class RBACService {
           credit_gl_account_number: newTable.credit_gl_account_number || null,
           credit_gl_account_name: newTable.credit_gl_account_name || null,
           comp_enabled: newTable.comp_enabled || false,
+          comp_orderer_name: newTable.comp_orderer_name || null,
+          comp_orderer_phone: newTable.comp_orderer_phone || null,
           assigned_waiter_ids: newTable.assigned_waiter_ids || [],
         },
       });
@@ -1437,6 +1454,8 @@ export class RBACService {
       if (updates.credit_gl_account_number !== undefined) tableUpdates.credit_gl_account_number = updates.credit_gl_account_number ? updates.credit_gl_account_number.trim() : null;
       if (updates.credit_gl_account_name !== undefined) tableUpdates.credit_gl_account_name = updates.credit_gl_account_name ? updates.credit_gl_account_name.trim() : null;
       if (updates.comp_enabled !== undefined) tableUpdates.comp_enabled = Boolean(updates.comp_enabled);
+      if (updates.comp_orderer_name !== undefined) tableUpdates.comp_orderer_name = updates.comp_orderer_name ? updates.comp_orderer_name.trim() : null;
+      if (updates.comp_orderer_phone !== undefined) tableUpdates.comp_orderer_phone = updates.comp_orderer_phone ? updates.comp_orderer_phone.trim() : null;
       if (updates.assigned_waiter_ids !== undefined) tableUpdates.assigned_waiter_ids = updates.assigned_waiter_ids;
       if (updates.waiter_ping !== undefined) tableUpdates.waiter_ping = updates.waiter_ping;
 
@@ -1459,6 +1478,8 @@ export class RBACService {
           credit_gl_account_number: updates.credit_gl_account_number ? updates.credit_gl_account_number.trim() : null,
           credit_gl_account_name: updates.credit_gl_account_name ? updates.credit_gl_account_name.trim() : null,
           comp_enabled: Boolean(updates.comp_enabled),
+          comp_orderer_name: updates.comp_orderer_name ? updates.comp_orderer_name.trim() : null,
+          comp_orderer_phone: updates.comp_orderer_phone ? updates.comp_orderer_phone.trim() : null,
           qr_code_url: `/menu?businessId=${encodeURIComponent(businessId)}&tableId=${encodeURIComponent(tableId)}&tableNumber=${encodeURIComponent((updates.table_number || tableId).trim())}`,
         },
         update: tableUpdates,
@@ -1797,6 +1818,8 @@ export class RBACService {
           credit_gl_account_number: existingTable.credit_gl_account_number || null,
           credit_gl_account_name: existingTable.credit_gl_account_name || null,
           comp_enabled: Boolean(existingTable.comp_enabled),
+          comp_orderer_name: existingTable.comp_orderer_name || null,
+          comp_orderer_phone: existingTable.comp_orderer_phone || null,
           assigned_waiter_ids: existingTable.assigned_waiter_ids || [],
           waiter_ping: (existingTable.waiter_ping as any) || null,
           qr_code_url: existingTable.qr_code_url || '',
@@ -1847,6 +1870,8 @@ export class RBACService {
           credit_gl_account_number: existingTable.credit_gl_account_number || null,
           credit_gl_account_name: existingTable.credit_gl_account_name || null,
           comp_enabled: Boolean(existingTable.comp_enabled),
+          comp_orderer_name: existingTable.comp_orderer_name || null,
+          comp_orderer_phone: existingTable.comp_orderer_phone || null,
           assigned_waiter_ids: existingTable.assigned_waiter_ids || [],
           waiter_ping: (existingTable.waiter_ping as any) || null,
           qr_code_url: existingTable.qr_code_url || '',
@@ -2048,7 +2073,7 @@ export class RBACService {
             existingDocSnap = null;
             targetOrderId = undefined;
           }
-          if (tableSnap.pay_first_enabled) {
+          if (tableSnap.pay_first_enabled && !orderData.existing_order_id && !tableSnap.comp_enabled) {
             existingDocSnap = null;
             targetOrderId = undefined;
           } else if (existingDocSnap) {
@@ -2192,64 +2217,107 @@ export class RBACService {
       };
     });
 
-    // If an existing unsettled order is found, APPEND new items & update bill immediately!
+    // If an existing unsettled order is found, dispatch a distinct "ORDER MORE" Follow-Up Round!
     if (existingDocSnap) {
       const existingData = existingDocSnap.data();
-      const existingItems: TableOrderItem[] = (existingData.items || []).map((it: any, i: number) => ({
-        ...it,
-        item_key: it.item_key || `${it.item_id || 'dish'}_prev_${i}`,
-        station: it.station || this.determineItemStation(it),
-        status: it.status || 'RECEIVED',
-        ordered_at: it.ordered_at || existingData.created_at || now.toISOString(),
-      }));
-
-      const combinedItems = [...existingItems, ...newItems];
-      const activeCombinedItems = combinedItems.filter((item) => item.status !== 'CANCELLED');
-      const itemsMenuTotal = activeCombinedItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
       const taxConfig = await this.getTaxConfig(businessId);
-      const {
-        subtotal: newSubtotal,
-        taxAmount: calculatedTax,
-        computedTaxes,
-        totalAmount: preDiscountTotal,
-      } = this.calculateOrderTaxBreakdown(itemsMenuTotal, taxConfig);
-      const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, existingData, taxConfig);
-      const newTotalAmount = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
 
-      // When new items arrive, kitchen & bar need to prepare them, so status transitions to RECEIVED or PREPARING
-      const updatedStatus: OrderStatus = (existingData.status === 'READY' || existingData.status === 'SERVED')
-        ? 'RECEIVED'
-        : (existingData.status || 'RECEIVED');
+      // Determine root order number & calculate round number
+      const rootOrderNumber = (existingData.order_number || 'ORD-1').replace(/\s*\(Round\s*\d+\)/i, '').trim();
+      const rootOrderId = (existingData as any).parent_order_id || existingData.id;
 
-      const combinedNotes = [existingData.order_notes, orderData.order_notes].filter(Boolean).join(' • ');
-
-      let existingOrderNumber = existingData.order_number;
-      if (!existingOrderNumber) {
-        existingOrderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
+      // Check existing rounds for this table to determine next round number
+      let nextRound = 2;
+      try {
+        const siblingOrders = await prisma.tableOrder.findMany({
+          where: {
+            business_id: businessId,
+            OR: [
+              { id: rootOrderId },
+              ...(existingData.table_id ? [{ table_id: existingData.table_id }] : []),
+              ...(existingData.table_number ? [{ table_number: existingData.table_number }] : []),
+            ],
+            status: { notIn: ['CANCELLED'] },
+          },
+          select: { order_number: true },
+        });
+        let maxFoundRound = 1;
+        for (const s of siblingOrders) {
+          const m = (s.order_number || '').match(/\(Round\s*(\d+)\)/i);
+          if (m) {
+            const r = parseInt(m[1], 10);
+            if (r > maxFoundRound) maxFoundRound = r;
+          }
+        }
+        nextRound = maxFoundRound + 1;
+      } catch (err) {
+        console.warn('Round calculation note:', err);
       }
 
-      const updatedOrder: TableOrder = {
-        id: existingDocSnap.id,
-        order_number: existingOrderNumber,
+      const followUpOrderNumber = `${rootOrderNumber} (Round ${nextRound})`;
+
+      // Tag each new item with this round number
+      const roundTaggedItems = newItems.map((item, idx) => ({
+        ...item,
+        round_number: nextRound,
+        item_key: item.item_key || `${item.item_id || 'dish'}_r${nextRound}_${now.getTime()}_${idx}`,
+      }));
+
+      // Calculate round-specific financial totals
+      const activeNewItems = roundTaggedItems.filter((item) => item.status !== 'CANCELLED');
+      const roundMenuTotal = activeNewItems.reduce((sum, item) => {
+        const qty = Number(item.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
+        return sum + (Number(item.price) || 0) * billedQty;
+      }, 0);
+
+      const roundPackagingTotal = activeNewItems.reduce((sum, item) => {
+        const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
+        const fee = Number(item.packaging_charge ?? (packQty * Number(taxConfig.packaging_fee ?? 10))) || 0;
+        return sum + fee;
+      }, 0);
+      const roundPackagingQty = activeNewItems.reduce((sum, item) => {
+        return sum + Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
+      }, 0);
+
+      const {
+        subtotal: roundSubtotal,
+        taxAmount: roundCalculatedTax,
+        computedTaxes: roundComputedTaxes,
+        totalAmount: roundTotal,
+      } = this.calculateOrderTaxBreakdown(roundMenuTotal + roundPackagingTotal, taxConfig);
+
+      const isCompTable = Boolean(tableDocData?.comp_enabled);
+      const hasCompItems = roundTaggedItems.some((item) => Boolean(item.is_comp || (Number(item.comp_qty) || 0) > 0));
+      const payFirstApplies = Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only) && !isCompTable && !hasCompItems;
+
+      const followUpOrderId = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
+
+      const followUpOrder: TableOrder = {
+        id: followUpOrderId,
+        order_number: followUpOrderNumber,
         business_id: businessId,
         table_id: existingData.table_id || orderData.table_id || '',
         table_number: existingData.table_number || orderData.table_number || 'Table',
         floor: existingData.floor ?? orderData.floor ?? null,
         building: existingData.building ?? orderData.building ?? null,
-        items: combinedItems,
-        subtotal: newSubtotal,
-        tax_amount: calculatedTax,
-        taxes: computedTaxes,
-        promo_code: existingData.promo_code || null,
-        promo_discount: promoDiscount,
-        total_amount: newTotalAmount,
+        items: roundTaggedItems,
+        subtotal: roundSubtotal,
+        tax_amount: roundCalculatedTax,
+        taxes: roundComputedTaxes,
+        promo_code: null,
+        promo_discount: 0,
+        packaging_charge: roundPackagingTotal,
+        packaging_qty: roundPackagingQty,
+        total_amount: roundTotal,
         currency: existingData.currency || orderData.currency || 'Rs.',
-        customer_name: existingData.customer_name || orderData.customer_name || tableDocData?.credit_customer_name || 'Guest',
-        customer_phone: existingData.customer_phone || orderData.customer_phone || tableDocData?.credit_customer_phone || '',
-        order_notes: combinedNotes,
-        status: updatedStatus,
-        pay_first: existingData.pay_first ?? Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only),
-        payment_status: existingData.payment_status || ((tableDocData?.pay_first_enabled || tableDocData?.credit_only) ? 'UNPAID' : null),
+        customer_name: orderData.customer_name || existingData.customer_name || tableDocData?.credit_customer_name || 'Guest',
+        customer_phone: orderData.customer_phone || existingData.customer_phone || tableDocData?.credit_customer_phone || '',
+        order_notes: orderData.order_notes || '',
+        status: payFirstApplies ? 'AWAITING_PAYMENT' : 'RECEIVED',
+        pay_first: payFirstApplies ? (existingData.pay_first ?? true) : false,
+        payment_status: payFirstApplies ? 'UNPAID' : null,
         credit_only: existingData.credit_only ?? Boolean(tableDocData?.credit_only),
         credit_pin_verified: existingData.credit_pin_verified ?? false,
         pin_verified: existingData.pin_verified ?? false,
@@ -2259,98 +2327,111 @@ export class RBACService {
         bill_requested: false,
         ready_at: null,
         served_at: null,
-        created_at: existingData.created_at ? new Date(existingData.created_at) : now,
+        session_id: existingData.session_id || rootOrderId,
+        source: 'QR_ORDER_MORE',
+        is_follow_up: true,
+        round_number: nextRound,
+        parent_order_id: rootOrderId,
+        created_at: now,
         updated_at: now,
       };
 
       try {
-        await prisma.tableOrder.upsert({
-          where: { id: updatedOrder.id },
-          create: {
-            id: updatedOrder.id,
+        await prisma.tableOrder.create({
+          data: {
+            id: followUpOrder.id,
             business_id: businessId,
-            table_id: updatedOrder.table_id || null,
-            table_number: updatedOrder.table_number,
-            order_number: updatedOrder.order_number,
-            floor: updatedOrder.floor ?? null,
-            building: updatedOrder.building ?? null,
-            items: updatedOrder.items as any,
-            subtotal: updatedOrder.subtotal,
-            tax_amount: updatedOrder.tax_amount || 0,
-            total_amount: updatedOrder.total_amount,
-            currency: updatedOrder.currency || 'Rs.',
-            customer_name: updatedOrder.customer_name || 'Guest',
-            customer_phone: updatedOrder.customer_phone || '',
-            order_notes: updatedOrder.order_notes || '',
-            status: updatedOrder.status,
-            pay_first: updatedOrder.pay_first || false,
-            session_id: updatedOrder.session_id || null,
-            taxes: (updatedOrder.taxes as any) || [],
-            promo_code: updatedOrder.promo_code || null,
-            promo_discount: updatedOrder.promo_discount || 0,
-          },
-          update: {
-            items: updatedOrder.items as any,
-            subtotal: updatedOrder.subtotal,
-            tax_amount: updatedOrder.tax_amount || 0,
-            total_amount: updatedOrder.total_amount,
-            status: updatedOrder.status,
-            pay_first: updatedOrder.pay_first || false,
-            credit_only: updatedOrder.credit_only || false,
-            credit_gl_account_id: updatedOrder.credit_gl_account_id || null,
-            credit_gl_account_number: updatedOrder.credit_gl_account_number || null,
-            credit_gl_account_name: updatedOrder.credit_gl_account_name || null,
-            ready_at: null,
-            served_at: null,
-            bill_requested: false,
-            updated_at: now,
-            order_notes: updatedOrder.order_notes || '',
-            taxes: (updatedOrder.taxes as any) || [],
-            promo_code: updatedOrder.promo_code || null,
-            promo_discount: updatedOrder.promo_discount || 0,
+            table_id: followUpOrder.table_id || null,
+            table_number: followUpOrder.table_number,
+            order_number: followUpOrder.order_number,
+            floor: followUpOrder.floor ?? null,
+            building: followUpOrder.building ?? null,
+            items: followUpOrder.items as any,
+            subtotal: followUpOrder.subtotal,
+            tax_amount: followUpOrder.tax_amount || 0,
+            total_amount: followUpOrder.total_amount,
+            currency: followUpOrder.currency || 'Rs.',
+            customer_name: followUpOrder.customer_name || 'Guest',
+            customer_phone: followUpOrder.customer_phone || '',
+            order_notes: followUpOrder.order_notes || '',
+            status: followUpOrder.status,
+            pay_first: followUpOrder.pay_first || false,
+            payment_status: followUpOrder.payment_status || null,
+            credit_only: followUpOrder.credit_only || false,
+            credit_pin_verified: false,
+            credit_gl_account_id: followUpOrder.credit_gl_account_id || null,
+            credit_gl_account_number: followUpOrder.credit_gl_account_number || null,
+            credit_gl_account_name: followUpOrder.credit_gl_account_name || null,
+            session_id: followUpOrder.session_id || null,
+            source: 'QR_ORDER_MORE',
+            taxes: (followUpOrder.taxes as any) || [],
+            packaging_charge: followUpOrder.packaging_charge || 0,
+            packaging_qty: followUpOrder.packaging_qty || 0,
           },
         });
       } catch (e: any) {
-        console.warn('Prisma createTableOrder update error:', e.message);
+        console.warn('Prisma createTableOrder followUp insert error:', e.message);
       }
 
       // Keep table occupied
-      if (updatedOrder.table_id) {
+      if (followUpOrder.table_id) {
         try {
           await prisma.restaurantTable.updateMany({
-            where: { id: updatedOrder.table_id },
+            where: { id: followUpOrder.table_id },
             data: {
               status: 'OCCUPIED',
-              current_session_id: updatedOrder.session_id || updatedOrder.id,
+              current_session_id: followUpOrder.session_id || rootOrderId,
             },
           });
         } catch (e) {}
       }
 
       auditService.log({
-        userId: `order-${updatedOrder.customer_name}`,
+        userId: `order-${followUpOrder.customer_name}`,
         email: 'guest@namasteqr.com',
-        eventType: 'DIGITAL_ORDER_ITEMS_APPENDED',
+        eventType: 'DIGITAL_ORDER_PLACED',
         status: 'ONLINE',
       });
 
-      realtimeEmitter.orderUpdated(businessId, updatedOrder);
-      return updatedOrder;
+      realtimeEmitter.orderCreated(businessId, followUpOrder);
+      return followUpOrder;
     }
 
     // Otherwise, create a brand new Table Order
     const orderId = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-    const itemsMenuTotal = newItems.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+    const itemsMenuTotal = newItems.reduce((sum, item) => {
+      const qty = Number(item.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+      const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
+      return sum + (Number(item.price) || 0) * billedQty;
+    }, 0);
+
+    const isAllComp = newItems.length > 0 && newItems.every((item) => {
+      const qty = Number(item.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+      return Boolean(item.is_comp || compQty >= qty);
+    });
 
     const taxConfig = await this.getTaxConfig(businessId);
+    const packagingTotal = newItems.reduce((sum, item) => {
+      const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
+      const fee = Number(item.packaging_charge ?? (packQty * Number(taxConfig.packaging_fee ?? 10))) || 0;
+      return sum + fee;
+    }, 0);
+    const totalPackagingQty = newItems.reduce((sum, item) => {
+      return sum + Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
+    }, 0);
     const {
       subtotal,
       taxAmount,
       computedTaxes,
       totalAmount,
-    } = this.calculateOrderTaxBreakdown(itemsMenuTotal, taxConfig);
+    } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, taxConfig);
 
     const orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
+    const isCompTable = Boolean(tableDocData?.comp_enabled);
+    const hasCompItems = newItems.some((item) => Boolean(item.is_comp || (Number(item.comp_qty) || 0) > 0));
+    const requiresPayFirst = Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only) && !isAllComp && !isCompTable && !hasCompItems;
 
     const order: TableOrder = {
       id: orderId,
@@ -2364,14 +2445,16 @@ export class RBACService {
       subtotal,
       tax_amount: taxAmount,
       taxes: computedTaxes,
+      packaging_charge: packagingTotal,
+      packaging_qty: totalPackagingQty,
       total_amount: totalAmount,
       currency: orderData.currency || 'Rs.',
       customer_name: orderData.customer_name || tableDocData?.credit_customer_name || 'Guest',
       customer_phone: orderData.customer_phone || tableDocData?.credit_customer_phone || '',
       order_notes: orderData.order_notes || '',
-      status: (tableDocData?.pay_first_enabled || tableDocData?.credit_only) ? 'AWAITING_PAYMENT' : 'RECEIVED',
-      pay_first: Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only),
-      payment_status: (tableDocData?.pay_first_enabled || tableDocData?.credit_only) ? 'UNPAID' : null,
+      status: requiresPayFirst ? 'AWAITING_PAYMENT' : 'RECEIVED',
+      pay_first: requiresPayFirst,
+      payment_status: requiresPayFirst ? 'UNPAID' : null,
       credit_only: Boolean(tableDocData?.credit_only),
       credit_pin_verified: false,
       pin_verified: false,
@@ -2443,12 +2526,16 @@ export class RBACService {
           credit_gl_account_name: order.credit_gl_account_name || null,
           session_id: order.session_id || null,
           taxes: (order.taxes as any) || [],
+          packaging_charge: order.packaging_charge || 0,
+          packaging_qty: order.packaging_qty || 0,
         },
         update: {
           items: order.items as any,
           subtotal: order.subtotal,
           tax_amount: order.tax_amount || 0,
           total_amount: order.total_amount,
+          packaging_charge: order.packaging_charge || 0,
+          packaging_qty: order.packaging_qty || 0,
           status: order.status,
           credit_only: order.credit_only || false,
           credit_gl_account_id: order.credit_gl_account_id || null,
@@ -2530,8 +2617,15 @@ export class RBACService {
             : (effectiveStatus === 'COMPLETED' || d.payment_status === 'PAID' || Boolean(d.sale_id))
         );
 
+        const roundMatch = (d.order_number || '').match(/\(Round\s*(\d+)\)/i);
+        const inferredRound = roundMatch ? parseInt(roundMatch[1], 10) : 1;
+        const isFollowUp = inferredRound > 1 || Boolean(d.source?.includes('ORDER_MORE'));
+
         return {
           id: d.id,
+          is_follow_up: isFollowUp,
+          round_number: inferredRound,
+          parent_order_id: (d as any).parent_order_id || null,
           business_id: d.business_id,
           table_id: d.table_id || '',
           table_number: d.table_number,
@@ -2775,12 +2869,20 @@ export class RBACService {
     const activeItems = items.filter((it) => it.status !== 'CANCELLED');
     const itemsMenuTotal = activeItems.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
     const taxConfig = await this.getTaxConfig(businessId);
+    const packagingTotal = activeItems.reduce((sum, item) => {
+      const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
+      const fee = Number(item.packaging_charge ?? (packQty * Number(taxConfig.packaging_fee ?? 10))) || 0;
+      return sum + fee;
+    }, 0);
+    const totalPackagingQty = activeItems.reduce((sum, item) => {
+      return sum + Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
+    }, 0);
     const {
       subtotal: newSubtotal,
       taxAmount: newTax,
       computedTaxes,
       totalAmount: preDiscountTotal,
-    } = this.calculateOrderTaxBreakdown(itemsMenuTotal, taxConfig);
+    } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, taxConfig);
     const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, currentData, taxConfig);
     const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
 
@@ -2815,6 +2917,8 @@ export class RBACService {
       tax_amount: newTax,
       taxes: computedTaxes,
       promo_discount: promoDiscount,
+      packaging_charge: packagingTotal,
+      packaging_qty: totalPackagingQty,
       total_amount: newTotal,
       updated_at: now.toISOString(),
     };
@@ -2833,6 +2937,8 @@ export class RBACService {
           status: nextOrderStatus,
           subtotal: newSubtotal,
           tax_amount: newTax,
+          packaging_charge: packagingTotal,
+          packaging_qty: totalPackagingQty,
           total_amount: newTotal,
           ...(updates.ready_at ? { ready_at: new Date(updates.ready_at) } : {}),
           ...(updates.served_at ? { served_at: new Date(updates.served_at) } : {}),
@@ -3134,6 +3240,7 @@ export class RBACService {
           tax_inclusive: isInclusive,
           currency: cfg.currency || 'Rs.',
           currency_symbol: cfg.currency_symbol || 'Rs.',
+          packaging_fee: cfg.packaging_fee ? Number(cfg.packaging_fee) : 10,
           rates: (cfg.rates as any[]) || [
             {
               id: 'vat',
@@ -3182,6 +3289,7 @@ export class RBACService {
       tax_inclusive: false,
       currency: 'Rs.',
       currency_symbol: 'Rs.',
+      packaging_fee: 10,
       rates: [
         {
           id: 'vat',
@@ -3249,6 +3357,7 @@ export class RBACService {
           tax_inclusive: updated.tax_inclusive ?? false,
           currency: updated.currency || 'Rs.',
           currency_symbol: updated.currency_symbol || 'Rs.',
+          packaging_fee: Number(updated.packaging_fee) || 10,
           rates: updated.rates as any,
           invoice_prefix: updated.invoice_prefix || 'INV-',
           receipt_footer_note: updated.receipt_footer_note || null,
@@ -3270,6 +3379,7 @@ export class RBACService {
           tax_inclusive: updated.tax_inclusive ?? false,
           currency: updated.currency || 'Rs.',
           currency_symbol: updated.currency_symbol || 'Rs.',
+          packaging_fee: Number(updated.packaging_fee) || 10,
           rates: updated.rates as any,
           invoice_prefix: updated.invoice_prefix || 'INV-',
           receipt_footer_note: updated.receipt_footer_note || null,
@@ -3305,6 +3415,13 @@ export class RBACService {
 
       for (const od of activePrismaOrders) {
         const activeItems = ((od.items as any[]) || []).filter((it: any) => it.status !== 'CANCELLED');
+        const packagingTotal = activeItems.reduce((sum: number, it: any) => {
+          const packQty = Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
+          return sum + (Number(it.packaging_charge) || (packQty * Number(updated.packaging_fee ?? 10)));
+        }, 0);
+        const totalPackagingQty = activeItems.reduce((sum: number, it: any) => {
+          return sum + Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
+        }, 0);
         const itemsMenuTotal = activeItems.reduce(
           (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
           0
@@ -3314,7 +3431,7 @@ export class RBACService {
           taxAmount: newTax,
           computedTaxes,
           totalAmount: preDiscountTotal,
-        } = this.calculateOrderTaxBreakdown(itemsMenuTotal, updated);
+        } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, updated);
         const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, od as any, updated);
         const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
 
@@ -3325,6 +3442,8 @@ export class RBACService {
             tax_amount: newTax,
             taxes: computedTaxes as any,
             promo_discount: promoDiscount,
+        packaging_charge: packagingTotal,
+        packaging_qty: totalPackagingQty,
             total_amount: newTotal,
           },
         }).catch(() => {});
@@ -4116,26 +4235,41 @@ export class RBACService {
       };
     }
 
-    // Server-side validation for COMPLEMENTARY items: Table must have comp_enabled
-    const rawCompItems = (saleData.items || []).filter((i: any) => (i.comp_qty ?? 0) > 0);
+    // Server-side validation for COMPLEMENTARY items: Table must have comp_enabled or be linked to an authorized table order
+    const rawCompItems = (saleData.items || []).filter((i: any) => (i.comp_qty ?? 0) > 0 || i.is_comp);
     if (rawCompItems.length > 0) {
-      if (!saleData.table_id) {
-        const compErr: any = new Error('Complementary sales mode requires a valid table with complementary mode enabled.');
-        compErr.statusCode = 400;
-        throw compErr;
+      let isAuthorizedByOrder = false;
+      if (saleData.order_id) {
+        try {
+          const linkedOrder = await prisma.tableOrder.findUnique({
+            where: { id: saleData.order_id },
+            select: { id: true },
+          });
+          if (linkedOrder) {
+            isAuthorizedByOrder = true;
+          }
+        } catch (e) {}
       }
-      try {
-        const tableSnap = await prisma.restaurantTable.findUnique({
-          where: { id: saleData.table_id },
-          select: { comp_enabled: true }
-        });
-        if (!tableSnap || !tableSnap.comp_enabled) {
-          const compErr: any = new Error('Complementary sales mode is disabled on this table. Please enable it in Table QR settings before comping items.');
+
+      if (!isAuthorizedByOrder) {
+        if (!saleData.table_id) {
+          const compErr: any = new Error('Complementary sales mode requires a valid table with complementary mode enabled.');
           compErr.statusCode = 400;
           throw compErr;
         }
-      } catch (te: any) {
-        if (te.statusCode === 400) throw te;
+        try {
+          const tableSnap = await prisma.restaurantTable.findUnique({
+            where: { id: saleData.table_id },
+            select: { comp_enabled: true }
+          });
+          if (!tableSnap || !tableSnap.comp_enabled) {
+            const compErr: any = new Error('Complementary sales mode is disabled on this table. Please enable it in Table QR settings before comping items.');
+            compErr.statusCode = 400;
+            throw compErr;
+          }
+        } catch (te: any) {
+          if (te.statusCode === 400) throw te;
+        }
       }
     }
 
@@ -4166,6 +4300,37 @@ export class RBACService {
       ? `order-pos-${timestamp}-${shortRandom}`
       : (saleData.order_id || null);
 
+    const cleanSaleItems = (saleData.items || []).filter((it: any) => it && (it.name || '').trim().length > 0);
+    const calculatedMenuSubtotal = cleanSaleItems.reduce((sum: number, it: any) => {
+      const qty = Number(it.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
+      const billedQty = it.is_comp ? 0 : Math.max(0, qty - compQty);
+      return sum + billedQty * (Number(it.unit_price ?? it.price) || 0);
+    }, 0);
+    const packagingChargeTotal = Number(saleData.packaging_charge) || cleanSaleItems.reduce((sum: number, it: any) => {
+      const packQty = Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
+      return sum + (Number(it.packaging_charge) || (packQty * Number(taxConfig.packaging_fee ?? 10)));
+    }, 0);
+    const packagingQtyTotal = Number(saleData.packaging_qty) || cleanSaleItems.reduce((sum: number, it: any) => {
+      return sum + Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
+    }, 0);
+    const effectiveSubtotal = (Number(saleData.subtotal) <= 0 && calculatedMenuSubtotal > 0)
+      ? calculatedMenuSubtotal
+      : (Number(saleData.subtotal) || 0);
+
+    let effectiveTaxes = saleData.taxes || [];
+    let effectiveTotalTax = Number(saleData.total_tax) || 0;
+    let effectiveTotalAmount = Number(saleData.total_amount) || 0;
+
+    if (effectiveTotalAmount <= 0 && (calculatedMenuSubtotal > 0 || packagingChargeTotal > 0)) {
+      const { taxAmount: calcTax, computedTaxes: calcTaxes, totalAmount: calcGrand } =
+        this.calculateOrderTaxBreakdown(calculatedMenuSubtotal + packagingChargeTotal, taxConfig);
+      const disc = Number(saleData.discount_amount || saleData.promo_discount || 0);
+      effectiveTotalTax = calcTax;
+      effectiveTaxes = calcTaxes as any;
+      effectiveTotalAmount = Math.max(0, calcGrand - disc);
+    }
+
     const newSale: any = {
       id,
       invoice_number: invoiceNumber || null,
@@ -4184,15 +4349,17 @@ export class RBACService {
       customer_pan: saleData.customer_pan || (saleData.payment_method === 'CREDIT' ? ((resolvedCreditCustomer as any).pan_number || (resolvedCreditCustomer as any).pan || '') : '') || null,
       sale_type: saleData.sale_type || 'DINE_IN',
       items: (saleData.items || []).filter((it: any) => it && (it.name || '').trim().length > 0),
-      subtotal: Number(saleData.subtotal) || 0,
+      subtotal: effectiveSubtotal,
       discount_percent: Number(saleData.discount_percent) || 0,
       discount_amount: Number(saleData.discount_amount) || 0,
       promo_code: saleData.promo_code || null,
       promo_discount: Number(saleData.promo_discount) || 0,
-      taxes: saleData.taxes || [],
-      total_tax: Number(saleData.total_tax) || 0,
+      packaging_charge: packagingChargeTotal,
+      packaging_qty: packagingQtyTotal,
+      taxes: effectiveTaxes,
+      total_tax: effectiveTotalTax,
       service_charge: Number(saleData.service_charge) || 0,
-      total_amount: Number(saleData.total_amount) || 0,
+      total_amount: effectiveTotalAmount,
       currency: saleData.currency || taxConfig.currency || 'Rs.',
       payment_method: saleData.payment_method || 'CASH',
       credit_gl_account_id: (saleData.payment_method === 'CREDIT' || saleData.payment_method === 'DEDUCT_FROM_DEPOSIT') ? saleData.credit_gl_account_id : null,
@@ -4231,6 +4398,8 @@ export class RBACService {
           promo_code: newSale.promo_code || null,
           promo_discount: newSale.promo_discount,
           taxes: newSale.taxes as any,
+          packaging_charge: newSale.packaging_charge || 0,
+          packaging_qty: newSale.packaging_qty || 0,
           total_tax: newSale.total_tax,
           service_charge: newSale.service_charge,
           total_amount: newSale.total_amount,
@@ -4250,6 +4419,8 @@ export class RBACService {
           invoice_number: invoiceNumber || id,
           order_number: orderNumber || null,
           total_amount: newSale.total_amount,
+          packaging_charge: newSale.packaging_charge || 0,
+          packaging_qty: newSale.packaging_qty || 0,
           payment_status: newSale.payment_status,
         },
       });
@@ -4259,7 +4430,7 @@ export class RBACService {
 
     // Create comp record if any items are comped
     try {
-      const compItems = (saleData.items || []).filter((i: any) => (i.comp_qty ?? 0) > 0);
+      const compItems = (saleData.items || []).filter((i: any) => i.is_comp || (i.comp_qty ?? 0) > 0);
       if (compItems.length > 0) {
         let settlingStaffName = user?.name;
         if (!settlingStaffName && user?.acting_as?.id) {
@@ -4278,9 +4449,47 @@ export class RBACService {
           settlingStaffName = 'Unknown Staff';
         }
 
+        let ordererName: string | null = (saleData as any).orderer_name || null;
+        let ordererPhone: string | null = (saleData as any).orderer_phone || null;
+        if ((!ordererName || !ordererPhone) && (saleData.table_id || saleData.table_number)) {
+          try {
+            const tableSnap = await prisma.restaurantTable.findFirst({
+              where: {
+                business_id: businessId,
+                OR: [
+                  ...(saleData.table_id ? [{ id: saleData.table_id }] : []),
+                  ...(saleData.table_number ? [{ table_number: saleData.table_number }] : []),
+                ],
+              },
+              select: { comp_enabled: true, comp_orderer_name: true, comp_orderer_phone: true },
+            });
+            if (tableSnap && tableSnap.comp_enabled) {
+              if (!ordererName) ordererName = tableSnap.comp_orderer_name || null;
+              if (!ordererPhone) ordererPhone = tableSnap.comp_orderer_phone || null;
+            }
+          } catch (e) {}
+        }
+
+        if ((!ordererName || !ordererPhone) && saleData.order_id) {
+          try {
+            const orderSnap = await prisma.tableOrder.findUnique({
+              where: { id: saleData.order_id },
+              select: { customer_name: true, customer_phone: true },
+            });
+            if (orderSnap) {
+              if (!ordererName && orderSnap.customer_name && orderSnap.customer_name !== 'Guest' && orderSnap.customer_name !== 'Walk-in Guest') {
+                ordererName = orderSnap.customer_name;
+              }
+              if (!ordererPhone && orderSnap.customer_phone) {
+                ordererPhone = orderSnap.customer_phone;
+              }
+            }
+          } catch (e) {}
+        }
+
         const compRecordItems = compItems.map((i: any) => {
           const qty = Number(i.quantity) || 1;
-          const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || 0));
+          const compQty = i.is_comp ? qty : Math.max(0, Math.min(qty, Number(i.comp_qty) || 0));
           const unitPrice = Number(i.unit_price ?? i.price ?? 0);
           return {
             item_id: i.item_id || i.id || '',
@@ -4301,6 +4510,8 @@ export class RBACService {
             table_number: saleData.table_number || 'N/A',
             staff_id: user?.acting_as?.id || user?.id || null,
             staff_name: settlingStaffName,
+            orderer_name: ordererName,
+            orderer_phone: ordererPhone,
             reason: (saleData as any).comp_reason || null,
             items: compRecordItems,
             total_comp_value: totalCompValue,
@@ -4388,6 +4599,8 @@ export class RBACService {
         sale_id: newSale.id,
         source: 'POS_MANUAL',
         taxes: newSale.taxes || null,
+        packaging_charge: newSale.packaging_charge || 0,
+        packaging_qty: newSale.packaging_qty || 0,
         created_at: now,
         updated_at: now,
       };
@@ -4441,14 +4654,24 @@ export class RBACService {
         const orderWhere: any = {
           business_id: businessId,
         };
-        if (saleData.order_id) {
+        let targetTableIdForSale = saleData.table_id;
+        let targetTableNumForSale = saleData.table_number;
+        if (!targetTableIdForSale && saleData.order_id) {
+          try {
+            const ordCheck = await prisma.tableOrder.findUnique({ where: { id: saleData.order_id }, select: { table_id: true, table_number: true } });
+            if (ordCheck?.table_id) targetTableIdForSale = ordCheck.table_id;
+            if (ordCheck?.table_number) targetTableNumForSale = ordCheck.table_number;
+          } catch {}
+        }
+
+        if (targetTableIdForSale) {
+          orderWhere.table_id = targetTableIdForSale;
+          orderWhere.status = { notIn: ['COMPLETED', 'CANCELLED'] };
+        } else if (targetTableNumForSale) {
+          orderWhere.table_number = targetTableNumForSale;
+          orderWhere.status = { notIn: ['COMPLETED', 'CANCELLED'] };
+        } else if (saleData.order_id) {
           orderWhere.id = saleData.order_id;
-        } else if (saleData.table_id) {
-          orderWhere.table_id = saleData.table_id;
-          orderWhere.status = { notIn: ['COMPLETED', 'CANCELLED'] };
-        } else if (saleData.table_number) {
-          orderWhere.table_number = saleData.table_number;
-          orderWhere.status = { notIn: ['COMPLETED', 'CANCELLED'] };
         }
 
         matchingOrders = await prisma.tableOrder.findMany({
@@ -5038,12 +5261,19 @@ export class RBACService {
       0
     );
     const taxConfig = await this.getTaxConfig(businessId);
+    const packagingTotal = activeItems.reduce((sum: number, it: any) => {
+      const packQty = Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
+      return sum + (Number(it.packaging_charge) || (packQty * Number(taxConfig.packaging_fee ?? 10)));
+    }, 0);
+    const totalPackagingQty = activeItems.reduce((sum, it: any) => {
+      return sum + Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
+    }, 0);
     const {
       subtotal: calcSubtotal,
       taxAmount: calcTax,
       computedTaxes,
       totalAmount: preDiscountTotal,
-    } = this.calculateOrderTaxBreakdown(itemsMenuTotal, taxConfig);
+    } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, taxConfig);
     const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, order, taxConfig);
     const finalTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
     const serviceCharge = Math.round(
@@ -5091,6 +5321,8 @@ export class RBACService {
       sale_type: 'DINE_IN',
       items: activeItems,
       subtotal: calcSubtotal,
+      packaging_charge: packagingTotal,
+      packaging_qty: totalPackagingQty,
       discount_percent: 0,
       discount_amount: promoDiscount,
       promo_code: order.promo_code,
@@ -5160,6 +5392,8 @@ export class RBACService {
           tax_amount: calcTax,
           taxes: computedTaxes as any,
           promo_discount: promoDiscount,
+        packaging_charge: packagingTotal,
+        packaging_qty: totalPackagingQty,
           total_amount: finalTotal,
           payment_status: 'PAID',
           payment_confirmed_at: new Date(),
@@ -5173,6 +5407,8 @@ export class RBACService {
           tax_amount: calcTax,
           taxes: computedTaxes as any,
           promo_discount: promoDiscount,
+        packaging_charge: packagingTotal,
+        packaging_qty: totalPackagingQty,
           total_amount: finalTotal,
           payment_status: 'PAID',
           payment_method: paymentMethod,
@@ -5348,8 +5584,109 @@ export class RBACService {
     };
   }
 
-}
+  /**
+   * Set or update universal complementary password (Owner/Manager only)
+   */
+  public async updateBusinessCompPassword(
+    businessId: string,
+    plaintext: string,
+    user: any
+  ): Promise<{ success: boolean; comp_password: string }> {
+    const access = this.evaluateAccess(user, 'business_details', 'write');
+    if (!access.granted) {
+      throw new Error(access.reason || 'Permission denied: Cannot update complementary password');
+    }
 
+    if (!plaintext || typeof plaintext !== 'string' || plaintext.trim().length < 3) {
+      throw new Error('Complementary password must be at least 3 characters long');
+    }
+
+    const cleanPass = plaintext.trim();
+    const hash = await bcrypt.hash(cleanPass, 10);
+
+    await db.ensureBusiness(businessId);
+    await prisma.business.update({
+      where: { id: businessId },
+      data: {
+        comp_password: cleanPass,
+        comp_password_hash: hash,
+      },
+    });
+
+    auditService.log({
+      userId: user.id,
+      email: user.email,
+      businessId,
+      eventType: 'COMP_PASSWORD_UPDATED',
+      status: 'ONLINE',
+    });
+
+    return { success: true, comp_password: cleanPass };
+  }
+
+  /**
+   * Get universal complementary password (Owner/Manager only)
+   */
+  public async getBusinessCompPassword(
+    businessId: string,
+    user: any
+  ): Promise<{ comp_password: string | null; has_comp_password: boolean }> {
+    const access = this.evaluateAccess(user, 'business_details', 'read');
+    if (!access.granted) {
+      throw new Error(access.reason || 'Permission denied: Cannot view complementary password');
+    }
+
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { comp_password: true, comp_password_hash: true },
+    });
+
+    return {
+      comp_password: biz?.comp_password || null,
+      has_comp_password: Boolean(biz?.comp_password || biz?.comp_password_hash),
+    };
+  }
+
+  /**
+   * Verify universal complementary password (Public / Table QR page)
+   */
+  public async verifyCompPassword(
+    businessId: string,
+    plaintext: string
+  ): Promise<{ valid: boolean; message?: string }> {
+    if (!plaintext || typeof plaintext !== 'string') {
+      return { valid: false, message: 'Password is required' };
+    }
+
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { comp_password: true, comp_password_hash: true },
+    });
+
+    if (!biz || (!biz.comp_password && !biz.comp_password_hash)) {
+      return {
+        valid: false,
+        message: 'Complementary ordering password has not been configured by venue management yet.',
+      };
+    }
+
+    const clean = plaintext.trim();
+    let isValid = false;
+
+    if (biz.comp_password_hash) {
+      isValid = await bcrypt.compare(clean, biz.comp_password_hash);
+    }
+    if (!isValid && biz.comp_password) {
+      isValid = (clean === biz.comp_password.trim());
+    }
+
+    if (isValid) {
+      return { valid: true };
+    } else {
+      return { valid: false, message: 'Incorrect complementary password. Please check and try again.' };
+    }
+  }
+}
 
 export const rbacService = new RBACService();
 

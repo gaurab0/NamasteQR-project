@@ -35,7 +35,6 @@ import {
   ShieldCheck,
   Maximize2,
   Minimize2,
-  Trash2,
   Database,
   Receipt,
   Banknote,
@@ -43,7 +42,8 @@ import {
   CreditCard,
   Hand,
   Copy,
-  Printer
+  Printer,
+  Package
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
@@ -345,7 +345,14 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
           if (effectiveKdsPrintMode !== 'DISPLAY_ONLY') {
             const createdAtTime = formattedOrder.created_at ? new Date(formattedOrder.created_at).getTime() : 0;
             if (Date.now() - createdAtTime < 15000) {
-              dispatchPrint('KOT', formattedOrder);
+              const hasKitchenItems = (formattedOrder.items || []).some((it: any) => it.station !== 'BAR');
+              const hasBarItems = (formattedOrder.items || []).some((it: any) => it.station === 'BAR' || it.station === 'BOTH');
+              if (hasKitchenItems) {
+                dispatchPrint('KOT', formattedOrder);
+              }
+              if (hasBarItems) {
+                dispatchPrint('BAR', formattedOrder);
+              }
             }
           }
         }
@@ -653,23 +660,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
       playChime();
     } catch (err: any) {
       alert(`Failed to batch update items: ${err.message}`);
-    }
-  };
-
-  const [isPurging, setIsPurging] = useState<boolean>(false);
-  const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
-
-  const handlePurgeCompletedOrders = async () => {
-    try {
-      setIsPurging(true);
-      const res = await rbacService.purgeCompletedOrdersApi(businessId);
-      setCleanupMessage(`Removed ${res.deletedCount} completed tickets from database.`);
-      setTimeout(() => setCleanupMessage(null), 4000);
-      loadFallbackOrders();
-    } catch (err: any) {
-      console.warn('Purge completed orders note:', err.message);
-    } finally {
-      setIsPurging(false);
     }
   };
 
@@ -1430,6 +1420,14 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                 const elapsed = getElapsedMinutes(req.created_at);
                 const isLate = elapsed >= 10;
                 const isProcessing = actionInProgress === req.id || (targetOrder && actionInProgress === targetOrder.id);
+                const activeTableItems = (targetOrder?.items || []).filter((i: any) => i.status !== 'CANCELLED');
+                const tableItemsMenuSubtotal = activeTableItems.reduce((sum: number, it: any) => {
+                  const q = Number(it.quantity) || 1;
+                  const cq = Math.max(0, Math.min(q, Number(it.comp_qty) || (it.is_comp ? q : 0)));
+                  const bq = it.is_comp ? 0 : Math.max(0, q - cq);
+                  return sum + bq * (Number(it.price) || 0);
+                }, 0);
+                const displayTotalPayable = targetOrder ? Number(targetOrder.total_amount ?? req.total_amount ?? 0) : Number(req.total_amount ?? 0);
 
                 return (
                   <div
@@ -1449,37 +1447,19 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                           : 'bg-amber-50/80 border-amber-200 text-amber-950'
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className={`text-base font-black ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
-                              {formatKdsTableName(req.table_number)}
-                            </span>
-                            {(req.floor || req.building || targetOrder?.floor || targetOrder?.building) && (
-                              <span
-                                className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
-                                  isFullScreenMode
-                                    ? 'text-amber-300 bg-amber-900/40 border-amber-700'
-                                    : 'text-amber-800 bg-amber-100 border-amber-300'
-                                }`}
-                              >
-                                {[req.floor || targetOrder?.floor, req.building || targetOrder?.building].filter(Boolean).join(' • ')}
-                              </span>
-                            )}
-                          </div>
-                          <div className={`text-xs mt-0.5 flex items-center gap-1.5 ${isFullScreenMode ? 'text-zinc-300' : 'text-zinc-600'}`}>
-                            <span className={`font-semibold ${isFullScreenMode ? 'text-zinc-200' : 'text-zinc-800'}`}>
+                      <div className="space-y-2">
+                        {/* Row 1: Guest / Ref on Left | Timer on Right */}
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className={`text-xs flex items-center gap-1.5 min-w-0 truncate ${isFullScreenMode ? 'text-zinc-300' : 'text-zinc-600'}`}>
+                            <span className={`font-semibold truncate ${isFullScreenMode ? 'text-zinc-200' : 'text-zinc-800'}`}>
                               {req.customer_name || targetOrder?.customer_name || 'Dine-In Guest'}
                             </span>
                             <span className="text-zinc-400">•</span>
-                            <span className="font-mono text-[11px] text-zinc-400">Ref: {targetOrder?.order_number || (req as any).order_number || req.id.slice(0, 8)}</span>
+                            <span className="font-mono text-[11px] text-zinc-400 shrink-0">Ref: {targetOrder?.order_number || (req as any).order_number || req.id.slice(0, 8)}</span>
                           </div>
-                        </div>
 
-                        {/* Timer & Bill Status Badge */}
-                        <div className="text-right space-y-1">
                           <div
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold font-mono ${
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold font-mono shrink-0 whitespace-nowrap ${
                               isLate
                                 ? 'bg-rose-950 text-rose-300 border border-rose-800 animate-pulse'
                                 : isFullScreenMode
@@ -1487,45 +1467,60 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                                 : 'bg-amber-100 text-amber-900 border border-amber-300'
                             }`}
                           >
-                            <Clock className="w-3.5 h-3.5 text-amber-500" />
+                            <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                             <span>{elapsed}m ago</span>
                           </div>
+                        </div>
 
-                          <div className="text-[11px] font-extrabold uppercase">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-zinc-950 shadow-xs font-black">
-                              <Receipt className="w-3 h-3" />
-                              <span>Bill Requested</span>
-                            </span>
+                        {/* Row 2: Full-Width Table Name */}
+                        <div className="min-w-0">
+                          <h3 className={`text-base sm:text-lg font-black tracking-tight leading-snug break-words ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
+                            {formatKdsTableName(req.table_number)}
+                          </h3>
+                        </div>
+
+                        {/* Row 3: Dedicated Subtitle for Floor & Building */}
+                        {(req.floor || req.building || targetOrder?.floor || targetOrder?.building) && (
+                          <div className={`text-xs font-medium ${isFullScreenMode ? 'text-amber-300/80' : 'text-zinc-500'}`}>
+                            {[req.floor || targetOrder?.floor, req.building || targetOrder?.building].filter(Boolean).join(' • ')}
                           </div>
+                        )}
+
+                        {/* Row 4: Full-Width Status Banner */}
+                        <div className="pt-0.5">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500 text-zinc-950 text-xs font-black uppercase tracking-wider shadow-xs">
+                            <Receipt className="w-3.5 h-3.5 shrink-0" />
+                            <span>Bill Requested</span>
+                          </span>
                         </div>
                       </div>
                     </div>
 
                     {/* Bill Request Card Body */}
                     <div className="p-4 sm:p-5 space-y-3.5 flex-1">
-                      {/* Grand Total & Payment Mode Box */}
-                      <div className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 ${
+                      {/* Grand Total & Payment Mode Box - Compact Inline Strip */}
+                      <div className={`px-3 py-2 rounded-xl border flex items-center justify-between gap-2.5 ${
                         isFullScreenMode
                           ? 'bg-zinc-950/80 border-amber-500/40 text-zinc-100'
                           : 'bg-amber-50/70 border-amber-200 text-amber-950'
                       }`}>
-                        <div>
-                          <span className="text-[10px] uppercase font-extrabold tracking-wider opacity-70 block">
-                            Total Payable
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[10px] uppercase font-extrabold tracking-wider opacity-70 shrink-0">
+                            Total Payable:
                           </span>
-                          <span className="text-xl font-black font-mono text-amber-600 dark:text-amber-400">
-                            {req.currency || targetOrder?.currency || 'Rs.'} {(req.total_amount || targetOrder?.total_amount || 0).toLocaleString()}
+                          <span className="text-sm sm:text-base font-black font-mono text-amber-600 dark:text-amber-400 truncate">
+                            {req.currency || targetOrder?.currency || 'Rs.'} {displayTotalPayable.toFixed(2)}
                           </span>
                         </div>
 
-                        <div className="text-right">
-                          <span className="text-[10px] uppercase font-extrabold tracking-wider opacity-70 block">
-                            Payment Mode
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[10px] uppercase font-extrabold tracking-wider opacity-70 hidden sm:inline">
+                            Payment:
                           </span>
-                          <span className="inline-flex items-center gap-1 text-xs font-black uppercase px-2.5 py-1 rounded-xl bg-amber-500 text-zinc-950 shadow-2xs">
-                            {req.payment_method === 'card' ? <CreditCard className="w-3.5 h-3.5" /> :
-                             req.payment_method === 'qr' || req.payment_method === 'upi' ? <QrCode className="w-3.5 h-3.5" /> :
-                             <Banknote className="w-3.5 h-3.5" />}
+                          <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase px-2 py-0.5 rounded-lg bg-amber-500 text-zinc-950 shadow-2xs">
+                            {req.payment_method === 'card' ? <CreditCard className="w-3 h-3" /> :
+                             req.payment_method === 'qr' || req.payment_method === 'upi' ? <QrCode className="w-3 h-3" /> :
+                             <Banknote className="w-3 h-3" />}
                             <span>{((req.payment_method || targetOrder?.payment_method || 'CASH') === 'upi' ? 'QR' : (req.payment_method || targetOrder?.payment_method || 'CASH')).toUpperCase()}</span>
                           </span>
                         </div>
@@ -1535,28 +1530,56 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                       {targetOrder && targetOrder.items && targetOrder.items.length > 0 ? (
                         <div className="space-y-1.5">
                           <div className="text-[11px] font-extrabold uppercase tracking-wider opacity-70 flex items-center justify-between">
-                            <span>Dishes on Table ({targetOrder.items.length})</span>
-                            <span className="font-mono">{targetOrder.currency} {targetOrder.subtotal?.toLocaleString() || targetOrder.total_amount.toLocaleString()}</span>
+                            <span>Dishes on Table ({activeTableItems.length})</span>
+                            <span className="font-mono">{targetOrder.currency} {tableItemsMenuSubtotal.toFixed(2)}</span>
                           </div>
                           <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                            {targetOrder.items.map((item, idx) => (
-                              <div
-                                key={idx}
-                                className={`p-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
-                                  isFullScreenMode
-                                    ? 'bg-zinc-800/60 border-zinc-700/60 text-zinc-200'
-                                    : 'bg-zinc-50 border-zinc-200/80 text-zinc-800'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <span className="font-mono font-black text-amber-500 shrink-0">{item.quantity}x</span>
-                                  <span className="font-semibold truncate">{item.name}</span>
+                            {activeTableItems.map((item, idx) => {
+                              const qty = Number(item.quantity) || 1;
+                              const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+                              const isComp = Boolean(item.is_comp || compQty >= qty);
+                              const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                              const linePrice = isComp ? 0 : billedQty * (Number(item.price) || 0);
+
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`p-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                                    isFullScreenMode
+                                      ? 'bg-zinc-800/60 border-zinc-700/60 text-zinc-200'
+                                      : 'bg-zinc-50 border-zinc-200/80 text-zinc-800'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-mono font-black text-amber-500 shrink-0">{item.quantity}x</span>
+                                    <span className="font-semibold truncate">{item.name}</span>
+                                    {(Boolean(item.is_packaged) || (Number(item.pack_qty) || 0) > 0) && (
+                                      <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 flex items-center gap-0.5 shrink-0">
+                                        <Package className="w-2.5 h-2.5 text-amber-500 shrink-0" />
+                                        {(Number(item.pack_qty) || 0) > 1 && (Number(item.pack_qty) || 0) < (Number(item.quantity) || 1)
+                                          ? `${item.pack_qty} of ${item.quantity} Pack`
+                                          : (Number(item.pack_qty) || 0) > 1
+                                          ? `${item.pack_qty}x Pack`
+                                          : 'Pack'}
+                                      </span>
+                                    )}
+                                    {isComp && (
+                                      <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-200 text-amber-900 border border-amber-300 shrink-0">
+                                        🎁 Comp
+                                      </span>
+                                    )}
+                                    {!isComp && compQty > 0 && (
+                                      <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                                        {compQty}x Comp
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="font-mono text-xs font-bold shrink-0 opacity-80">
+                                    {targetOrder.currency} {linePrice.toFixed(2)}
+                                  </span>
                                 </div>
-                                <span className="font-mono text-xs font-bold shrink-0 opacity-80">
-                                  {targetOrder.currency} {(item.price * item.quantity).toLocaleString()}
-                                </span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ) : (
@@ -1737,42 +1760,38 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
               >
                 {/* Redesigned Multi-Row Card Header: Prevents Any Clipping & Displays Prominent Table Name */}
                 <div className="space-y-2">
-                  {/* Row 1: Order # & Badges (Left) | Print Button & Elapsed Time (Right) */}
+                  {/* Row 1: Order # (Left) | Print Button & Elapsed Time (Right) */}
                   <div className="flex items-center justify-between gap-2 min-w-0">
                     <div className="flex items-center gap-2 min-w-0 flex-wrap">
                       <span className={`text-base font-black tracking-tight ${isFullScreenMode ? 'text-white' : 'text-zinc-900'}`}>
                         Order #{order.order_number || order.id.slice(0, 8)}
                       </span>
-                      {isAdditionalRound && (
-                        <span
-                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border shrink-0 ${
-                            isFullScreenMode
-                              ? 'text-amber-300 bg-amber-950/80 border-amber-800'
-                              : 'text-amber-800 bg-amber-100 border-amber-300'
-                          }`}
-                        >
-                          Round 2 (Add-on)
-                        </span>
-                      )}
-                      {(order.floor || order.building) && (
-                        <span
-                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border shrink-0 ${
-                            isFullScreenMode
-                              ? 'text-zinc-300 bg-zinc-800 border-zinc-700'
-                              : 'text-zinc-500 bg-white border-zinc-200'
-                          }`}
-                        >
-                          {[order.floor, order.building].filter(Boolean).join(' • ')}
-                        </span>
-                      )}
+                      {(() => {
+                        const roundMatch = (order.order_number || '').match(/\(Round\s*(\d+)\)/i);
+                        const roundNum = (order as any).round_number || (roundMatch ? parseInt(roundMatch[1], 10) : 1);
+                        const isFollowUp = (order as any).is_follow_up || roundNum > 1 || Boolean(roundMatch);
+                        if (!isFollowUp && !isAdditionalRound) return null;
+                        const displayRound = isFollowUp ? roundNum : 2;
+                        return (
+                          <span
+                            className={`text-[10px] font-black px-2 py-0.5 rounded-md border shrink-0 flex items-center gap-1 ${
+                              isFullScreenMode
+                                ? 'text-purple-300 bg-purple-950/80 border-purple-800'
+                                : 'text-purple-800 bg-purple-100 border-purple-300'
+                            }`}
+                          >
+                            <span>🔁 Order More • Round {displayRound}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     {/* Top Right: Print Button & Elapsed Time (Strictly shrink-0, always visible) */}
                     <div className="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => dispatchPrint('KOT', { ...order, date_format_billing: billingFormat })}
-                        title="Print Kitchen Ticket"
+                        onClick={() => dispatchPrint(activeStation === 'BAR' ? 'BAR' : 'KOT', { ...order, date_format_billing: billingFormat })}
+                        title={activeStation === 'BAR' ? 'Print Bar Ticket (BOT)' : 'Print Kitchen Ticket (KOT)'}
                         className={`p-1.5 rounded-lg border flex items-center justify-center shrink-0 ${
                           isFullScreenMode
                             ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-700'
@@ -1798,71 +1817,65 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                     </div>
                   </div>
 
-                  {/* Row 2: Table Name (Big, prominent, almost as big as Order #) | Status Badge (Right) */}
-                  <div className="flex items-center justify-between gap-2.5 min-w-0 flex-wrap">
-                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                      <span
-                        title={formatKdsTableName(order.table_number)}
-                        className={`text-[15px] sm:text-base font-black tracking-tight ${
-                          isFullScreenMode ? 'text-amber-400' : 'text-zinc-900'
-                        }`}
-                      >
-                        {formatKdsTableName(order.table_number)}
-                      </span>
-                      {order.customer_name && order.customer_name.trim() !== 'Guest' && (
-                        <span
-                          title={order.customer_name}
-                          className={`text-xs font-medium truncate ${
-                            isFullScreenMode ? 'text-zinc-400' : 'text-zinc-500'
-                          }`}
-                        >
-                          • {order.customer_name}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Status Badge: Strictly shrink-0, always 100% visible, never clipped */}
-                    <div className="shrink-0 text-[11px] font-extrabold uppercase whitespace-nowrap">
-                      {effectiveKdsPrintMode === 'PRINT_ONLY' && order.status !== 'SERVED' && order.status !== 'COMPLETED' ? (
-                        <span className="text-amber-200 bg-amber-900/90 border border-amber-600 px-2.5 py-1 rounded-md flex items-center gap-1 font-bold animate-pulse">
-                          <Printer className="w-3 h-3 text-amber-400" /> KOT Printed • Pending Delivery
-                        </span>
-                      ) : (
-                        <>
-                          {order.status === 'RECEIVED' && (
-                            <span className="text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2.5 py-1 rounded-md inline-block">
-                              Received
-                            </span>
-                          )}
-                          {order.status === 'PREPARING' && (
-                            <span className="text-amber-200 bg-amber-900/90 border border-amber-700 px-2.5 py-1 rounded-md flex items-center gap-1 inline-flex">
-                              <Flame className="w-3 h-3 text-amber-400 animate-pulse" /> Preparing
-                            </span>
-                          )}
-                          {order.status === 'READY' && (
-                            <span className="text-blue-200 bg-blue-900/90 border border-blue-600 px-2.5 py-1 rounded-md flex items-center gap-1 inline-flex">
-                              <Bell className="w-3 h-3 text-blue-400 animate-bounce" /> Prepared!
-                            </span>
-                          )}
-                          {(order.status === 'SERVED' || order.status === 'COMPLETED') && (
-                            <span className="text-emerald-300 bg-emerald-950/90 border border-emerald-800 px-2.5 py-1 rounded-md flex items-center gap-1 inline-flex">
-                              <CheckCheck className="w-3 h-3 text-emerald-400" /> Served
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </div>
+                  {/* Row 2: Full-Width Prominent Table Name (Never wrapped vertically) */}
+                  <div className="min-w-0">
+                    <h3
+                      title={formatKdsTableName(order.table_number)}
+                      className={`text-base sm:text-lg font-black tracking-tight leading-snug break-words ${
+                        isFullScreenMode ? 'text-amber-400' : 'text-zinc-900'
+                      }`}
+                    >
+                      {formatKdsTableName(order.table_number)}
+                    </h3>
                   </div>
 
-                  {/* Row 3: Timestamp & Customer Info (Subtle metadata) */}
-                  <div className="flex items-center justify-between gap-2 text-[10px] font-mono min-w-0">
-                    <div className={`truncate min-w-0 flex-1 kds-order-timestamp ${isFullScreenMode ? 'text-amber-300/80' : 'text-zinc-500'}`}>
-                      {renderFormattedDate(order.created_at, billingFormat)}
-                    </div>
-                    {(!order.customer_name || order.customer_name.trim() === 'Guest') && (
-                      <span className={`text-[11px] font-medium shrink-0 ${isFullScreenMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                        Guest
+                  {/* Row 3: Location & Customer Subtitle Line */}
+                  <div className={`text-xs flex items-center gap-1.5 flex-wrap ${isFullScreenMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                    {(order.floor || order.building) && (
+                      <span className="font-medium">
+                        {[order.floor, order.building].filter(Boolean).join(' • ')}
                       </span>
+                    )}
+                    {(order.floor || order.building) && (
+                      <span className="opacity-40">•</span>
+                    )}
+                    <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                      {order.customer_name && order.customer_name.trim() !== 'Guest' ? order.customer_name : 'Guest'}
+                    </span>
+                    <span className="opacity-40">•</span>
+                    <span className="font-mono text-[10px] opacity-75">{renderFormattedDate(order.created_at, billingFormat)}</span>
+                  </div>
+
+                  {/* Row 4: Status Badge (Full-width, never collides with table name) */}
+                  <div className="pt-0.5">
+                    {effectiveKdsPrintMode === 'PRINT_ONLY' && order.status !== 'SERVED' && order.status !== 'COMPLETED' ? (
+                      <div className="text-amber-200 bg-amber-900/90 border border-amber-600 px-2.5 py-1 rounded-lg flex items-center gap-1.5 font-bold text-xs uppercase tracking-wider animate-pulse w-fit">
+                        <Printer className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>KOT Printed • Pending Delivery</span>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] font-extrabold uppercase whitespace-nowrap">
+                        {order.status === 'RECEIVED' && (
+                          <span className="text-amber-300 bg-amber-950/80 border border-amber-800/80 px-2.5 py-1 rounded-md inline-block">
+                            Received
+                          </span>
+                        )}
+                        {order.status === 'PREPARING' && (
+                          <span className="text-amber-200 bg-amber-900/90 border border-amber-700 px-2.5 py-1 rounded-md flex items-center gap-1.5 inline-flex">
+                            <Flame className="w-3.5 h-3.5 text-amber-400 animate-pulse shrink-0" /> Preparing
+                          </span>
+                        )}
+                        {order.status === 'READY' && (
+                          <span className="text-blue-200 bg-blue-900/90 border border-blue-600 px-2.5 py-1 rounded-md flex items-center gap-1.5 inline-flex">
+                            <Bell className="w-3.5 h-3.5 text-blue-400 animate-bounce shrink-0" /> Prepared!
+                          </span>
+                        )}
+                        {(order.status === 'SERVED' || order.status === 'COMPLETED') && (
+                          <span className="text-emerald-300 bg-emerald-950/90 border border-emerald-800 px-2.5 py-1 rounded-md flex items-center gap-1.5 inline-flex">
+                            <CheckCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> Served
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1933,6 +1946,22 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                             <span className={`font-extrabold text-sm ${isFullScreenMode ? 'text-zinc-100' : 'text-zinc-900'}`}>
                               {item.name}
                             </span>
+                            {(Boolean(item.is_packaged) || (Number(item.pack_qty) || 0) > 0) && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[11px] font-bold border flex items-center gap-1 ${
+                                  isFullScreenMode
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                    : 'bg-amber-50 text-amber-800 border-amber-300'
+                                }`}
+                              >
+                                <Package className="w-3 h-3 text-amber-500 shrink-0" />
+                                {(Number(item.pack_qty) || 0) > 1 && (Number(item.pack_qty) || 0) < (Number(item.quantity) || 1)
+                                  ? `${item.pack_qty} of ${item.quantity} Pack`
+                                  : (Number(item.pack_qty) || 0) > 1
+                                  ? `${item.pack_qty}x Pack`
+                                  : 'Pack'}
+                              </span>
+                            )}
                             {item.variant_name && (
                               <span className="px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 [{item.variant_name}]
@@ -2557,7 +2586,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-zinc-900 mt-1">
-              Station Display System (KDS & Bar)
+              Station Display System (KDS & Beverage)
             </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
               {defaultStation === 'WAITER'
@@ -2595,17 +2624,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
             <button
               type="button"
-              onClick={handlePurgeCompletedOrders}
-              disabled={isPurging}
-              className="p-2.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
-              title="Clear served/completed table tickets"
-            >
-              <Trash2 className={`w-4 h-4 text-zinc-500 ${isPurging ? 'animate-spin' : ''}`} />
-              <span className="hidden sm:inline">{isPurging ? 'Clearing...' : 'Clear Completed'}</span>
-            </button>
-
-            <button
-              type="button"
               onClick={loadFallbackOrders}
               className="p-2.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
             >
@@ -2614,22 +2632,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
             </button>
           </div>
         </div>
-
-        {cleanupMessage && (
-          <div className="mt-3 p-2.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-semibold flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-              {cleanupMessage}
-            </span>
-            <button
-              type="button"
-              onClick={() => setCleanupMessage(null)}
-              className="text-emerald-700 hover:text-emerald-950 text-xs font-bold"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
 
         {/* Station Navigation Tabs with Small Full-Screen Option on Each */}
         <div className={`grid grid-cols-1 ${defaultStation === 'WAITER' ? 'sm:grid-cols-1' : 'sm:grid-cols-2'} gap-3 mt-6 pt-6 border-t border-zinc-100`}>

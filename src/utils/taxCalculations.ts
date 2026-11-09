@@ -23,6 +23,8 @@ export function isTaxInclusiveMode(taxConfig?: BusinessTaxConfig | null): boolea
 export interface BillCalculationInput {
   /** Sum of (item.price * item.quantity) from menu pricing */
   itemsMenuTotal: number;
+  /** Optional packaging charges added to the bill */
+  packagingTotal?: number;
   taxConfig?: BusinessTaxConfig | null;
   /** Optional manual percentage discount (0-100) */
   manualDiscountPercent?: number;
@@ -74,7 +76,8 @@ export interface BillCalculationResult {
  *    - Deducted directly from grossTotal (pre-discount Grand Total).
  */
 export function calculateBillTotals(input: BillCalculationInput): BillCalculationResult {
-  const menuTotal = Math.max(0, round2(input.itemsMenuTotal));
+  const packaging = Math.max(0, round2(input.packagingTotal || 0));
+  const menuTotal = Math.max(0, round2(input.itemsMenuTotal)) + packaging;
   const { taxConfig, fallbackOrder, fallbackTaxes, fallbackTaxAmount } = input;
   const orderTaxes = (fallbackOrder?.taxes && fallbackOrder.taxes.length > 0)
     ? fallbackOrder.taxes

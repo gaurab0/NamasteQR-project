@@ -93,6 +93,7 @@ export interface MenuItem {
   food_type: FoodType;
   status: MenuStatus;
   is_available: boolean;
+  is_packageable?: boolean;
   has_variants?: boolean;
   variants?: MenuItemVariant[];
   variant_group_name?: string;
@@ -101,6 +102,12 @@ export interface MenuItem {
   promo_badge?: string;
   station?: KitchenStation;
   erp_item_code?: string;
+  is_comp?: boolean;
+  comp_qty?: number;
+  comp_value?: number;
+  is_packaged?: boolean;
+  pack_qty?: number;
+  packaging_charge?: number;
   order_index?: number;
   preparation_time_mins?: number;
   created_by: string;
@@ -130,6 +137,8 @@ export interface RestaurantTable {
   credit_gl_account_number?: string | null;
   credit_gl_account_name?: string | null;
   comp_enabled?: boolean;
+  comp_orderer_name?: string | null;
+  comp_orderer_phone?: string | null;
   assigned_waiter_ids?: string[];
   waiter_ping?: {
     active: boolean;
@@ -163,9 +172,17 @@ export interface TableOrderItem {
   station?: KitchenStation;
   erp_item_code?: string;
   status?: OrderStatus;
+  is_comp?: boolean;
+  comp_qty?: number;
+  comp_value?: number;
+  is_packageable?: boolean;
+  is_packaged?: boolean;
+  pack_qty?: number;
+  packaging_charge?: number;
   ready_at?: Date | string | null;
   served_at?: Date | string | null;
   cancelled_at?: Date | string | null;
+  round_number?: number;
   ordered_at?: Date | string | null;
 }
 
@@ -209,10 +226,15 @@ export interface TableOrder {
   promo_code?: string | null;
   promo_discount?: number;
   taxes?: SaleTaxBreakdown[];
+  packaging_charge?: number;
+  packaging_qty?: number;
   ready_at?: Date | null;
   served_at?: Date | null;
   source?: 'QR' | 'POS_MANUAL' | string;
   pos_sale_id?: string;
+  is_follow_up?: boolean;
+  round_number?: number;
+  parent_order_id?: string | null;
   settled?: boolean;
   invoice_number?: string;
   created_at: Date;
@@ -258,6 +280,7 @@ export interface BusinessTaxConfig {
   tax_inclusive?: boolean;
   currency: string;
   currency_symbol: string;
+  packaging_fee?: number;
   rates: TaxRateItem[];
   invoice_prefix?: string;
   receipt_footer_note?: string;
@@ -297,6 +320,10 @@ export interface SaleItem {
   comp_qty?: number;
   is_comp?: boolean;
   comp_value?: number;
+  is_packageable?: boolean;
+  is_packaged?: boolean;
+  pack_qty?: number;
+  packaging_charge?: number;
 }
 
 export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'ROOM_SERVICE' | 'QUICK_POS';
@@ -322,6 +349,8 @@ export interface SaleRecord {
   promo_code?: string;
   promo_discount?: number;
   taxes: SaleTaxBreakdown[];
+  packaging_charge?: number;
+  packaging_qty?: number;
   total_tax: number;
   service_charge?: number;
   total_amount: number;
@@ -417,6 +446,8 @@ export interface CompRecord {
   table_number: string;
   staff_id?: string;
   staff_name: string;
+  orderer_name?: string | null;
+  orderer_phone?: string | null;
   reason?: string;
   items: CompRecordItem[];
   total_comp_value: number;

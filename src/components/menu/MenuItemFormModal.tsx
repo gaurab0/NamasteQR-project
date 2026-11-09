@@ -18,6 +18,8 @@ import {
   Copy,
   ChefHat,
   Wine,
+  PackageCheck,
+  PackageX,
 } from 'lucide-react';
 
 interface MenuItemFormModalProps {
@@ -53,6 +55,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const [prepTime, setPrepTime] = useState<number | string>(15);
   const [station, setStation] = useState<KitchenStation>('KITCHEN');
   const [erpItemCode, setErpItemCode] = useState('');
+  const [isPackageable, setIsPackageable] = useState<boolean>(true);
 
   const [isCreatingInlineCat, setIsCreatingInlineCat] = useState(false);
   const [newCatInlineName, setNewCatInlineName] = useState('');
@@ -121,6 +124,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setErpItemCode(itemToEdit.erp_item_code || '');
       setStatus(itemToEdit.status || (itemToEdit.is_available ? 'available' : 'unavailable'));
       setPrepTime(itemToEdit.preparation_time_mins || 15);
+      setIsPackageable(itemToEdit.is_packageable !== false);
     } else {
       setName('');
       setCategory(categories[0]?.name || 'Nepali');
@@ -137,6 +141,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setErpItemCode('');
       setStatus('available');
       setPrepTime(15);
+      setIsPackageable(true);
     }
     setCustomCatInput('');
     setFormError(null);
@@ -368,6 +373,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
         station,
         status,
         is_available: status === 'available',
+        is_packageable: isPackageable,
         has_variants: hasVariants && validVariants.length > 0,
         variants: validVariants,
         variant_group_name: hasVariants && variantGroupName.trim() ? variantGroupName.trim() : undefined,
@@ -1216,6 +1222,43 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                   placeholder="e.g. 101, SKU-024"
                   className="w-full text-xs px-3 py-2 border border-zinc-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-zinc-900 bg-white font-mono"
                 />
+              </div>
+
+              {/* Takeaway Packaging Option */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-zinc-700">Takeaway Packaging</label>
+                  <span className="text-[10px] text-zinc-400 font-medium">Allow takeaway packing (+Rs. 10/pkg)</span>
+                </div>
+                <div className="inline-flex p-0.5 bg-zinc-100/90 rounded-lg border border-zinc-200/80 w-full">
+                  <button
+                    id="packageable-option-yes"
+                    type="button"
+                    onClick={() => setIsPackageable(true)}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      isPackageable
+                        ? 'bg-white text-amber-700 shadow-xs border border-amber-200/80 font-bold'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    <PackageCheck className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Packageable</span>
+                  </button>
+
+                  <button
+                    id="packageable-option-no"
+                    type="button"
+                    onClick={() => setIsPackageable(false)}
+                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      !isPackageable
+                        ? 'bg-white text-zinc-800 shadow-xs border border-zinc-300 font-bold'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    <PackageX className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Dine-In Only</span>
+                  </button>
+                </div>
               </div>
 
               {/* Availability Status */}

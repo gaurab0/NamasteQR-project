@@ -519,6 +519,7 @@ router.get('/business-profile', optionalAuthenticate, asyncHandler('BUSINESS_PRO
       menu_theme_config: business.menu_theme_config,
       kds_print_mode: business.kds_print_mode || 'DISPLAY_ONLY',
       default_language: (business as any).default_language || 'en',
+      has_comp_password: Boolean(business.comp_password || (business as any).comp_password_hash),
     }
   });
 }));
@@ -527,6 +528,55 @@ router.get('/business-profile', optionalAuthenticate, asyncHandler('BUSINESS_PRO
  * PUT /api/rbac/business-profile
  * Owner & Manager endpoint to update business name, tagline, location, and kitchen open timings
  */
+
+/**
+ * GET /api/rbac/business/comp-password
+ * Owner/Manager endpoint to view universal complementary password
+ */
+router.get('/business/comp-password', authenticate, requireOwnerOrManager, asyncHandler('COMP_PASSWORD_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
+  const result = await rbacService.getBusinessCompPassword(targetBusinessId, req.user);
+  return res.json({ success: true, data: result });
+}));
+
+/**
+ * POST /api/rbac/business/comp-password
+ * Owner/Manager endpoint to set/regenerate universal complementary password
+ */
+router.post('/business/comp-password', authenticate, requireOwnerOrManager, asyncHandler('COMP_PASSWORD_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
+  const { password } = req.body;
+  if (!password || typeof password !== 'string' || password.trim().length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_PASSWORD', message: 'Password is required' }
+    });
+  }
+  const result = await rbacService.updateBusinessCompPassword(targetBusinessId, password.trim(), req.user);
+  return res.json({ success: true, data: result });
+}));
+
+/**
+ * POST /api/rbac/business/comp-password/verify
+ * Public / Table QR endpoint to verify universal complementary password
+ */
+router.post('/business/comp-password/verify', customerDiningLimiter, asyncHandler('COMP_PASSWORD_VERIFY_FAILED', async (req: Request, res: Response) => {
+  const { business_id, businessId, password } = req.body;
+  const targetBusinessId = business_id || businessId || (await db.getDefaultBusiness())?.id;
+  if (!targetBusinessId) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_BUSINESS', message: 'Business ID is required' }
+    });
+  }
+  if (!password || typeof password !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_PASSWORD', message: 'Password is required' }
+    });
+  }
+  const result = await rbacService.verifyCompPassword(targetBusinessId, password.trim());
+  return res.json({ success: true, ...result });
+}));
+
 router.put('/business-profile', authenticate, asyncHandler('BUSINESS_UPDATE_FAILED', async (req: AuthenticatedRequest, res: Response, targetBusinessId: string) => {
   const user = req.user!;
   const role = rbacService.normalizeRole(user.role);
@@ -1529,7 +1579,12 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
     const existingItems = Array.isArray(existingOrder.items) ? (existingOrder.items as any[]) : [];
     const activeItems = existingItems.filter((item: any) => item.status !== 'CANCELLED');
     const itemsMenuTotal = activeItems.reduce(
-      (sum: number, item: any) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1),
+      (sum: number, item: any) => {
+        const qty = Number(item.quantity) || 1;
+        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
+        return sum + (Number(item.price) || 0) * billedQty;
+      },
       0
     );
     const { subtotal, taxAmount, computedTaxes, totalAmount: preDiscountTotal } =

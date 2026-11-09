@@ -61,6 +61,8 @@ export interface Business {
   date_format_billing?: "BOTH" | "ENGLISH" | "NEPALI";
   kds_print_mode?: string;
   default_language?: string;
+  comp_password?: string | null;
+  comp_password_hash?: string | null;
   created_at: Date;
   updated_at: Date;
 }
