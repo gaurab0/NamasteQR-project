@@ -71,6 +71,8 @@ export interface MenuItemVariant {
   image_url?: string;
   description?: string;
   food_type?: FoodType;
+  erp_item_code?: string;
+  station?: 'KITCHEN' | 'BAR' | 'BOTH';
 }
 
 export interface MenuItem {

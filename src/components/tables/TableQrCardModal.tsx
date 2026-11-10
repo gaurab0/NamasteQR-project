@@ -783,7 +783,7 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
                       )}
                     </p>
                     <p className="text-[11px] text-zinc-500 leading-tight">
-                      Orderer authorizes complimentary dishes with universal password
+                      Orderer authorizes complimentary dishes with password
                     </p>
                   </div>
                 </div>

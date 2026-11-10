@@ -87,7 +87,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
   const handleVerifyPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passwordInput.trim()) {
-      setPasswordError('Please enter the universal complementary password.');
+      setPasswordError('Please enter the complementary password.');
       return;
     }
 
@@ -161,7 +161,8 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
     try {
       const itemsPayload = cartItems.map((ci) => {
         const itemCategories = getAllItemCategories(ci.menuItem);
-        const station = determineItemStation(ci.menuItem);
+        const station = ci.selected_variant?.station || determineItemStation(ci.menuItem);
+        const itemCode = ci.selected_variant?.erp_item_code || ci.menuItem.erp_item_code;
         const finalPrice = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
         const variantName = ci.selected_variant?.name;
         const key = getItemKey(ci);
@@ -179,7 +180,8 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
           special_instructions: ci.special_instructions || '',
           variant_id: ci.selected_variant?.id,
           variant_name: variantName,
-          food_type: ci.menuItem.food_type,
+          food_type: ci.selected_variant?.food_type || ci.menuItem.food_type,
+          erp_item_code: itemCode,
           category: ci.menuItem.category,
           additional_categories: itemCategories,
           station,
@@ -274,7 +276,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-          {/* STEP 1: Universal Password Gate */}
+          {/* STEP 1: Password Gate */}
           {step === 'PASSWORD' && (
             <div className="space-y-4 animate-in fade-in duration-150">
               <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-2xl space-y-2">
@@ -302,7 +304,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
               <form onSubmit={handleVerifyPassword} className="space-y-4 pt-1">
                 <div>
                   <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1.5">
-                    Universal Complementary Password
+                    Complementary Password
                   </label>
                   <div className="relative">
                     <input
@@ -311,7 +313,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                       required
                       value={passwordInput}
                       onChange={(e) => setPasswordInput(e.target.value)}
-                      placeholder="Enter universal comp password"
+                      placeholder="Enter complementary password"
                       className="w-full px-3.5 py-3 pr-11 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono font-bold tracking-wider text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
                     />
                     <button
@@ -323,7 +325,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                     </button>
                   </div>
                   <p className="text-[11px] text-zinc-500 mt-1">
-                    Universal code configured in Business Details tab by the owner.
+                    Code configured in Business Details tab by the owner.
                   </p>
                 </div>
 
@@ -546,7 +548,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                 <div className="flex items-center justify-between text-emerald-800 font-semibold">
                   <span className="flex items-center gap-1">
                     <Gift className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Complimentary Value (Rs. 0 to customer)</span>
+                    <span>Complimentary Value</span>
                   </span>
                   <span className="font-mono font-bold text-emerald-900">
                     +{currencySymbol} {compValueTotal.toFixed(2)}

@@ -876,6 +876,19 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
       // Check if item already exists (by ERP Code first, then by exact name)
       const existing = (rawCode ? itemByErpCode.get(rawCode.toLowerCase()) : null) || itemByName.get(rawName.toLowerCase());
 
+      const validVariants = raw.has_variants && Array.isArray(raw.variants) && raw.variants.length > 0
+        ? raw.variants.map((v: any, i: number) => ({
+            id: v.id || `var_${Date.now()}_${i}`,
+            name: String(v.name || '').trim(),
+            price: Math.round((Number(v.price) || 0) * rateMultiplier * 100) / 100,
+            is_available: v.is_available !== false,
+            description: v.description ? String(v.description).trim() : undefined,
+            food_type: v.food_type || 'none',
+            erp_item_code: v.erp_item_code ? String(v.erp_item_code).trim() : undefined,
+            station: v.station || undefined,
+          }))
+        : null;
+
       if (existing && mode === 'merge') {
         // Surgically update price and ERP code while preserving image, description, variants, etc.
         await prisma.menuItem.update({
@@ -886,6 +899,10 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
             station: raw.station ? station : existing.station,
             category_id: categoryId || existing.category_id,
             category: rawCategory || existing.category,
+            has_variants: raw.has_variants !== undefined ? Boolean(raw.has_variants) : existing.has_variants,
+            variant_group_name: raw.variant_group_name || existing.variant_group_name || 'Options',
+            variants: validVariants ? validVariants : existing.variants,
+            is_packageable: raw.is_packageable !== undefined ? Boolean(raw.is_packageable) : existing.is_packageable,
           },
         });
         updatedCount++;
@@ -898,6 +915,7 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
             business_id: businessId,
             name: rawName,
             category: rawCategory,
+            additional_categories: raw.subCategory && raw.subCategory.toLowerCase() !== rawName.toLowerCase() ? [raw.subCategory] : [],
             category_id: categoryId || null,
             price: finalPrice,
             currency: 'Rs.',
@@ -906,7 +924,10 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
             food_type: raw.food_type === 'veg' || raw.food_type === 'non-veg' ? raw.food_type : (catKey.includes('veg') ? 'veg' : 'none'),
             status: 'available',
             is_available: true,
-            has_variants: false,
+            is_packageable: raw.is_packageable !== false,
+            has_variants: Boolean(raw.has_variants && validVariants && validVariants.length > 0),
+            variant_group_name: raw.has_variants ? (raw.variant_group_name || 'Options') : null,
+            variants: validVariants ? validVariants : undefined,
             station,
             erp_item_code: rawCode || null,
             created_by: userId,

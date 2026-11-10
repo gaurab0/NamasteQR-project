@@ -209,7 +209,8 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
         credit_gl_account_name: tableInfo.creditGlAccountName || undefined,
         items: items.map((ci) => {
           const itemCategories = getAllItemCategories(ci.menuItem);
-          const station = determineItemStation(ci.menuItem);
+          const station = ci.selected_variant?.station || determineItemStation(ci.menuItem);
+          const itemCode = ci.selected_variant?.erp_item_code || ci.menuItem.erp_item_code;
           const finalPrice = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
           const variantName = ci.selected_variant?.name;
           const isPkg = ci.menuItem.is_packageable !== false;
@@ -223,7 +224,8 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
             special_instructions: ci.special_instructions || '',
             variant_id: ci.selected_variant?.id,
             variant_name: variantName,
-            food_type: ci.menuItem.food_type,
+            food_type: ci.selected_variant?.food_type || ci.menuItem.food_type,
+            erp_item_code: itemCode,
             category: ci.menuItem.category,
             additional_categories: itemCategories,
             station,

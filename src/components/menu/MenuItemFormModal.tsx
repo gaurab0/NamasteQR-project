@@ -47,7 +47,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const [currency, setCurrency] = useState('Rs.');
   const [hasVariants, setHasVariants] = useState<boolean>(false);
   const [variants, setVariants] = useState<MenuItemVariant[]>([]);
-  const [variantGroupName, setVariantGroupName] = useState<string>('Portion / Size');
+  const [variantGroupName, setVariantGroupName] = useState<string>('Options');
   const [description, setDescription] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [foodType, setFoodType] = useState<FoodType>('none');
@@ -116,7 +116,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       const itemHasVariants = !!itemToEdit.has_variants && Array.isArray(itemToEdit.variants) && itemToEdit.variants.length > 0;
       setHasVariants(itemHasVariants);
       setVariants(itemHasVariants ? (itemToEdit.variants || []) : []);
-      setVariantGroupName(itemToEdit.variant_group_name || 'Portion / Size');
+      setVariantGroupName(itemToEdit.variant_group_name || 'Options');
       setDescription(itemToEdit.description || '');
       setImageUrl(itemToEdit.image_url || '');
       setFoodType(itemToEdit.food_type || 'none');
@@ -133,7 +133,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setCurrency('Rs.');
       setHasVariants(false);
       setVariants([]);
-      setVariantGroupName('Portion / Size');
+      setVariantGroupName('Options');
       setDescription('');
       setImageUrl('');
       setFoodType('none');
@@ -152,7 +152,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
     setHasVariants(true);
     const baseP = Number(price) || 350;
     if (type === 'sizes') {
-      setVariantGroupName('Portion / Size');
+      setVariantGroupName('Options');
       setVariants([
         { id: `var_${Date.now()}_1`, name: 'Small', price: Math.round(baseP * 0.75) },
         { id: `var_${Date.now()}_2`, name: 'Medium', price: baseP },
@@ -208,7 +208,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
     }
   };
 
-  const handleUpdateVariant = (index: number, field: 'name' | 'price' | 'image_url' | 'description' | 'food_type', val: any) => {
+  const handleUpdateVariant = (index: number, field: 'name' | 'price' | 'image_url' | 'description' | 'food_type' | 'erp_item_code' | 'station', val: any) => {
     setVariants((prev) =>
       prev.map((v, i) => (i === index ? { ...v, [field]: val } : v))
     );
@@ -245,6 +245,11 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       name: `${target.name} (Copy)`.trim(),
       price: target.price,
       is_available: target.is_available !== false,
+      food_type: target.food_type,
+      image_url: target.image_url,
+      description: target.description,
+      erp_item_code: target.erp_item_code,
+      station: target.station,
     };
     const next = [...variants];
     next.splice(index + 1, 0, duplicated);
@@ -353,6 +358,8 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
             image_url: v.image_url || undefined,
             description: v.description || undefined,
             food_type: v.food_type || foodType,
+            erp_item_code: v.erp_item_code?.trim() || undefined,
+            station: v.station || undefined,
           }))
         : [];
 
@@ -683,6 +690,31 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                             </button>
                           </div>
                           
+                          {/* Row 2: SKU / Item Code & Station Route */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-zinc-100">
+                            <div>
+                              <input
+                                type="text"
+                                value={v.erp_item_code || ''}
+                                onChange={(e) => handleUpdateVariant(idx, 'erp_item_code', e.target.value)}
+                                placeholder="Item Code / SKU (e.g. AB-12)"
+                                className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 rounded-lg bg-zinc-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono font-medium"
+                              />
+                            </div>
+                            <div>
+                              <select
+                                value={v.station || ''}
+                                onChange={(e) => handleUpdateVariant(idx, 'station', (e.target.value || undefined) as any)}
+                                className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 rounded-lg bg-zinc-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium cursor-pointer"
+                              >
+                                <option value="">Route: Inherit Dish ({station})</option>
+                                <option value="KITCHEN">👨‍🍳 Kitchen</option>
+                                <option value="BAR">🍸 Bar</option>
+                                <option value="BOTH">🔄 Both (Kitchen & Bar)</option>
+                              </select>
+                            </div>
+                          </div>
+
                           {/* Bottom Row (Inline Description Input) */}
                           <div className="flex flex-col gap-1.5">
                             <input

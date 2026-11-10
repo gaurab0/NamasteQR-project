@@ -520,7 +520,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
     phone: business?.phone || phoneE164 || '',
   });
   const [savingBizProfile, setSavingBizProfile] = useState(false);
-  // Universal Complementary Password State
+  // Complimentary Password State
   const [compPassword, setCompPassword] = useState('');
   const [showCompPassword, setShowCompPassword] = useState(false);
   const [hasCompPassword, setHasCompPassword] = useState(false);
@@ -572,7 +572,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
     try {
       await rbacService.updateCompPasswordApi(compPassword.trim(), bizId);
       setHasCompPassword(true);
-      setCompPasswordSuccess('Universal complementary password saved and active.');
+      setCompPasswordSuccess('Complimentary password saved and active.');
       setTimeout(() => setCompPasswordSuccess(null), 3000);
     } catch (err: any) {
       setCompPasswordError(err?.message || 'Failed to save complementary password');
@@ -1512,7 +1512,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                 </form>
               </div>
 
-              {/* Universal Complementary Password Section */}
+              {/* Complimentary Password Section */}
               <div className="bg-white rounded-3xl p-6 sm:p-8 border border-zinc-200 shadow-xs space-y-5">
                 <div className="flex items-start justify-between gap-4 border-b border-zinc-100 pb-4">
                   <div className="flex items-center gap-3">
@@ -1521,7 +1521,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                     </div>
                     <div>
                       <h3 className="text-base font-extrabold text-zinc-900 flex items-center gap-2">
-                        Universal Complementary Password
+                        Complimentary Password
                         {hasCompPassword && (
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                             Active
@@ -1529,7 +1529,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                         )}
                       </h3>
                       <p className="text-xs text-zinc-500">
-                        Universal password used by managers/owners on mobile to authorize complementary table orders directly to the kitchen.
+                        Password used by managers/owners on mobile to authorize complementary table orders directly to the kitchen.
                       </p>
                     </div>
                   </div>
