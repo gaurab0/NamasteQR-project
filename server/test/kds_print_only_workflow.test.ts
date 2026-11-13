@@ -18,7 +18,7 @@ async function runTests() {
   const baseUrl = `http://localhost:${port}`;
 
   const defaultBiz = await db.getDefaultBusiness();
-  const businessId = defaultBiz?.id || 'maya-forest-resort';
+  const businessId = defaultBiz?.id || 'namaste-bistro';
 
   // Test 1: Verify kds_print_mode column & persistence via db.service
   try {

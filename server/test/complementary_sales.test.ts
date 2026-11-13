@@ -1,8 +1,10 @@
 import { prisma } from '../src/lib/prisma';
 import { rbacService } from '../src/services/rbac.service';
 import { db } from '../src/services/db.service';
+import { realtimeEmitter } from '../src/lib/socket';
 import { buildSalesWorkbookData, exportSalesToExcel } from '../../src/utils/excelExport';
 import { EscPosEncoder } from '../../src/utils/escpos';
+import { computeOrderBillableAmounts } from '../../src/utils/taxCalculations';
 
 let passed = 0;
 let failed = 0;
@@ -411,11 +413,223 @@ async function runComplementarySalesTestSuite() {
     assert(compAfterDeleteAll.length === 0, 'deleteAllSales cleans up all comp records for business');
 
     // =========================================================================
-    // 13. Cleanup Throwaway Test Data
+    // 13. Complimentary Packaging + Order Status Recalc + Socket Settlement Sync
     // =========================================================================
-    console.log('\n🧹 13. Cleanup Test Business');
+    console.log('\n📦 13. Complimentary Packaging & Socket Settlement Sync');
+    await rbacService.updateTaxConfig(testBizId, {
+      tax_enabled: true,
+      tax_inclusive: false,
+      packaging_fee: 10,
+      rates: [{ id: 'vat', name: 'VAT', rate_percent: 13, enabled: true, is_inclusive: false }],
+    });
+
+    // 13A. Full Comp ("Select All") with packaged items -> packaging_qty > 0, packaging_charge === 0, total_amount === 0
+    const fullCompOrder = await rbacService.createTableOrder(testBizId, {
+      table_id: table1.id,
+      table_number: 'T-10',
+      customer_name: 'Manager Comp',
+      is_packaging_comp: true,
+      items: [
+        {
+          item_id: 'dish-pkg-1',
+          name: 'Butter Naan Pack',
+          price: 150,
+          currency: 'Rs.',
+          quantity: 2,
+          is_comp: true,
+          comp_qty: 2,
+          is_packageable: true,
+          is_packaged: true,
+          pack_qty: 2,
+          comp_pack_qty: 2,
+          is_packaging_comp: true,
+          packaging_charge: 0,
+        } as any,
+      ],
+      packaging_qty: 2,
+      packaging_charge: 0,
+      subtotal: 0,
+      total_amount: 0,
+    });
+
+    assert(fullCompOrder.packaging_qty === 2, `Full comp order preserves physical packaging_qty = 2 (got ${fullCompOrder.packaging_qty})`);
+    assert(Number(fullCompOrder.packaging_charge) === 0, `Full comp order has packaging_charge = 0 (got ${fullCompOrder.packaging_charge})`);
+    assert(Number(fullCompOrder.total_amount) === 0, `Full comp order has total_amount = 0 (got ${fullCompOrder.total_amount})`);
+
+    // Marking item SERVED must NOT overwrite comp_qty or 0 packaging charge
+    const servedFullComp = await rbacService.updateTableOrderItemStatus(
+      testBizId,
+      fullCompOrder.id,
+      { index: 0 },
+      'SERVED'
+    );
+    assert(Number(servedFullComp.total_amount) === 0, `Marking full comp item SERVED keeps total_amount = 0 (got ${servedFullComp.total_amount})`);
+    assert(Number(servedFullComp.packaging_charge) === 0, `Marking full comp item SERVED keeps packaging_charge = 0 (got ${servedFullComp.packaging_charge})`);
+    assert(servedFullComp.packaging_qty === 2, `Marking full comp item SERVED keeps packaging_qty = 2 (got ${servedFullComp.packaging_qty})`);
+
+    // Settle full comp order and verify socket payload + DB order + CompRecord + ESC/POS slip
+    const capturedSocketUpdates: any[] = [];
+    const socketEventSequence: string[] = [];
+    const origOrderUpdated = realtimeEmitter.orderUpdated.bind(realtimeEmitter);
+    const origTableUpdated = realtimeEmitter.tableUpdated.bind(realtimeEmitter);
+    realtimeEmitter.orderUpdated = (bizId: string, ord: any) => {
+      capturedSocketUpdates.push(ord);
+      if (bizId === testBizId) socketEventSequence.push(`orderUpdated:${ord.id}`);
+      origOrderUpdated(bizId, ord);
+    };
+    realtimeEmitter.tableUpdated = (bizId: string, tbl: any) => {
+      if (bizId === testBizId) socketEventSequence.push(`tableUpdated:${tbl.status}`);
+      origTableUpdated(bizId, tbl);
+    };
+
+    try {
+      const fullCompPkgSale = await rbacService.createSale(testBizId, {
+        order_id: fullCompOrder.id,
+        table_id: table1.id,
+        table_number: 'T-10',
+        customer_name: 'Manager Comp',
+        sale_type: 'DINE_IN',
+        payment_method: 'CASH',
+        is_packaging_comp: true,
+        items: [
+          {
+            item_id: 'dish-pkg-1',
+            name: 'Butter Naan Pack',
+            price: 150,
+            unit_price: 150,
+            quantity: 2,
+            comp_qty: 2,
+            is_comp: true,
+            is_packageable: true,
+            is_packaged: true,
+            pack_qty: 2,
+            comp_pack_qty: 2,
+            is_packaging_comp: true,
+            packaging_charge: 0,
+            subtotal: 0,
+            total_price: 0,
+          } as any,
+        ],
+        packaging_qty: 2,
+        packaging_charge: 0,
+        subtotal: 0,
+        total_tax: 0,
+        total_amount: 0,
+      }, staffUser);
+
+      assert(fullCompPkgSale.total_amount === 0, 'Full comp packaged sale has total_amount = 0');
+      assert(fullCompPkgSale.packaging_charge === 0, 'Full comp packaged sale preserves packaging_charge = 0 (no 0 || fallback)');
+      assert(fullCompPkgSale.packaging_qty === 2, 'Full comp packaged sale preserves packaging_qty = 2');
+
+      const emittedFull = capturedSocketUpdates.find((e) => e.id === fullCompOrder.id && e.status === 'COMPLETED');
+      assert(Boolean(emittedFull) && emittedFull.total_amount === 0, `Socket orderUpdated emits exact settled total_amount = 0 (got ${emittedFull?.total_amount})`);
+
+      const pkgCompRecords = await rbacService.getCompRecords(testBizId);
+      const fullPkgRec = pkgCompRecords.find((r) => r.sale_id === fullCompPkgSale.id);
+      assert(Number(fullPkgRec?.total_comp_value) === 320, `CompRecord captures dish comp (300) + comp packaging (20) = 320 (got ${fullPkgRec?.total_comp_value})`);
+
+      const escposZeroPkgBuf = EscPosEncoder.buildReceipt(fullCompPkgSale, { paperWidth: '80mm' });
+      const escposZeroPkgStr = Buffer.from(escposZeroPkgBuf).toString('utf-8');
+      assert(escposZeroPkgStr.includes('Complimentary (Rs 0.00)'), 'ESC/POS receipt prints Complimentary (Rs 0.00) for free packaging');
+
+      // 13B. Partial Comp with 1 auto-comp pack + 1 billed pack -> cashier toggles ALL packaging comp ON at settlement
+      const partialPkgOrder = await rbacService.createTableOrder(testBizId, {
+        table_id: table1.id,
+        table_number: 'T-10',
+        customer_name: 'Partial Comp Guest',
+        items: [
+          {
+            item_id: 'dish-pkg-2',
+            name: 'Paneer Tikka',
+            price: 200,
+            currency: 'Rs.',
+            quantity: 2,
+            is_comp: false,
+            comp_qty: 1,
+            is_packageable: true,
+            is_packaged: true,
+            pack_qty: 2,
+            comp_pack_qty: 1,
+            is_packaging_comp: false,
+            packaging_charge: 10,
+          } as any,
+        ],
+      });
+
+      // Billed before settlement: 1 * 200 + 1 * 10 = 210 + 13% VAT (27.30) = 237.30
+      assert(Number(partialPkgOrder.packaging_charge) === 10, `Partial comp order bills 1 of 2 packs = Rs. 10 (got ${partialPkgOrder.packaging_charge})`);
+      assert(Number(partialPkgOrder.total_amount) === 237.3, `Partial comp order total is Rs. 237.30 (got ${partialPkgOrder.total_amount})`);
+
+      const servedPartial = await rbacService.updateTableOrderItemStatus(
+        testBizId,
+        partialPkgOrder.id,
+        { index: 0 },
+        'SERVED'
+      );
+      assert(Number(servedPartial.total_amount) === 237.3, `Marking partial comp item SERVED keeps total Rs. 237.30 instead of full price (got ${servedPartial.total_amount})`);
+
+      // Cashier settles with "Complimentary Packaging" toggled ON -> 1 * 200 + 0 pack + 13% VAT (26) = 226.00
+      const partialSettledSale = await rbacService.createSale(testBizId, {
+        order_id: partialPkgOrder.id,
+        table_id: table1.id,
+        table_number: 'T-10',
+        customer_name: 'Partial Comp Guest',
+        sale_type: 'DINE_IN',
+        payment_method: 'CASH',
+        is_packaging_comp: true,
+        items: [
+          {
+            item_id: 'dish-pkg-2',
+            name: 'Paneer Tikka',
+            price: 200,
+            unit_price: 200,
+            quantity: 2,
+            comp_qty: 1,
+            is_comp: false,
+            is_packageable: true,
+            is_packaged: true,
+            pack_qty: 2,
+            comp_pack_qty: 2,
+            is_packaging_comp: true,
+            packaging_charge: 0,
+            subtotal: 200,
+            total_price: 200,
+          } as any,
+        ],
+        packaging_qty: 2,
+        packaging_charge: 0,
+        subtotal: 200,
+        total_tax: 26,
+        total_amount: 226,
+      }, staffUser);
+
+      assert(partialSettledSale.packaging_charge === 0, 'Cashier comp packaging toggle keeps sale packaging_charge = 0');
+      assert(partialSettledSale.total_amount === 226, `Partial comp sale with comp packaging total_amount = 226 (got ${partialSettledSale.total_amount})`);
+
+      const emittedPartial = capturedSocketUpdates.find((e) => e.id === partialPkgOrder.id && e.status === 'COMPLETED');
+      assert(Boolean(emittedPartial) && emittedPartial.total_amount === 226, `Socket orderUpdated emits settled newSale.total_amount = 226 instead of stale 237.30 (got ${emittedPartial?.total_amount})`);
+
+      const dbOrderAfterSettle = await prisma.tableOrder.findUnique({ where: { id: partialPkgOrder.id } });
+      assert(Number(dbOrderAfterSettle?.total_amount) === 226, `DB TableOrder.total_amount updated to 226 (got ${dbOrderAfterSettle?.total_amount})`);
+      assert(Number(dbOrderAfterSettle?.packaging_charge) === 0, `DB TableOrder.packaging_charge updated to 0 (got ${dbOrderAfterSettle?.packaging_charge})`);
+      assert(Boolean((partialSettledSale as any).is_packaging_comp) === true, 'Sale record sets is_packaging_comp = true when packaging waived');
+
+      const orderEvtIdx = socketEventSequence.indexOf(`orderUpdated:${partialPkgOrder.id}`);
+      const tableEvtIdx = socketEventSequence.lastIndexOf('tableUpdated:ACTIVE');
+      assert(orderEvtIdx !== -1 && (tableEvtIdx === -1 || orderEvtIdx < tableEvtIdx), `orderUpdated emitted before tableUpdated:ACTIVE (sequence: ${socketEventSequence.join(' -> ')})`);
+    } finally {
+      realtimeEmitter.orderUpdated = origOrderUpdated;
+      realtimeEmitter.tableUpdated = origTableUpdated;
+    }
+
+    // =========================================================================
+    // 14. Cleanup Throwaway Test Data
+    // =========================================================================
+    console.log('\n🧹 14. Cleanup Test Business');
+    await prisma.tableOrder.deleteMany({ where: { business_id: testBizId } });
     await prisma.compRecord.deleteMany({ where: { business_id: testBizId } });
     await prisma.sale.deleteMany({ where: { business_id: testBizId } });
+    await prisma.taxConfig.deleteMany({ where: { business_id: testBizId } });
     await prisma.restaurantTable.deleteMany({ where: { business_id: testBizId } });
     await prisma.business.deleteMany({ where: { id: testBizId } });
     console.log(`  Cleaned up throwaway business ${testBizId}`);
@@ -430,6 +644,7 @@ async function runComplementarySalesTestSuite() {
   console.log('========================================\n');
 
   if (failed > 0) process.exit(1);
+  process.exit(0);
 }
 
 runComplementarySalesTestSuite().catch((e) => {

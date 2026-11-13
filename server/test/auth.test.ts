@@ -30,8 +30,8 @@ async function runTests() {
 
   await test('Valid signup payload passes schema validation', async () => {
     const validData = {
-      businessName: 'Royal Palace Resort',
-      businessType: 'RESORT',
+      businessName: 'Royal Palace Bistro',
+      businessType: 'RESTAURANT',
       email: 'owner@royalpalace.com',
       countryCode: '+977',
       phoneNumber: '9841234567',
@@ -76,13 +76,13 @@ async function runTests() {
   console.log('\n🔐 Testing 2: Email OTP Verification Flow');
 
   await test('Generates, hashes and stores 6-digit OTP', async () => {
-    const business = await db.createBusiness('Grand Mirage Hotel', 'HOTEL');
+    const business = await db.createBusiness('Grand Mirage Bistro', 'RESTAURANT');
     const passwordHash = await bcrypt.hash('Secure123!@#', 10);
     const user = await db.createUser({
       business_id: business.id,
       email: 'manager@grandmirage.com',
       password_hash: passwordHash,
-      role: 'HOTEL_OWNER',
+      role: 'RESTAURANT_OWNER',
     });
     await db.createPhoneVerification({
       user_id: user.id,
@@ -127,7 +127,7 @@ async function runTests() {
   await test('Generates and verifies JWT token for authenticated user', async () => {
     const token = generateToken({
       userId: 'u47a11c8-2b87-4321-b328-91c64e52a001',
-      role: 'HOTEL_OWNER',
+      role: 'RESTAURANT_OWNER',
     });
     const decoded = jwt.verify(token, config.jwtSecret) as any;
     if (decoded.userId !== 'u47a11c8-2b87-4321-b328-91c64e52a001') {
@@ -138,12 +138,12 @@ async function runTests() {
   console.log('\n🔑 Testing 4: Password Reset Token Workflow');
 
   await test('Generates cryptographically random reset token, hashes, and validates', async () => {
-    const biz = await db.createBusiness('Reset Test Resort', 'RESORT');
+    const biz = await db.createBusiness('Reset Test Bistro', 'RESTAURANT');
     const user = await db.createUser({
       business_id: biz.id,
       email: `reset-test-${Date.now()}@example.com`,
       password_hash: await bcrypt.hash('SecurePassword123!', 10),
-      role: 'HOTEL_OWNER',
+      role: 'RESTAURANT_OWNER',
     });
 
     const { token } = await emailService.createPasswordResetToken({

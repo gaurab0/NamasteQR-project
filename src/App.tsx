@@ -22,25 +22,35 @@ function AppContent() {
   const [currentPath, setCurrentPath] = useState<string>(() => {
     return window.location.pathname || '/';
   });
+  const currentPathRef = React.useRef(currentPath);
+  currentPathRef.current = currentPath;
 
   // Handle browser back/forward buttons
   useEffect(() => {
     const handlePopState = () => {
       const nextPath = window.location.pathname || '/';
+      const wasOnCustomerRoute =
+        currentPathRef.current.startsWith('/menu') ||
+        currentPathRef.current.startsWith('/t/');
       const isGuestCustomerSession = !isAuthenticated && Boolean(
+        wasOnCustomerRoute ||
         sessionStorage.getItem('serveflow_customer_table_session') ||
         sessionStorage.getItem('serveflow_customer_active')
       );
-      // If unauthenticated customer dining session is active and popstate tries to jump back to admin or auth pages, trap them safely on /menu
-      if (
-        isGuestCustomerSession &&
-        (nextPath.startsWith('/dashboard') ||
-          nextPath.startsWith('/menu-management') ||
-          nextPath === '/login' ||
-          nextPath === '/signup')
-      ) {
-        window.history.pushState({}, '', '/menu');
-        setCurrentPath('/menu');
+      const isCustomerRoute = nextPath.startsWith('/menu') || nextPath.startsWith('/t/');
+      // If unauthenticated customer dining session is active and popstate tries to leave /menu (e.g. mobile back button), keep them safely on /menu
+      if (isGuestCustomerSession && !isCustomerRoute) {
+        let targetCustomerUrl = '/menu';
+        try {
+          const savedUrl = sessionStorage.getItem('serveflow_customer_last_url');
+          if (savedUrl && savedUrl.startsWith('/menu')) {
+            targetCustomerUrl = savedUrl;
+          } else if (window.location.search) {
+            targetCustomerUrl = `/menu${window.location.search}`;
+          }
+        } catch {}
+        window.history.pushState({ menuView: true, menuGuard: true }, '', targetCustomerUrl);
+        setCurrentPath(targetCustomerUrl);
         return;
       }
       setCurrentPath(nextPath);
@@ -162,14 +172,15 @@ function AppContent() {
       return <CustomerMenuPreviewPage onNavigate={navigate} />;
     }
 
-    // 1. GUEST LOCK: If an UNAUTHENTICATED customer is dining at a table or active in customer mode, lock strictly to /menu (prevent accidental backdoors into admin or auth)
+    // 1. GUEST LOCK: If an UNAUTHENTICATED customer is dining at a table or active in customer mode, lock strictly to /menu (prevent accidental backdoors into admin, auth, or landing page)
     const isGuestCustomerSession = !isAuthenticated && Boolean(
       sessionStorage.getItem('serveflow_customer_table_session') ||
       sessionStorage.getItem('serveflow_customer_active')
     );
     if (
       isGuestCustomerSession &&
-      (basePath.startsWith('/dashboard') ||
+      (basePath === '/' ||
+        basePath.startsWith('/dashboard') ||
         basePath.startsWith('/menu-management') ||
         basePath === '/login' ||
         basePath === '/signup')

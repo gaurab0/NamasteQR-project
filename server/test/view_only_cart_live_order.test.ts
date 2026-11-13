@@ -17,7 +17,7 @@ async function runTests() {
   const baseUrl = `http://localhost:${port}`;
 
   const defaultBiz = await db.getDefaultBusiness();
-  const testBizId = defaultBiz?.id || 'maya-forest-resort';
+  const testBizId = defaultBiz?.id || 'namaste-bistro';
   const uniqueSuffix = Date.now().toString().slice(-6);
   const testTableNumber = `VO-${uniqueSuffix}`;
 

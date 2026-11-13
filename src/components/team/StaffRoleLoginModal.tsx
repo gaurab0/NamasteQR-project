@@ -110,7 +110,7 @@ export const StaffRoleLoginModal: React.FC<StaffRoleLoginModalProps> = ({
   const handleRoleSelect = (role: AppRole) => {
     setSelectedRole(role);
     setErrorMsg(null);
-    if ((role === 'HOTEL_OWNER' || role === 'RESTAURANT_OWNER') && businessOwnerEmail) {
+    if (role === 'RESTAURANT_OWNER' && businessOwnerEmail) {
       if (!email) setEmail(businessOwnerEmail);
     }
   };

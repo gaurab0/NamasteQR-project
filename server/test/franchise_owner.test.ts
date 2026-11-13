@@ -58,27 +58,27 @@ async function run() {
       throw new Error('Default tables were not seeded in PostgreSQL');
     }
 
-    // 3. Test HOTEL_OWNER role
-    console.log('\n2. Testing HOTEL_OWNER provisioning:');
-    const hotelOwnerUser = {
-      id: `usr-hotel-${Date.now()}`,
-      role: 'HOTEL_OWNER',
-      email: 'owner@testhotel.com'
+    // 3. Test ADMIN / secondary owner role
+    console.log('\n2. Testing ADMIN provisioning:');
+    const adminOwnerUser = {
+      id: `usr-admin-${Date.now()}`,
+      role: 'ADMIN',
+      email: 'admin@testbistro.com'
     };
 
     const branch2 = await rbacService.createFranchiseBranch(
       {
-        name: 'Hotel Branch Annexe',
+        name: 'Bistro Branch Annexe',
         parentBusinessId: testParentId,
         branchCode: 'BRANCH-02',
       },
-      hotelOwnerUser
+      adminOwnerUser
     );
 
-    if (branch2 && branch2.branch.name === 'Hotel Branch Annexe') {
-      console.log('  ✅ PASS: HOTEL_OWNER successfully provisioned branch');
+    if (branch2 && branch2.branch.name === 'Bistro Branch Annexe') {
+      console.log('  ✅ PASS: ADMIN successfully provisioned branch');
     } else {
-      throw new Error('Failed to create branch with HOTEL_OWNER');
+      throw new Error('Failed to create branch with ADMIN');
     }
 
     // 4. Test unauthorized role (WAITER)

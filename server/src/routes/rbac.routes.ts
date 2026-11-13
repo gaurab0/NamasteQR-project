@@ -15,13 +15,27 @@ import {
   createGuestContext,
   createSystemContext,
   canAccessResource,
-  isOwnerSubject,
+  isOwnerSubject, isBusinessOwnerRole, isManagerRole, resolveSubject,
   getEffectiveTabs,
   describeResourceRequirement,
 } from '../services/tabAccess';
 import { prisma } from '../lib/prisma';
 import { realtimeEmitter } from '../lib/socket';
 import { erpService } from '../services/integrations/erpService';
+import { getActiveRevenueWindow } from '../../../src/utils/revenueWindow';
+import { computeOrderBillableAmounts } from '../../../src/utils/taxCalculations';
+
+async function getBusinessTodayDate(businessId: string): Promise<string> {
+  try {
+    const biz = await prisma.business.findUnique({
+      where: { id: businessId },
+      select: { operations_config: true },
+    });
+    return getActiveRevenueWindow((biz?.operations_config as any) || null).businessDate;
+  } catch {
+    return getActiveRevenueWindow(null).businessDate;
+  }
+}
 
 const router = Router();
 
@@ -45,7 +59,7 @@ async function getTargetBusinessId(req: AuthenticatedRequest): Promise<string> {
       } else if (req.user?.business?.id) {
         targetBiz = req.user.business.id;
       } else {
-        targetBiz = 'maya-forest-resort';
+        targetBiz = 'namaste-bistro';
       }
     }
   }
@@ -175,7 +189,7 @@ router.get('/businesses', optionalAuthenticate, async (req: AuthenticatedRequest
             name: b.name,
             type: b.business_type,
             status: b.status,
-            tagline: b.tagline || (b.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+            tagline: b.tagline || 'Authentic Cuisine • Prepared Fresh to Order',
             location: b.location || 'Main Dining & Service Area',
             kitchen_hours: b.kitchen_hours || '07:30 AM – 10:30 PM',
             phone: b.phone || '',
@@ -250,7 +264,7 @@ router.post('/businesses', authenticate, async (req: AuthenticatedRequest, res: 
 router.get('/branches', authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = req.user!;
-    const parentBusinessId = user.business?.id || 'maya-forest-resort';
+    const parentBusinessId = user.business?.id || 'namaste-bistro';
     const branches = await db.getBranchesForOwner(user.id, parentBusinessId);
 
     const detailed = await Promise.all(
@@ -352,7 +366,7 @@ router.post(['/branches', '/branch'], authenticate, async (req: AuthenticatedReq
       });
     }
 
-    const parentBusinessId = user.business?.id || 'maya-forest-resort';
+    const parentBusinessId = user.business?.id || 'namaste-bistro';
 
     const result = await rbacService.createFranchiseBranch(
       {
@@ -445,7 +459,7 @@ router.delete(['/branches/:branchId(*)', '/branch/:branchId(*)', '/branches', '/
     }
 
     // Verify ownership
-    const parentBusinessId = user.business?.id || 'maya-forest-resort';
+    const parentBusinessId = user.business?.id || 'namaste-bistro';
     if (branch.owner_uid && branch.owner_uid !== user.id && branch.parent_business_id !== parentBusinessId) {
       return res.status(403).json({
         success: false,
@@ -510,7 +524,7 @@ router.get('/business-profile', optionalAuthenticate, asyncHandler('BUSINESS_PRO
       name: business.name,
       type: business.business_type,
       status: business.status,
-      tagline: business.tagline || (business.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+      tagline: business.tagline || 'Authentic Cuisine • Prepared Fresh to Order',
       location: business.location !== undefined ? business.location : 'Main Dining & Service Area',
       address: business.address || '',
       kitchen_hours: business.kitchen_hours || '07:30 AM – 10:30 PM',
@@ -976,7 +990,7 @@ router.delete('/tables/:id', authenticate, asyncHandler('TABLE_DELETION_FAILED',
 router.post('/tables/scan-checkin', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
     const { businessId, tableId, tableNumber, existingHostToken, hostToken } = req.body;
-    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
     const targetTableId = tableId || `tbl-${tableNumber ? encodeURIComponent(tableNumber) : '1'}`;
 
     const result = await rbacService.scanTableCheckIn(targetBusinessId, targetTableId, { 
@@ -1013,7 +1027,7 @@ router.post('/tables/:id/reset-session', authenticate, asyncHandler('TABLE_SESSI
 router.post('/tables/reset-status', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
     const { businessId, tableId, tableNumber } = req.body;
-    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
     await rbacService.resetTableToDefault(targetBusinessId, tableId, tableNumber);
     return res.json({ success: true, message: 'Table status reset to default ACTIVE successfully' });
   } catch (err: any) {
@@ -1029,7 +1043,7 @@ router.post('/tables/reset-status', customerDiningLimiter, async (req: Request, 
  */
 router.post('/orders', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
-    const { businessId, table_id, table_number, floor, building, items, currency, customer_name, customer_phone, order_notes, existing_order_id, existingOrderId, host_token, hostToken } = req.body;
+    const { businessId, table_id, table_number, floor, building, items, currency, customer_name, customer_phone, order_notes, existing_order_id, existingOrderId, host_token, hostToken, session_id, sessionId } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -1038,7 +1052,7 @@ router.post('/orders', customerDiningLimiter, async (req: Request, res: Response
       });
     }
 
-    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const targetBusinessId = businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
     const order = await rbacService.createTableOrder(targetBusinessId, {
       table_id: table_id || undefined,
       table_number: table_number || 'Table 1',
@@ -1051,6 +1065,7 @@ router.post('/orders', customerDiningLimiter, async (req: Request, res: Response
       order_notes: order_notes || '',
       existing_order_id: existing_order_id || existingOrderId,
       host_token: host_token || hostToken,
+      session_id: session_id || sessionId,
     });
 
     
@@ -1098,7 +1113,7 @@ router.post('/orders', customerDiningLimiter, async (req: Request, res: Response
  */
 router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Response) => {
   try {
-    const { business_id, businessId, table_id, table_number, floor, building, items, currency, customer_name, customer_phone, order_notes, general_notes, existing_order_id, existingOrderId, host_token, hostToken } = req.body;
+    const { business_id, businessId, table_id, table_number, floor, building, items, currency, customer_name, customer_phone, order_notes, general_notes, existing_order_id, existingOrderId, host_token, hostToken, session_id, sessionId } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -1107,7 +1122,7 @@ router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Re
       });
     }
 
-    const targetBusinessId = business_id || businessId || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const targetBusinessId = business_id || businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
     const order = await rbacService.createTableOrder(targetBusinessId, {
       table_id: table_id || undefined,
       table_number: table_number || 'Table 1',
@@ -1120,6 +1135,7 @@ router.post('/table-orders', customerDiningLimiter, async (req: Request, res: Re
       order_notes: order_notes || general_notes || '',
       existing_order_id: existing_order_id || existingOrderId,
       host_token: host_token || hostToken,
+      session_id: session_id || sessionId,
     });
 
     return res.status(201).json({
@@ -1151,13 +1167,13 @@ router.get('/orders', optionalAuthenticate, async (req: AuthenticatedRequest, re
           error: { code: 'UNAUTHORIZED', message: 'Authentication required to view all orders' }
         });
       }
-      const businessId = (req.query.businessId as string) || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+      const businessId = (req.query.businessId as string) || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
       const orders = await rbacService.getTableOrders(businessId, createSystemContext(), tableId);
       return res.json({ success: true, data: orders });
     }
 
     // Authenticated staff/manager: verify access to requested business
-    const businessId = (req.query.businessId as string) || req.user?.business?.id || (await db.getDefaultBusiness())?.id || 'maya-forest-resort';
+    const businessId = (req.query.businessId as string) || req.user?.business?.id || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
     const isAuthorized = await assertBusinessAccess(req.user, businessId);
     if (!isAuthorized) {
       return res.status(403).json({
@@ -1578,24 +1594,23 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
     const taxConfig = await rbacService.getTaxConfig(businessId);
     const existingItems = Array.isArray(existingOrder.items) ? (existingOrder.items as any[]) : [];
     const activeItems = existingItems.filter((item: any) => item.status !== 'CANCELLED');
-    const itemsMenuTotal = activeItems.reduce(
-      (sum: number, item: any) => {
-        const qty = Number(item.quantity) || 1;
-        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
-        return sum + (Number(item.price) || 0) * billedQty;
-      },
-      0
-    );
-    const { subtotal, taxAmount, computedTaxes, totalAmount: preDiscountTotal } =
-      rbacService.calculateOrderTaxBreakdown(itemsMenuTotal, taxConfig);
+    const billReqPkgComp =
+      Boolean((existingOrder as any).is_packaging_comp) ||
+      (Number(existingOrder.packaging_qty || 0) > 0 &&
+        existingOrder.packaging_charge !== undefined &&
+        existingOrder.packaging_charge !== null &&
+        Number(existingOrder.packaging_charge) === 0);
+    const billReqBillable = computeOrderBillableAmounts(activeItems, {
+      packagingFeeRate: Number(taxConfig.packaging_fee ?? 10),
+      isPackagingComp: billReqPkgComp,
+    });
 
     const verifiedPromoCode = promo_code ? String(promo_code).trim() : (existingOrder.promo_code || null);
-    const verifiedPromoDiscount = verifiedPromoCode
-      ? rbacService.resolveOrderPromoDiscount(preDiscountTotal, { promo_code: verifiedPromoCode }, taxConfig)
-      : (existingOrder.promo_discount ? Number(existingOrder.promo_discount) : 0);
+    const {
+      subtotal, taxAmount, computedTaxes, discountAmount: verifiedPromoDiscount, totalAmount: verifiedTotalAmount
+    } = rbacService.calculateOrderTotalsWithDiscount(billReqBillable.itemsMenuTotal + billReqBillable.packagingTotal, { promo_code: verifiedPromoCode, promo_discount: verifiedPromoCode ? undefined : (existingOrder.promo_discount ? Number(existingOrder.promo_discount) : 0) }, taxConfig);
 
-    const verifiedTotalAmount = Math.max(0, Math.round((preDiscountTotal - verifiedPromoDiscount) * 100) / 100);
+
 
     const updatedOrder = await prisma.tableOrder.update({
       where: { id: orderId },
@@ -1609,6 +1624,8 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
         subtotal: subtotal,
         tax_amount: taxAmount,
         taxes: computedTaxes as any,
+        packaging_charge: billReqBillable.packagingTotal,
+        packaging_qty: billReqBillable.packagingQty,
       },
     });
 
@@ -1660,11 +1677,16 @@ router.post('/orders/:id/request-bill', customerDiningLimiter, optionalAuthentic
  */
 router.get('/cashier-session/current', authenticate, requireResourceAccess('billing', 'read'), asyncHandler('CASHIER_SESSION_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
   const user = req.user!;
-  const todayStr = new Date().toISOString().split('T')[0];
-  const isManagerOrOwner = (user.role as string) === 'OWNER' || (user.role as string) === 'MANAGER' || (user.role as string) === 'RESTAURANT_OWNER' || (user.role as string) === 'HOTEL_OWNER' || (user as any).isOwner;
+  const actor = resolveSubject(user) || user;
+  const actorId = actor.id || user.id;
+  const todayStr = await getBusinessTodayDate(businessId);
+  const isManagerOrOwner =
+    isBusinessOwnerRole(actor.role) ||
+    isManagerRole(actor.role) ||
+    Boolean((user as any).isOwner && !user.acting_as);
   const requestedCashierId = req.query.cashierId as string | undefined;
 
-  const targetCashierId = (isManagerOrOwner && requestedCashierId) ? requestedCashierId : user.id;
+  const targetCashierId = (isManagerOrOwner && requestedCashierId) ? requestedCashierId : actorId;
 
   const session = await prisma.cashierRegisterSession.findFirst({
     where: {
@@ -1682,46 +1704,83 @@ router.get('/cashier-session/current', authenticate, requireResourceAccess('bill
 }));
 
 /**
- * POST /api/rbac/cashier-session/open
- * Open a cashier's individual shift drawer with an opening float
- */
-/**
  * GET /api/rbac/cashier-session/all
- * Fetch all cashier shift register sessions for today
+ * Fetch cashier shift register sessions (defaults to today; supports date_string, start_date/end_date, all_dates=true, cashier_id)
  */
 router.get('/cashier-session/all', authenticate, requireResourceAccess('billing', 'read'), asyncHandler('CASHIER_ALL_SESSIONS_FETCH_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
-  const todayStr = new Date().toISOString().split('T')[0];
+  const user = req.user!;
+  const actor = resolveSubject(user) || user;
+  const actorId = actor.id || user.id;
+  const isManagerOrOwner =
+    isBusinessOwnerRole(actor.role) ||
+    isManagerRole(actor.role) ||
+    Boolean((user as any).isOwner && !user.acting_as);
+
+  const dateString = (req.query.date_string as string | undefined)?.trim();
+  const startDate = (req.query.start_date as string | undefined)?.trim();
+  const endDate = (req.query.end_date as string | undefined)?.trim();
+  const allDates = String(req.query.all_dates || '').toLowerCase() === 'true';
+  const requestedCashierId = ((req.query.cashier_id || req.query.cashierId) as string | undefined)?.trim();
+
+  const where: any = { business_id: businessId };
+
+  if (!allDates) {
+    if (dateString) {
+      where.date_string = dateString;
+    } else if (startDate || endDate) {
+      where.date_string = {};
+      if (startDate) where.date_string.gte = startDate;
+      if (endDate) where.date_string.lte = endDate;
+    } else {
+      where.date_string = await getBusinessTodayDate(businessId);
+    }
+  }
+
+  if (!isManagerOrOwner) {
+    where.cashier_id = actorId;
+  } else if (requestedCashierId && requestedCashierId !== 'ALL') {
+    where.cashier_id = requestedCashierId;
+  }
+
   const sessions = await prisma.cashierRegisterSession.findMany({
-    where: {
-      business_id: businessId,
-      date_string: todayStr,
-    },
+    where,
     orderBy: { opened_at: 'desc' },
   });
 
   return res.json({
     success: true,
-    data: sessions,
+    data: sessions.map((s) => ({
+      ...s,
+      opening_float: Number(s.opening_float) || 0,
+      closing_cash: s.closing_cash !== null && s.closing_cash !== undefined ? Number(s.closing_cash) : null,
+    })),
   });
 }));
 
+/**
+ * POST /api/rbac/cashier-session/open
+ * Open a cashier's individual shift drawer with an opening float
+ */
 router.post('/cashier-session/open', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('CASHIER_SESSION_OPEN_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
   const user = req.user!;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const actor = resolveSubject(user) || user;
+  const actorId = actor.id || user.id;
+  const todayStr = await getBusinessTodayDate(businessId);
   const { opening_float = 0, notes } = req.body;
-  const cashierName = (user as any).name || user.email?.split('@')[0] || 'Cashier';
+  const actorRecord = actorId !== user.id ? await db.findUserById(actorId) : null;
+  const cashierName = actorRecord?.name || (actorId === user.id ? (user as any).name : undefined) || actor.email?.split('@')[0] || user.email?.split('@')[0] || 'Cashier';
 
   const session = await prisma.cashierRegisterSession.upsert({
     where: {
       business_id_cashier_id_date_string: {
         business_id: businessId,
-        cashier_id: user.id,
+        cashier_id: actorId,
         date_string: todayStr,
       },
     },
     create: {
       business_id: businessId,
-      cashier_id: user.id,
+      cashier_id: actorId,
       cashier_name: cashierName,
       date_string: todayStr,
       status: 'OPEN',
@@ -1752,13 +1811,15 @@ router.post('/cashier-session/open', authenticate, requireResourceAccess('billin
  */
 router.post('/cashier-session/close', authenticate, requireResourceAccess('billing', 'write'), asyncHandler('CASHIER_SESSION_CLOSE_FAILED', async (req: AuthenticatedRequest, res: Response, businessId: string) => {
   const user = req.user!;
-  const todayStr = new Date().toISOString().split('T')[0];
+  const actor = resolveSubject(user) || user;
+  const actorId = actor.id || user.id;
+  const todayStr = await getBusinessTodayDate(businessId);
   const { closing_cash, notes } = req.body;
 
   const session = await prisma.cashierRegisterSession.findFirst({
     where: {
       business_id: businessId,
-      cashier_id: user.id,
+      cashier_id: actorId,
       date_string: todayStr,
       status: 'OPEN',
     },
@@ -1948,8 +2009,11 @@ router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), asy
   const startDate = req.query.startDate as string | undefined;
   const endDate = req.query.endDate as string | undefined;
   const paymentMethod = req.query.paymentMethod as string | undefined;
-  const isManagerOrOwner = (req.user?.role as string) === 'OWNER' || (req.user?.role as string) === 'MANAGER' || (req.user?.role as string) === 'RESTAURANT_OWNER' || (req.user?.role as string) === 'HOTEL_OWNER' || (req.user as any)?.isOwner;
-  const cashierId = isManagerOrOwner ? (req.query.cashierId as string | undefined) : req.user?.id;
+  const salesActor = resolveSubject(req.user) || req.user;
+  const isManagerOrOwner = isBusinessOwnerRole(salesActor?.role) || isManagerRole(salesActor?.role) || Boolean((req.user as any)?.isOwner && !req.user?.acting_as);
+  const effectiveTabs = getEffectiveTabs(req.user);
+  const canViewStoreWideSales = isManagerOrOwner || effectiveTabs.includes('overview') || effectiveTabs.includes('operations');
+  const cashierId = canViewStoreWideSales ? (req.query.cashierId as string | undefined) : (salesActor?.id || req.user?.id);
   const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
 
   const sales = await rbacService.getSales(businessId, {
@@ -1957,6 +2021,7 @@ router.get('/sales', authenticate, requireResourceAccess('billing', 'read'), asy
     startDate,
     endDate,
     paymentMethod,
+    cashierId,
     limit
   });
 
@@ -2130,6 +2195,8 @@ router.put('/businesses/:businessId/operations/config', authenticate, requireOwn
       where: { id: businessId },
       data: { operations_config: config },
     });
+    realtimeEmitter.operationsConfigUpdated(businessId, config);
+    realtimeEmitter.businessProfileUpdated(businessId, { id: businessId, operations_config: config });
     return res.json({ success: true, message: 'Operations config saved' });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -2168,6 +2235,8 @@ router.post('/businesses/:businessId/operations/days', authenticate, requireOwne
       data: { current_operational_day: fullRecord },
     });
 
+    realtimeEmitter.operationalDayUpdated(businessId, fullRecord);
+    realtimeEmitter.businessProfileUpdated(businessId, { id: businessId, current_operational_day: fullRecord });
     return res.json({ success: true, data: fullRecord });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
@@ -2211,6 +2280,8 @@ router.put('/businesses/:businessId/operations/days/:dayId', authenticate, requi
       data: { current_operational_day: dayData },
     });
 
+    realtimeEmitter.operationalDayUpdated(businessId, dayData);
+    realtimeEmitter.businessProfileUpdated(businessId, { id: businessId, current_operational_day: dayData });
     return res.json({ success: true, data: dayData });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });

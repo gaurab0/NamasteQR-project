@@ -18,7 +18,7 @@ async function runTests() {
   const baseUrl = `http://localhost:${port}`;
 
   const defaultBiz = await db.getDefaultBusiness();
-  const businessId = defaultBiz?.id || 'maya-forest-resort';
+  const businessId = defaultBiz?.id || 'namaste-bistro';
 
   // Test 1: Verify all 10 supported languages and their configuration
   try {

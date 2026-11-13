@@ -1,6 +1,10 @@
 import { CreditAccountSelectionModal } from './CreditAccountSelectionModal';
-import { calculateBillTotals } from '../../utils/taxCalculations';
+import { CashierSalesSheet } from './CashierSalesSheet';
+import { calculateBillTotals, computeOrderBillableAmounts } from '../../utils/taxCalculations';
 import { renderFormattedDate } from '../../utils/dateFormatter';
+import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
+import { applySaleDeletion, formatVenueDateStr, isSaleInRevenueWindow } from '../../utils/revenueWindow';
+import { normalizeLegacyRole } from '../../utils/tabAccess';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 import { usePrinter } from '../../contexts/PrinterContext';
@@ -113,7 +117,24 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   onNavigateTab,
 }) => {
   const canSettleBill = !isViewOnly;
-  const isManagerOrOwner = activeRole === 'OWNER' || activeRole === 'MANAGER' || user?.role === 'OWNER' || user?.role === 'MANAGER' || user?.isOwner;
+  const currentStaffSession = rbacService.getCurrentStaffSession();
+  const effectiveRole = normalizeLegacyRole(activeRole || currentStaffSession?.role || user?.role);
+  const isManagerOrOwner =
+    effectiveRole === 'OWNER' ||
+    effectiveRole === 'MANAGER' ||
+    effectiveRole === 'RESTAURANT_OWNER' ||
+    effectiveRole === 'RESTAURANT_MANAGER' ||
+    effectiveRole === 'ADMIN' ||
+    Boolean(user?.isOwner && !currentStaffSession);
+  const activeCashier = currentStaffSession
+    ? { id: currentStaffSession.id, name: currentStaffSession.name, email: currentStaffSession.email }
+    : { id: user?.id, name: user?.name, email: user?.email };
+  const [posSubTab, setPosSubTab] = useState<'register' | 'cashier_sheet'>('register');
+  const { opsConfig, revenueWindow, storeStatus } = useSyncedOperationsState(
+    business.id,
+    business.operations_config,
+    business.current_operational_day
+  );
 
   // Cashier Shift Register & Drawer Float States
   const [cashierSession, setCashierSession] = useState<CashierRegisterSession | null>(null);
@@ -152,6 +173,10 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       if (onRequestRoleSignIn) onRequestRoleSignIn();
       return;
     }
+    if (!storeStatus.isOpen && mode !== 'SETTLE_TABLE' && !orderId) {
+      showStatus(storeStatus.reason || 'Business day is closed. Reopen or start the day to take new orders.', 'error');
+      return;
+    }
     setSaleModalMode(mode);
     setSelectedOrderToSettle(orderId);
     setShowNewSaleModal(true);
@@ -162,7 +187,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const [excelPreviewPrefix, setExcelPreviewPrefix] = useState<string>('Sales_Register');
   const [timeFilter, setTimeFilter] = useState<SalesTimeFilter>('ALL');
   const [customDate, setCustomDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    formatVenueDateStr(new Date(), business?.operations_config)
   );
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [paymentFilter, setPaymentFilter] = useState<string>('ALL');
@@ -179,7 +204,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
   // Deletion feedback
   const [dayToDelete, setDayToDelete] = useState<string>(
-    new Date().toISOString().split('T')[0]
+    formatVenueDateStr(new Date(), business?.operations_config)
   );
   const [deleteAllConfirmText, setDeleteAllConfirmText] = useState<string>('');
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
@@ -191,14 +216,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     loadBillingData();
   }, [business.id]);
 
-  // Reload session when cashier filter changes
+  // Reload session when cashier filter or active trading day changes
   useEffect(() => {
     if (!business.id) return;
-    const targetCashierId = isManagerOrOwner && selectedCashierFilter !== 'ALL' ? selectedCashierFilter : user?.id;
+    const targetCashierId = isManagerOrOwner && selectedCashierFilter !== 'ALL' ? selectedCashierFilter : activeCashier.id;
     if (targetCashierId) {
       rbacService.getCurrentCashierSessionApi(targetCashierId, business.id).then(setCashierSession).catch(() => {});
     }
-  }, [selectedCashierFilter, business.id, isManagerOrOwner, user?.id]);
+    rbacService.getAllCashierSessionsApi(business.id).then(setAllCashierSessions).catch(() => {});
+  }, [selectedCashierFilter, business.id, isManagerOrOwner, activeCashier.id, revenueWindow.businessDate]);
 
   const showStatus = (text: string, type: 'success' | 'error' = 'success') => {
     setStatusMessage({ type, text });
@@ -325,13 +351,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       setGlAccounts(glData || []);
       if (menuData) setMenuItems(menuData || []);
       // Load Cashier Session for Today
-      const targetCashierId = isManagerOrOwner && selectedCashierFilter !== 'ALL' ? selectedCashierFilter : user?.id;
+      const targetCashierId = isManagerOrOwner && selectedCashierFilter !== 'ALL' ? selectedCashierFilter : activeCashier.id;
       if (targetCashierId) {
         rbacService.getCurrentCashierSessionApi(targetCashierId, business.id).then(setCashierSession).catch(() => {});
       }
-      if (isManagerOrOwner) {
-        rbacService.getAllCashierSessionsApi(business.id).then(setAllCashierSessions).catch(() => {});
-      }
+      rbacService.getAllCashierSessionsApi(business.id).then(setAllCashierSessions).catch(() => {});
 
       if (ordersData && Array.isArray(ordersData)) {
         processIncomingOrders(ordersData);
@@ -454,6 +478,18 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       });
     });
 
+    // Real-time sales sync (keeps POS Register and Dashboard revenue in sync across terminals)
+    const unsubSales = socketService.subscribeToSales((newSale: SaleRecord) => {
+      if (!newSale?.id || (newSale.business_id && newSale.business_id !== business.id)) return;
+      setSales((prev) => (prev.some((s) => s.id === newSale.id) ? prev : [newSale, ...prev]));
+    });
+    const unsubSalesDel = socketService.subscribeToSalesDeleted((payload) => {
+      setSales((prev) => applySaleDeletion(prev, payload));
+    });
+    const unsubReconnect = socketService.onReconnect(() => {
+      loadBillingData();
+    });
+
     // 5-second polling fallback to keep tables & scan check-in sessions fresh
     const tablePollInterval = setInterval(() => {
       rbacService.getTablesApi(business.id).then((fresh) => {
@@ -464,6 +500,9 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     return () => {
       unsubSocket();
       unsubTables();
+      unsubSales();
+      unsubSalesDel();
+      unsubReconnect();
       clearInterval(tablePollInterval);
     };
   }, [business.id]);
@@ -522,7 +561,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     return `${Math.floor(diffMin / 60)}h ${diffMin % 60}m ago`;
   };
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = revenueWindow.businessDate;
 
   const weekRange = useMemo(() => {
     const now = new Date();
@@ -530,25 +569,24 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     const start = new Date(now);
     start.setDate(now.getDate() - dayOfWeek);
     start.setHours(0, 0, 0, 0);
-    return start.toISOString().split('T')[0];
-  }, []);
+    return formatVenueDateStr(start, opsConfig);
+  }, [revenueWindow.businessDate, opsConfig]);
 
   const monthRange = useMemo(() => {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
-    return start.toISOString().split('T')[0];
-  }, []);
+    const [y, m] = revenueWindow.businessDate.split('-');
+    return `${y}-${m}-01`;
+  }, [revenueWindow.businessDate]);
 
   // Filtered sales based on TimeFilter
   const filteredSales = useMemo(() => {
     return sales.filter((sale) => {
       const saleDate =
         sale.date_string ||
-        (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : '');
+        (sale.created_at ? formatVenueDateStr(new Date(sale.created_at), opsConfig) : '');
 
       // Time Filter
       if (timeFilter === 'DAY') {
-        if (saleDate !== todayStr) return false;
+        if (!isSaleInRevenueWindow(sale, revenueWindow)) return false;
       } else if (timeFilter === 'WEEK') {
         if (saleDate < weekRange) return false;
       } else if (timeFilter === 'MONTH') {
@@ -564,11 +602,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
       // Cashier Scope: Cashiers only see their own; Owners/Managers can filter or see all
       if (!isManagerOrOwner) {
-        const myId = user?.id;
-        const myName = (user?.name || '').toLowerCase();
-        const myEmailPrefix = (user?.email ? user.email.split('@')[0] : '').toLowerCase();
+        const myId = activeCashier.id;
+        const myName = (activeCashier.name || '').toLowerCase();
+        const myEmailPrefix = (activeCashier.email ? activeCashier.email.split('@')[0] : '').toLowerCase();
         const saleCashierName = (sale.cashier_name || '').toLowerCase();
-        const matchesCashier = sale.cashier_id === myId || (saleCashierName && (saleCashierName === myName || saleCashierName === myEmailPrefix));
+        const matchesCashier = sale.cashier_id === myId || (!sale.cashier_id && Boolean(saleCashierName) && (saleCashierName === myName || saleCashierName === myEmailPrefix));
         if (!matchesCashier) return false;
       } else if (selectedCashierFilter !== 'ALL') {
         if (sale.cashier_id !== selectedCashierFilter) return false;
@@ -589,7 +627,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
       return true;
     });
-  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery, isManagerOrOwner, user, selectedCashierFilter]);
+  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery, isManagerOrOwner, activeCashier.id, activeCashier.name, activeCashier.email, selectedCashierFilter]);
 
   // Earnings and Key Metrics Calculations
   const metrics = useMemo(() => {
@@ -604,7 +642,6 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       CARD: { count: 0, total: 0 },
       QR_CODE: { count: 0, total: 0 },
       ONLINE: { count: 0, total: 0 },
-      ROOM_CHARGE: { count: 0, total: 0 },
       CREDIT: { count: 0, total: 0 },
     };
 
@@ -640,21 +677,18 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
     };
   }, [filteredSales]);
 
-  // Today's summary for POS Register View (Cashier-scoped or Manager-selected)
+  // Today's summary for POS Register View (Cashier-scoped or Manager-selected, synchronized to revenueWindow)
   const todaySales = useMemo(() => {
     return sales.filter((sale) => {
-      const saleDate =
-        sale.date_string ||
-        (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : '');
-      if (saleDate !== todayStr) return false;
+      if (!isSaleInRevenueWindow(sale, revenueWindow)) return false;
 
       // Cashier scope: Cashiers only see their own settled bills
       if (!isManagerOrOwner) {
-        const myId = user?.id;
-        const myName = (user?.name || '').toLowerCase();
-        const myEmailPrefix = (user?.email ? user.email.split('@')[0] : '').toLowerCase();
+        const myId = activeCashier.id;
+        const myName = (activeCashier.name || '').toLowerCase();
+        const myEmailPrefix = (activeCashier.email ? activeCashier.email.split('@')[0] : '').toLowerCase();
         const saleCashierName = (sale.cashier_name || '').toLowerCase();
-        const matchesCashier = sale.cashier_id === myId || (saleCashierName && (saleCashierName === myName || saleCashierName === myEmailPrefix));
+        const matchesCashier = sale.cashier_id === myId || (!sale.cashier_id && Boolean(saleCashierName) && (saleCashierName === myName || saleCashierName === myEmailPrefix));
         if (!matchesCashier) return false;
       } else if (selectedCashierFilter !== 'ALL') {
         if (sale.cashier_id !== selectedCashierFilter) return false;
@@ -662,7 +696,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
       return true;
     });
-  }, [sales, todayStr, isManagerOrOwner, user, selectedCashierFilter]);
+  }, [sales, revenueWindow, isManagerOrOwner, activeCashier.id, activeCashier.name, activeCashier.email, selectedCashierFilter]);
 
   const todayGross = useMemo(() => {
     return todaySales.reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
@@ -680,11 +714,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         map.set(s.cashier_id, s.cashier_name || 'Cashier');
       }
     });
-    if (user?.id) {
-      map.set(user.id, user.name || (user.email ? user.email.split('@')[0] : 'Me'));
+    if (activeCashier.id) {
+      map.set(activeCashier.id, activeCashier.name || (activeCashier.email ? activeCashier.email.split('@')[0] : 'Me'));
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [allCashierSessions, sales, user]);
+  }, [allCashierSessions, sales, activeCashier.id, activeCashier.name, activeCashier.email]);
 
   const isShiftOpen = cashierSession?.status === 'OPEN';
   const currentOpeningFloat = Number(cashierSession?.opening_float) || 0;
@@ -709,6 +743,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       setIsSessionOperating(true);
       const sess = await rbacService.openCashierSessionApi(floatNum, 'Shift drawer opened', business.id);
       setCashierSession(sess);
+      rbacService.getAllCashierSessionsApi(business.id).then(setAllCashierSessions).catch(() => {});
       showStatus(`Shift register opened with Rs. ${sess.opening_float.toLocaleString()} drawer float!`);
     } catch (err: any) {
       showStatus(err.message || 'Failed to open register', 'error');
@@ -723,6 +758,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       setIsSessionOperating(true);
       const sess = await rbacService.closeCashierSessionApi(closeNum, closingNotesInput, business.id);
       setCashierSession(sess);
+      rbacService.getAllCashierSessionsApi(business.id).then(setAllCashierSessions).catch(() => {});
       setShowCloseShiftModal(false);
       setClosingCashInput('');
       setClosingNotesInput('');
@@ -946,7 +982,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
             <button
               id="btn-settle-table-orders"
               type="button"
-              onClick={() => canSettleBill ? setShowNewSaleModal(true) : onRequestRoleSignIn?.()}
+              onClick={() => openSaleModal('SETTLE_TABLE', pendingOrders[0]?.id)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 text-xs font-bold hover:bg-amber-100 transition-colors shadow-2xs"
             >
               <Utensils className="w-4 h-4 text-amber-600" />
@@ -958,17 +994,86 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           <button
             id="btn-new-pos-sale"
             type="button"
-            onClick={() => canSettleBill ? setShowNewSaleModal(true) : onRequestRoleSignIn?.()}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-2xs cursor-pointer"
+            disabled={!storeStatus.isOpen}
+            title={!storeStatus.isOpen ? (storeStatus.reason || 'Business day is closed') : 'Record a new counter POS sale'}
+            onClick={() => openSaleModal('COUNTER')}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
-            New POS Sale
+            {storeStatus.isOpen ? 'New POS Sale' : 'Day Closed'}
           </button>
 
           
         </div>
       </div>
 
+      {!storeStatus.isOpen && (
+        <div
+          id="banner-pos-store-closed"
+          className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-900"
+        >
+          <div className="flex items-center gap-2 font-semibold">
+            <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>
+              {storeStatus.reason || 'Business day is currently closed.'} New customer QR &amp; counter POS orders are paused.
+              {pendingOrders.length > 0 ? ' Existing open table bills can still be settled.' : ''}
+            </span>
+          </div>
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateTab('operations', 'shift')}
+              className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold shrink-0 cursor-pointer"
+            >
+              Open Operations Hub
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Finance & POS Sub-Tab Switcher */}
+      <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-zinc-100 border border-zinc-200/90 shadow-2xs">
+        <button
+          id="btn-pos-subtab-register"
+          type="button"
+          onClick={() => setPosSubTab('register')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+            posSubTab === 'register'
+              ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200/80'
+              : 'text-zinc-600 hover:text-zinc-900'
+          }`}
+        >
+          <Receipt className="w-3.5 h-3.5 text-amber-600" />
+          <span>POS Register</span>
+        </button>
+        <button
+          id="btn-pos-subtab-cashier-sheet"
+          type="button"
+          onClick={() => setPosSubTab('cashier_sheet')}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+            posSubTab === 'cashier_sheet'
+              ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200/80'
+              : 'text-zinc-600 hover:text-zinc-900'
+          }`}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Cashier Sales Sheet</span>
+        </button>
+      </div>
+
+      {posSubTab === 'cashier_sheet' ? (
+        <CashierSalesSheet
+          business={business}
+          sales={sales}
+          initialSessions={allCashierSessions}
+          availableCashiers={availableCashiers}
+          isManagerOrOwner={isManagerOrOwner}
+          activeCashier={activeCashier}
+          revenueWindow={revenueWindow}
+          opsConfig={opsConfig}
+          currencySymbol={currencySymbol}
+        />
+      ) : (
       <div className="space-y-6 animate-in fade-in duration-150 pt-2">
           {/* Pay-First Orders Queue */}
           {payFirstOrders.length > 0 && (
@@ -993,14 +1098,19 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
                 {payFirstOrders.map((order) => {
                   const pfActiveItems = (order.items || []).filter((i: any) => i.status !== 'CANCELLED');
-                  const pfMenuTotal = pfActiveItems.reduce((s: number, i: any) => {
-                    const qty = Number(i.quantity) || 1;
-                    const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
-                    const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
-                    return s + (Number(i.price) || 0) * billedQty;
-                  }, 0);
+                  const pfPkgComp =
+                    Boolean((order as any).is_packaging_comp) ||
+                    (Number(order.packaging_qty || 0) > 0 &&
+                      order.packaging_charge !== undefined &&
+                      order.packaging_charge !== null &&
+                      Number(order.packaging_charge) === 0);
+                  const pfBillable = computeOrderBillableAmounts(pfActiveItems, {
+                    packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+                    isPackagingComp: pfPkgComp,
+                  });
                   const pfBill = calculateBillTotals({
-                    itemsMenuTotal: pfMenuTotal,
+                    itemsMenuTotal: pfBillable.itemsMenuTotal,
+                    packagingTotal: pfBillable.packagingTotal,
                     taxConfig,
                     fallbackTaxes: order.taxes,
                     fallbackTaxAmount: order.tax_amount,
@@ -1274,13 +1384,19 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   const table = tables.find((t) => t.id === order.table_id);
                   const tableName = table ? `Table ${table.table_number}` : (order.table_number ? `Table ${order.table_number}` : 'Table');
                   const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
+                  const ordPkgComp =
+                    Boolean((order as any).is_packaging_comp) ||
+                    (Number(order.packaging_qty || 0) > 0 &&
+                      order.packaging_charge !== undefined &&
+                      order.packaging_charge !== null &&
+                      Number(order.packaging_charge) === 0);
+                  const ordBillable = computeOrderBillableAmounts(activeItems, {
+                    packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+                    isPackagingComp: ordPkgComp,
+                  });
                   const orderSubtotal = calculateBillTotals({
-                    itemsMenuTotal: activeItems.reduce((sum, i) => {
-                      const qty = Number(i.quantity) || 1;
-                      const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
-                      const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
-                      return sum + (Number(i.price) || 0) * billedQty;
-                    }, 0),
+                    itemsMenuTotal: ordBillable.itemsMenuTotal,
+                    packagingTotal: ordBillable.packagingTotal,
                     taxConfig,
                     flatDiscountAmount: Number(order.promo_discount) || 0,
                   }).grandTotal;
@@ -1479,7 +1595,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                   <p className="text-xs text-zinc-500 mt-0.5">
                     {isManagerOrOwner
                       ? 'Per-cashier drawer float tracking, cash collection reconciliation, and multi-terminal monitoring.'
-                      : `Live drawer float and physical cash reconciliation for ${user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier')}`}
+                      : `Live drawer float and physical cash reconciliation for ${activeCashier.name || (activeCashier.email ? activeCashier.email.split('@')[0] : 'Cashier')}`}
                   </p>
                 </div>
               </div>
@@ -1624,7 +1740,9 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                 </span>
                 <div>
                   <h3 className="text-sm font-bold text-zinc-900">Today's POS Counter Register</h3>
-                  <p className="text-xs text-zinc-500">Real-time settlement metrics for today ({todayStr})</p>
+                  <p className="text-xs text-zinc-500">
+                    Real-time settlement metrics for today ({todayStr}) • Resets daily at {revenueWindow.resetTimeLabel}
+                  </p>
                 </div>
               </div>
               <button
@@ -1712,6 +1830,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
             </div>
           </div>
         </div>
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL 2: REGISTER NEW POS SALE / SETTLE TABLE                             */}
@@ -1726,6 +1845,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           user={user}
           initialOrderId={selectedOrderToSettle}
           initialTableId={selectedTableIdToOrder}
+          isStoreOpen={storeStatus.isOpen}
           onClose={() => {
             setShowNewSaleModal(false);
             setSelectedOrderToSettle(undefined);
@@ -1733,7 +1853,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           }}
           onGlAccountCreated={(acc) => setGlAccounts(prev => { if (!prev.some(a => a.id === acc.id)) return [...prev, acc]; return prev; })}
           onSaleCreated={(newSale) => {
-            setSales((prev) => [newSale, ...prev]);
+            setSales((prev) => (prev.some((s) => s.id === newSale.id) ? prev : [newSale, ...prev]));
             if (newSale.order_id) {
               setPendingOrders((prev) => prev.filter((o) => o.id !== newSale.order_id));
               setPayFirstOrders((prev) => prev.filter((o) => o.id !== newSale.order_id));
@@ -1947,13 +2067,19 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                     const table = tables.find((t) => t.id === order.table_id);
                     const tableName = table ? `Table ${table.table_number}` : (order.table_number ? `Table ${order.table_number}` : 'Table');
                     const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
+                    const ordPkgComp =
+                      Boolean((order as any).is_packaging_comp) ||
+                      (Number(order.packaging_qty || 0) > 0 &&
+                        order.packaging_charge !== undefined &&
+                        order.packaging_charge !== null &&
+                        Number(order.packaging_charge) === 0);
+                    const ordBillable = computeOrderBillableAmounts(activeItems, {
+                      packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+                      isPackagingComp: ordPkgComp,
+                    });
                     const orderSubtotal = calculateBillTotals({
-                      itemsMenuTotal: activeItems.reduce((sum, i) => {
-                        const qty = Number(i.quantity) || 1;
-                        const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
-                        const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
-                        return sum + (Number(i.price) || 0) * billedQty;
-                      }, 0),
+                      itemsMenuTotal: ordBillable.itemsMenuTotal,
+                      packagingTotal: ordBillable.packagingTotal,
                       taxConfig,
                       flatDiscountAmount: Number(order.promo_discount) || 0,
                     }).grandTotal;
@@ -2171,6 +2297,7 @@ interface NewSaleModalProps {
   user?: any;
   initialOrderId?: string;
   initialTableId?: string;
+  isStoreOpen?: boolean;
   onClose: () => void;
   onSaleCreated: (sale: SaleRecord) => void;
   onOrderSettledConflict?: (orderId?: string, tableId?: string) => void;
@@ -2187,6 +2314,7 @@ interface MenuCandidate {
   category?: string;
   food_type?: FoodType;
   is_available?: boolean;
+  is_packageable?: boolean;
 }
 
 const NewSaleModal: React.FC<NewSaleModalProps> = ({
@@ -2198,6 +2326,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   user,
   initialOrderId,
   initialTableId,
+  isStoreOpen = true,
   onClose,
   onSaleCreated,
   onOrderSettledConflict,
@@ -2227,6 +2356,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   } | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
   const [compReason, setCompReason] = useState<string>('');
+  // null = auto-comp packaging for comped quantities; true = make ALL packaging complimentary; false = bill all packaging
+  const [pkgCompOverride, setPkgCompOverride] = useState<boolean | null>(null);
 
   const compModeActive = useMemo(() => {
     if (saleType !== 'DINE_IN') return false;
@@ -2282,6 +2413,10 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             const unitPrice = Number(i.price) || 0;
             const isPkg = (i as any).is_packageable !== false;
             const pQty = isPkg ? Math.max(0, Math.min(qty, Number(i.pack_qty) || (i.is_packaged ? qty : 0))) : 0;
+            const compPackQty =
+              i.comp_pack_qty !== undefined && i.comp_pack_qty !== null
+                ? Math.min(pQty, Math.max(0, Number(i.comp_pack_qty) || 0))
+                : undefined;
             return {
               id: `item-${idx}`,
               item_id: i.item_id || `item-${idx}`,
@@ -2296,12 +2431,26 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               is_packageable: isPkg,
               is_packaged: pQty > 0,
               pack_qty: pQty,
+              ...(compPackQty !== undefined ? { comp_pack_qty: compPackQty } : {}),
+              ...(i.is_packaging_comp !== undefined ? { is_packaging_comp: Boolean(i.is_packaging_comp) } : {}),
               subtotal: billedQty * unitPrice,
               total_price: billedQty * unitPrice,
             };
           })
         );
       }
+
+      const packagedRelated = relatedOrders.filter((o) => Number(o.packaging_qty || 0) > 0);
+      const orderHasAllCompPkg =
+        packagedRelated.length > 0 &&
+        packagedRelated.every(
+          (o) =>
+            Boolean((o as any).is_packaging_comp) ||
+            (o.packaging_charge !== undefined &&
+              o.packaging_charge !== null &&
+              Number(o.packaging_charge) === 0)
+        );
+      setPkgCompOverride(orderHasAllCompPkg ? true : null);
 
       const savedPromoCode = (found.promo_code || '').trim().toUpperCase();
       const savedPromoDiscount = Number(found.promo_discount) || 0;
@@ -2400,6 +2549,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             category: item.category,
             food_type: (v.food_type || item.food_type || 'none') as FoodType,
             is_available: v.is_available !== false && item.is_available !== false && item.status !== 'out_of_stock' && item.status !== 'unavailable',
+            is_packageable: item.is_packageable !== false,
           });
         });
       } else {
@@ -2411,6 +2561,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           category: item.category,
           food_type: (item.food_type || 'none') as FoodType,
           is_available: item.is_available !== false && item.status !== 'out_of_stock' && item.status !== 'unavailable',
+          is_packageable: item.is_packageable !== false,
         });
       }
     });
@@ -2614,6 +2765,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           target.pack_qty = Math.min(qty, Number(target.pack_qty) || 0);
           target.is_packaged = Boolean(Number(target.pack_qty) > 0);
         }
+        delete target.comp_pack_qty;
+        delete target.is_packaging_comp;
       }
       if ((field as string) === 'pack_qty' || field === 'is_packaged') {
         const qty = Math.max(1, Number(target.quantity) || 1);
@@ -2622,6 +2775,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           : (val === '' ? ('' as any) : Math.max(0, Math.min(qty, Number(val) || 0)));
         target.pack_qty = pQty;
         target.is_packaged = Boolean(Number(pQty) > 0);
+        delete target.comp_pack_qty;
+        delete target.is_packaging_comp;
       }
       copy[index] = target;
       return copy;
@@ -2811,37 +2966,39 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
   // Calculations (Supports both Exclusive of VAT% and Inclusive of VAT% modes; Discounts are deducted from Grand Total without combining with VAT)
   const currency = taxConfig?.currency_symbol || taxConfig?.currency || 'Rs.';
-  const itemsMenuTotal = useMemo(() => {
-    return items
-      .filter((item) => (item.name || '').trim().length > 0)
-      .reduce((sum, item) => {
-        const qty = Number(item.quantity) || 1;
-        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
-        const unitPrice = Number(item.unit_price ?? item.price) || 0;
-        return sum + billedQty * unitPrice;
-      }, 0);
-  }, [items]);
+  const packagingFeeRate = Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0);
 
-  const packagingFeeRate = Number(taxConfig?.packaging_fee) || 10;
-  const packagingTotal = useMemo(() => {
-    return items
-      .filter((item) => (item.name || '').trim().length > 0 && item.is_packageable !== false)
-      .reduce((sum, item) => {
-        const qty = Number(item.quantity) || 1;
-        const pQty = Math.max(0, Math.min(qty, Number(item.pack_qty) || (item.is_packaged ? qty : 0)));
-        return sum + pQty * packagingFeeRate;
-      }, 0);
+  const defaultBillableSummary = useMemo(() => {
+    const namedItems = items.filter((item) => (item.name || '').trim().length > 0);
+    return computeOrderBillableAmounts(namedItems, { packagingFeeRate });
   }, [items, packagingFeeRate]);
 
-  const packagingQtyTotal = useMemo(() => {
-    return items
-      .filter((item) => (item.name || '').trim().length > 0 && item.is_packageable !== false)
-      .reduce((sum, item) => {
-        const qty = Number(item.quantity) || 1;
-        return sum + Math.max(0, Math.min(qty, Number(item.pack_qty) || (item.is_packaged ? qty : 0)));
+  const billableSummary = useMemo(() => {
+    if (pkgCompOverride === null) return defaultBillableSummary;
+    const namedItems = items.filter((item) => (item.name || '').trim().length > 0);
+    const grossPkg = namedItems
+      .filter((it) => it.is_packageable !== false)
+      .reduce((sum, it) => {
+        const qty = Number(it.quantity) || 1;
+        const pQty = Math.max(0, Math.min(qty, Number(it.pack_qty) || (it.is_packaged ? qty : 0)));
+        return sum + pQty * packagingFeeRate;
       }, 0);
-  }, [items]);
+    return computeOrderBillableAmounts(namedItems, {
+      packagingFeeRate,
+      isPackagingComp: pkgCompOverride === true ? true : undefined,
+      ...(pkgCompOverride === false ? { explicitPackagingCharge: grossPkg } : {}),
+    });
+  }, [items, packagingFeeRate, pkgCompOverride, defaultBillableSummary]);
+
+  const isDefaultAllPkgComp =
+    defaultBillableSummary.packagingQty > 0 && defaultBillableSummary.packagingTotal === 0;
+
+  const itemsMenuTotal = billableSummary.itemsMenuTotal;
+  const packagingTotal = billableSummary.packagingTotal;
+  const packagingQtyTotal = billableSummary.packagingQty;
+  const compPackagingQty = pkgCompOverride === false ? 0 : billableSummary.compPackagingQty;
+  const grossPackagingTotal = billableSummary.grossPackagingTotal;
+  const isAllPkgComp = packagingQtyTotal > 0 && packagingTotal === 0;
 
   const billCalc = useMemo(() => {
     return calculateBillTotals({
@@ -2951,6 +3108,16 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         const price = Number(item.unit_price ?? item.price) || 0;
         const isPkg = item.is_packageable !== false;
         const pQty = isPkg ? Math.max(0, Math.min(qty, Number(item.pack_qty) || (item.is_packaged ? qty : 0))) : 0;
+        const itemCompPack = pkgCompOverride === true
+          ? pQty
+          : pkgCompOverride === false
+            ? 0
+            : item.is_packaging_comp
+              ? pQty
+              : item.comp_pack_qty !== undefined && item.comp_pack_qty !== null
+                ? Math.min(pQty, Math.max(0, Number(item.comp_pack_qty) || 0))
+                : Math.min(pQty, compQty);
+        const billedPackQty = Math.max(0, pQty - itemCompPack);
         return {
           ...item,
           quantity: qty,
@@ -2962,7 +3129,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           is_packageable: isPkg,
           is_packaged: pQty > 0,
           pack_qty: pQty,
-          packaging_charge: pQty * packagingFeeRate,
+          comp_pack_qty: itemCompPack,
+          is_packaging_comp: pQty > 0 && itemCompPack >= pQty,
+          packaging_charge: billedPackQty * packagingFeeRate,
           subtotal: billedQty * price,
           total_price: billedQty * price,
         };
@@ -2970,7 +3139,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
 
     const hasCompItems = validItems.some((i) => (i.comp_qty ?? 0) > 0);
 
-    if (validItems.length === 0 || (subtotal <= 0 && !hasCompItems)) {
+    if (validItems.length === 0 || (subtotal <= 0 && !hasCompItems && compPackagingQty <= 0)) {
       alert('Please add at least one dish with a valid name and price.');
       return;
     }
@@ -2993,8 +3162,6 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         resolvedTableNumber = 'Takeaway';
       } else if (saleType === 'DELIVERY') {
         resolvedTableNumber = 'Delivery';
-      } else if (saleType === 'ROOM_SERVICE') {
-        resolvedTableNumber = 'Room Service';
       } else {
         resolvedTableNumber = 'Dine-In Restaurant';
       }
@@ -3006,6 +3173,14 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         : appliedPromo?.code && totalDiscountAmount > 0
         ? totalDiscountAmount
         : undefined;
+
+    const modalStaffSession = rbacService.getCurrentStaffSession();
+    const activeCashierId = modalStaffSession?.id || user?.id;
+    const activeCashierName =
+      modalStaffSession?.name ||
+      (modalStaffSession?.email ? modalStaffSession.email.split('@')[0] : undefined) ||
+      user?.name ||
+      (user?.email ? user.email.split('@')[0] : 'Cashier');
 
     const salePayload: Partial<SaleRecord> = {
       business_id: business.id,
@@ -3019,6 +3194,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       order_number: customOrderNumber.trim() || undefined,
       sale_type: saleType,
       items: validItems,
+      is_packaging_comp: isAllPkgComp,
       packaging_charge: packagingTotal,
       packaging_qty: packagingQtyTotal,
       subtotal,
@@ -3036,8 +3212,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       credit_gl_account_name: paymentMethod === 'CREDIT' ? creditGlAccount?.name : undefined,
       credit_gl_account_number: paymentMethod === 'CREDIT' ? creditGlAccount?.number : undefined,
       payment_status: 'PAID',
-      cashier_name: user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier'),
-      cashier_id: user?.id,
+      cashier_name: activeCashierName,
+      cashier_id: activeCashierId,
       notes,
       comp_reason: compModeActive && compReason.trim() ? compReason.trim() : undefined,
     };
@@ -3108,13 +3284,23 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                   const primaryOrd = ordList[0];
                   const allActive = ordList.flatMap((o) => o.items || []).filter((i) => i.status !== 'CANCELLED');
                   const isMultiRound = ordList.length > 1;
+                  const packagedInList = ordList.filter((o) => Number(o.packaging_qty || 0) > 0);
+                  const ordListPkgComp =
+                    packagedInList.length > 0 &&
+                    packagedInList.every(
+                      (o) =>
+                        Boolean((o as any).is_packaging_comp) ||
+                        (o.packaging_charge !== undefined &&
+                          o.packaging_charge !== null &&
+                          Number(o.packaging_charge) === 0)
+                    );
+                  const ordListBillable = computeOrderBillableAmounts(allActive, {
+                    packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+                    isPackagingComp: ordListPkgComp,
+                  });
                   const totalPayable = calculateBillTotals({
-                    itemsMenuTotal: allActive.reduce((s, i) => {
-                      const qty = Number(i.quantity) || 1;
-                      const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
-                      const billedQty = i.is_comp ? 0 : Math.max(0, qty - compQty);
-                      return s + (Number(i.price) || 0) * billedQty;
-                    }, 0),
+                    itemsMenuTotal: ordListBillable.itemsMenuTotal,
+                    packagingTotal: ordListBillable.packagingTotal,
                     taxConfig,
                     flatDiscountAmount: ordList.reduce((s, o) => s + (Number(o.promo_discount) || 0), 0),
                   }).grandTotal;
@@ -3344,11 +3530,20 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                       </button>
                     </div>
                     <span className="text-[10px] text-zinc-500">of {item.quantity || 1}</span>
-                    {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) > 0 && (
-                      <span className="text-[10px] font-bold text-amber-700 font-mono">
-                        (+{currency} {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) * packagingFeeRate})
-                      </span>
-                    )}
+                    {(() => {
+                      const pQty = Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)));
+                      if (pQty <= 0) return null;
+                      const itemPkg = computeOrderBillableAmounts([item], {
+                        packagingFeeRate,
+                        isPackagingComp: pkgCompOverride === true ? true : undefined,
+                        ...(pkgCompOverride === false ? { explicitPackagingCharge: pQty * packagingFeeRate } : {}),
+                      });
+                      return (
+                        <span className={`text-[10px] font-bold font-mono ${itemPkg.packagingTotal === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {itemPkg.packagingTotal === 0 ? '(🎁 Comp)' : `(+${currency} ${itemPkg.packagingTotal})`}
+                        </span>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -3551,11 +3746,20 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                             </button>
                           </div>
                           <span className="text-[9px] text-zinc-500">of {item.quantity || 1}</span>
-                          {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) > 0 && (
-                            <span className="text-[10px] font-bold text-amber-700 font-mono">
-                              (+{currency} {(Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)) * packagingFeeRate})
-                            </span>
-                          )}
+                          {(() => {
+                            const pQty = Math.max(0, Math.min(Number(item.quantity) || 1, Number(item.pack_qty) || (item.is_packaged ? Number(item.quantity) || 1 : 0)));
+                            if (pQty <= 0) return null;
+                            const itemPkg = computeOrderBillableAmounts([item], {
+                              packagingFeeRate,
+                              isPackagingComp: pkgCompOverride === true ? true : undefined,
+                              ...(pkgCompOverride === false ? { explicitPackagingCharge: pQty * packagingFeeRate } : {}),
+                            });
+                            return (
+                              <span className={`text-[10px] font-bold font-mono ${itemPkg.packagingTotal === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                {itemPkg.packagingTotal === 0 ? '(🎁 Comp)' : `(+${currency} ${itemPkg.packagingTotal})`}
+                              </span>
+                            );
+                          })()}
                         </div>
                       )}
                     </td>
@@ -3905,15 +4109,60 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
             </div>
 
             {/* Calculations */}
-            {packagingTotal > 0 && (
-              <div className="flex items-center justify-between text-zinc-600">
-                <span className="flex items-center gap-1 text-zinc-700 font-semibold">
-                  <Package className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Packaging ({packagingQtyTotal} {packagingQtyTotal === 1 ? 'item' : 'items'}):</span>
-                </span>
-                <span className="font-semibold text-zinc-800">
-                  +{currency} {packagingTotal.toFixed(2)}
-                </span>
+            {packagingQtyTotal > 0 && (
+              <div className="space-y-1.5 pb-1.5 border-b border-zinc-200/70">
+                <label
+                  htmlFor="toggle-pos-comp-packaging"
+                  className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border cursor-pointer transition select-none ${
+                    isAllPkgComp
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                      : 'bg-amber-50/70 border-amber-200 text-amber-950 hover:border-amber-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <input
+                      id="toggle-pos-comp-packaging"
+                      type="checkbox"
+                      checked={isAllPkgComp}
+                      onChange={() => {
+                        if (isAllPkgComp) {
+                          setPkgCompOverride(pkgCompOverride === true && !isDefaultAllPkgComp ? null : false);
+                        } else {
+                          setPkgCompOverride(true);
+                        }
+                      }}
+                      className="w-3.5 h-3.5 rounded border-zinc-300 text-amber-600 focus:ring-amber-500 cursor-pointer shrink-0"
+                    />
+                    <span className="text-[11px] font-bold truncate">Complimentary Packaging</span>
+                  </div>
+                  <span className={`text-[10px] font-bold font-mono shrink-0 ${isAllPkgComp ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {isAllPkgComp ? 'WAIVED' : `${compPackagingQty}/${packagingQtyTotal} Comp`}
+                  </span>
+                </label>
+
+                <div className="flex items-center justify-between text-zinc-600">
+                  <span className="flex items-center gap-1 text-zinc-700 font-semibold">
+                    <Package className="w-3.5 h-3.5 text-amber-600" />
+                    <span>
+                      Packaging ({packagingQtyTotal} {packagingQtyTotal === 1 ? 'item' : 'items'}
+                      {compPackagingQty > 0 && !isAllPkgComp ? `, ${compPackagingQty} comp` : ''}):
+                    </span>
+                  </span>
+                  {packagingTotal === 0 ? (
+                    <span className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                      {grossPackagingTotal > 0 && (
+                        <span className="line-through text-zinc-400 font-normal">
+                          +{currency} {grossPackagingTotal.toFixed(2)}
+                        </span>
+                      )}
+                      <span>Complimentary ({currency} 0.00)</span>
+                    </span>
+                  ) : (
+                    <span className="font-semibold text-zinc-800">
+                      +{currency} {packagingTotal.toFixed(2)}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
             <div className="flex items-center justify-between text-zinc-600">
@@ -3927,18 +4176,6 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
                 {currency} {subtotal.toFixed(2)}
               </span>
             </div>
-
-            {/* Itemized Taxes */}
-            {taxesList.map((tax, tIdx) => (
-              <div key={tax.id || `${tax.name}-${tIdx}`} className="flex items-center justify-between text-zinc-500">
-                <span>
-                  {tax.name} ({tax.rate_percent}%):
-                </span>
-                <span className="font-medium">
-                  +{currency} {tax.amount.toFixed(2)}
-                </span>
-              </div>
-            ))}
 
             {manualDiscountAmount > 0 && (
               <div className="flex items-center justify-between text-rose-600 font-semibold">
@@ -3963,6 +4200,27 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
               </div>
             )}
 
+            {(manualDiscountAmount > 0 || (appliedPromo && promoDiscountAmount > 0)) && (
+              <div className="flex items-center justify-between text-zinc-700 font-semibold border-t border-dashed border-zinc-200 pt-1">
+                <span>Taxable Subtotal:</span>
+                <span>
+                  {currency} {billCalc.taxableSubtotal.toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {/* Itemized Taxes */}
+            {taxesList.map((tax, tIdx) => (
+              <div key={tax.id || `${tax.name}-${tIdx}`} className="flex items-center justify-between text-zinc-500">
+                <span>
+                  {tax.name} ({tax.rate_percent}%):
+                </span>
+                <span className="font-medium">
+                  +{currency} {tax.amount.toFixed(2)}
+                </span>
+              </div>
+            ))}
+
             <div className="pt-2 border-t border-zinc-200 flex items-center justify-between text-zinc-950 font-black text-base">
               <span>Grand Total:</span>
               <span className="text-amber-700">
@@ -3973,6 +4231,12 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         </div>
 
         {/* Footer Actions */}
+        {!isStoreOpen && !selectedOrderId && (
+          <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-semibold">
+            Business day is closed — select an open unsettled table order above to close out, or reopen the day before recording a new counter sale.
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-zinc-100">
           <button
             type="button"
@@ -3984,9 +4248,9 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
           <button
             id="btn-confirm-complete-sale"
             type="button"
-            disabled={isSubmitting}
+            disabled={isSubmitting || (!isStoreOpen && !selectedOrderId)}
             onClick={handleCompleteSale}
-            className="px-5 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+            className="px-5 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
             Complete Sale & Print Receipt
@@ -4031,14 +4295,27 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
   const { dispatchPrint } = usePrinter();
   const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
   const cancelledItems = (order.items || []).filter((i) => i.status === 'CANCELLED');
-  const itemsMenuTotal = activeItems.reduce((sum, it) => {
-    const qty = Number(it.quantity) || 1;
-    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
-    const billedQty = it.is_comp ? 0 : Math.max(0, qty - compQty);
-    return sum + (Number(it.price) || 0) * billedQty;
-  }, 0);
-  const packagingCharge = Number(order.packaging_charge || 0);
-  const packagingQty = Number(order.packaging_qty || 0);
+  const slipPkgComp =
+    Boolean((order as any).is_packaging_comp) ||
+    (Number(order.packaging_qty || 0) > 0 &&
+      order.packaging_charge !== undefined &&
+      order.packaging_charge !== null &&
+      Number(order.packaging_charge) === 0);
+  const slipBillable = computeOrderBillableAmounts(activeItems, {
+    packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+    isPackagingComp: slipPkgComp,
+    explicitPackagingCharge:
+      order.packaging_charge !== undefined && order.packaging_charge !== null
+        ? Number(order.packaging_charge)
+        : undefined,
+    explicitPackagingQty:
+      order.packaging_qty !== undefined && order.packaging_qty !== null
+        ? Number(order.packaging_qty)
+        : undefined,
+  });
+  const itemsMenuTotal = slipBillable.itemsMenuTotal;
+  const packagingCharge = slipBillable.packagingTotal;
+  const packagingQty = slipBillable.packagingQty;
   const checkCalc = calculateBillTotals({
     itemsMenuTotal,
     packagingTotal: packagingCharge,
@@ -4207,10 +4484,10 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
 
           {/* Calculations */}
           <div className="space-y-1 text-[11px]">
-            {packagingCharge > 0 && (
+            {packagingQty > 0 && (
               <div className="flex justify-between text-zinc-700 font-semibold">
                 <span>Packaging ({packagingQty} pkgs):</span>
-                <span>+{currency} {packagingCharge.toFixed(2)}</span>
+                <span>{packagingCharge === 0 ? `Complimentary (${currency} 0.00)` : `+${currency} ${packagingCharge.toFixed(2)}`}</span>
               </div>
             )}
             <div className="flex justify-between text-zinc-600">

@@ -62,10 +62,7 @@ export class AuthController {
       });
 
       // 5. Determine Role
-      const role: UserRole = 
-        validated.businessType === 'HOTEL' || validated.businessType === 'RESORT' 
-          ? 'HOTEL_OWNER' 
-          : 'RESTAURANT_OWNER';
+      const role: UserRole = 'RESTAURANT_OWNER';
 
       // 6. Create User (Pending)
       const user = await db.createUser({

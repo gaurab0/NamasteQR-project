@@ -1,6 +1,6 @@
 import React from 'react';
 import { Logo } from '../ui/Logo';
-import { ShieldCheck, Mail, Hotel, Sparkles, Utensils } from 'lucide-react';
+import { ShieldCheck, Mail, Building2, Sparkles, Utensils } from 'lucide-react';
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -33,7 +33,7 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
             </div>
 
             <h1 className="text-3xl lg:text-4xl font-extrabold tracking-tight text-white leading-tight">
-              Manage your restaurants and hotel operations with ease.
+              Manage your restaurants, cafés, and dining operations with ease.
             </h1>
 
             <p className="text-zinc-400 text-sm leading-relaxed">
@@ -58,12 +58,12 @@ export const AuthLayout: React.FC<AuthLayoutProps> = ({
 
           <div className="flex items-start gap-3">
             <div className="p-2 rounded-lg bg-zinc-900 border border-zinc-800 text-amber-400 shrink-0">
-              <Hotel className="w-4 h-4" />
+              <Building2 className="w-4 h-4" />
             </div>
             <div>
               <h4 className="text-xs font-bold text-zinc-200">Multi-Property Support</h4>
               <p className="text-xs text-zinc-400 mt-0.5">
-                From single boutique cafes to full-scale resort chains.
+                From single boutique cafés to multi-branch restaurant groups.
               </p>
             </div>
           </div>

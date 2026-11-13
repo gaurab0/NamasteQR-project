@@ -14,7 +14,15 @@ export const TAB_LABELS: Record<TabPermissionId, string> = {
   franchise: 'Franchise / Branch Switcher',
 };
 
-const BUSINESS_OWNER_ROLES = new Set(['OWNER', 'ADMIN', 'RESTAURANT_OWNER', 'HOTEL_OWNER']);
+const BUSINESS_OWNER_ROLES = new Set(['OWNER', 'ADMIN', 'RESTAURANT_OWNER']);
+
+export function normalizeLegacyRole(role?: string | null): string {
+  if (!role || typeof role !== 'string') return '';
+  const upper = role.trim().toUpperCase();
+  if (upper === 'HOTEL_OWNER') return 'RESTAURANT_OWNER';
+  if (upper === 'HOTEL_MANAGER') return 'RESTAURANT_MANAGER';
+  return upper;
+}
 
 const TAB_SET: ReadonlySet<string> = new Set<string>(TAB_PERMISSION_IDS);
 
@@ -48,7 +56,7 @@ export type AccessSubject = {
  */
 export function isBusinessOwner(role?: string | null): boolean {
   if (!role || typeof role !== 'string') return false;
-  return BUSINESS_OWNER_ROLES.has(role.trim().toUpperCase());
+  return BUSINESS_OWNER_ROLES.has(normalizeLegacyRole(role));
 }
 
 /**

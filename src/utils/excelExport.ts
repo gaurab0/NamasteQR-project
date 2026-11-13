@@ -48,7 +48,6 @@ export function buildSalesWorkbookData(
   let totalCard = 0;
   let totalQR = 0;
   let totalOnline = 0;
-  let totalRoomBill = 0;
   let totalDeposit = 0;
   let totalDiscounts = 0;
   let totalTax = 0;
@@ -74,7 +73,6 @@ export function buildSalesWorkbookData(
     else if (pm === 'CARD') totalCard += tot;
     else if (pm === 'UPI_QR' || pm === 'QR_CODE') totalQR += tot;
     else if (pm === 'ONLINE') totalOnline += tot;
-    else if (pm === 'ROOM_BILL' || pm === 'ROOM_CHARGE') totalRoomBill += tot;
     else if (pm === 'DEDUCT_FROM_DEPOSIT') totalDeposit += tot;
     else totalCash += tot; // fallback
 
@@ -184,7 +182,7 @@ export function buildSalesWorkbookData(
   // -------------------------------------------------------------
   const salesHeaders = [
     'S.N.', 'Invoice Number', 'Order Number', 'Date & Time', 'Date (YYYY-MM-DD)',
-    'Sale Type', 'Table # / Room', 'Customer Name', 'Customer Phone', 'Customer PAN',
+    'Sale Type', 'Table #', 'Customer Name', 'Customer Phone', 'Customer PAN',
     'Items Summary', 'Total Items', 'Payment Method', 'Payment Status',
     'GL Account No.', 'GL Account Name', 'GL Category', 'Currency',
     'Subtotal', 'Packaging (Rs.)', 'Taxes Breakdown', 'Total Tax', 'Service Charge',
@@ -255,11 +253,6 @@ export function buildSalesWorkbookData(
       glAccNumber = match?.account_number || '1040';
       glAccName = match?.account_name || 'Online Payment Gateway Clearing';
       glAccCategory = match?.category || 'ASSET';
-    } else if (normalizedPayment === 'ROOM_BILL' || normalizedPayment === 'ROOM_CHARGE') {
-      const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'ROOM_CHARGE' || a.account_number === '1110');
-      glAccNumber = match?.account_number || '1110';
-      glAccName = match?.account_name || 'Guest Room Folio Receivable';
-      glAccCategory = match?.category || 'ASSET';
     } else if (normalizedPayment === 'DEDUCT_FROM_DEPOSIT') {
       const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'DEPOSIT_CLEARING' || a.account_number === '2130');
       glAccNumber = match?.account_number || '2130';
@@ -329,7 +322,7 @@ export function buildSalesWorkbookData(
     'Total Amount',
     'Payment Method',
     'Sale Type',
-    'Table # / Room',
+    'Table #',
     'Customer Name',
     'Customer Phone',
     'Customer PAN',
@@ -581,7 +574,6 @@ export function buildSalesWorkbookData(
     else if (key === 'CARD_SETTLEMENT') mappedTotal = totalCard;
     else if (key === 'QR_SETTLEMENT') mappedTotal = totalQR;
     else if (key === 'ONLINE_SETTLEMENT') mappedTotal = totalOnline;
-    else if (key === 'ROOM_CHARGE') mappedTotal = totalRoomBill;
     else if (key === 'DEPOSIT_CLEARING') mappedTotal = totalDeposit;
     else if (key === 'CREDIT_SETTLEMENT') {
       mappedTotal = creditAccountsMap[acc.id]?.total || 0;
@@ -608,7 +600,6 @@ export function buildSalesWorkbookData(
   if (totalCard > 0) journalRows.push(['1020', 'Credit & Debit Card Clearing', 'ASSET', Number(totalCard.toFixed(2)), 0, 'POS card swipe settlements']);
   if (totalQR > 0) journalRows.push(['1030', 'QR Digital Payment Clearing', 'ASSET', Number(totalQR.toFixed(2)), 0, 'QR digital payments settled']);
   if (totalOnline > 0) journalRows.push(['1040', 'Online Payment Gateway Clearing', 'ASSET', Number(totalOnline.toFixed(2)), 0, 'Direct online checkout settlement']);
-  if (totalRoomBill > 0) journalRows.push(['1110', 'Guest Room Folio Receivable', 'ASSET', Number(totalRoomBill.toFixed(2)), 0, 'Dining bills transferred to hotel guest folio']);
   if (totalDeposit > 0) journalRows.push(['2130', 'Customer Advance & Deposit Clearing', 'LIABILITY', Number(totalDeposit.toFixed(2)), 0, 'Sales settled against pre-paid customer deposits']);
   if (totalDiscounts > 0) journalRows.push(['4090', 'Sales Discounts & Rebates', 'EXPENSE', Number(totalDiscounts.toFixed(2)), 0, 'Customer discounts allowed on billing']);
 
@@ -627,7 +618,7 @@ export function buildSalesWorkbookData(
   if (totalTax > 0) journalRows.push(['2110', 'Sales Tax / VAT Payable (13%)', 'TAX_LIABILITY', 0, Number(totalTax.toFixed(2)), 'Collected government tax liability']);
   if (totalServiceCharge > 0) journalRows.push(['2120', 'Hospitality Service Charge Payable', 'LIABILITY', 0, Number(totalServiceCharge.toFixed(2)), '10% Service charge pool for staff']);
 
-  const totalDebits = totalCash + totalCard + totalQR + totalOnline + totalRoomBill + totalDeposit + journalCreditDebits + totalDiscounts;
+  const totalDebits = totalCash + totalCard + totalQR + totalOnline + totalDeposit + journalCreditDebits + totalDiscounts;
   const totalCredits = totalFoodSales + totalBeverageSales + totalTax + totalServiceCharge;
   const variance = Math.abs(totalDebits - totalCredits);
 
@@ -643,7 +634,7 @@ export function buildSalesWorkbookData(
   const creditHeaders = [
     'S.N.', 'Invoice Number', 'Order Number', 'Date & Time', 'Customer GL Account No.', 'Customer GL Account Name',
     'Customer Name', 'Customer Address', 'Customer Phone', 'Extension No.', 'Office Name', 'Designation',
-    'Table # / Room', 'Items Ordered', 'Subtotal', 'Total Tax', 'Service Charge', 'Discount Amount', 'Grand Total (Credit)',
+    'Table #', 'Items Ordered', 'Subtotal', 'Total Tax', 'Service Charge', 'Discount Amount', 'Grand Total (Credit)',
     'Payment Status', 'Cashier / Billed By', 'Notes'
   ];
   const creditCols = creditHeaders.length;

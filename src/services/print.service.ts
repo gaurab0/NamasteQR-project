@@ -1,4 +1,5 @@
 import { renderFormattedDate } from '../utils/dateFormatter';
+import { computeOrderBillableAmounts } from '../utils/taxCalculations';
 import {
   PrinterConfig,
   PrinterRole,
@@ -267,8 +268,6 @@ class PrintService {
         tableNo = 'Takeaway';
       } else if (data.sale_type === 'DELIVERY') {
         tableNo = 'Delivery';
-      } else if (data.sale_type === 'ROOM_SERVICE') {
-        tableNo = 'Room Service';
       } else {
         tableNo = 'Dine-In Restaurant';
       }
@@ -406,12 +405,24 @@ class PrintService {
 
       html += `<div class="divider"></div>`;
 
-      const calculatedSubtotal = items.reduce((sum: number, it: any) => {
-        const qty = Number(it.quantity) || 1;
-        const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
-        const billedQty = it.is_comp ? 0 : Math.max(0, qty - compQty);
-        return sum + billedQty * (Number(it.price) || 0);
-      }, 0);
+      const dataPkgComp =
+        Boolean(data.is_packaging_comp) ||
+        (Number(data.packaging_qty || 0) > 0 &&
+          data.packaging_charge !== undefined &&
+          data.packaging_charge !== null &&
+          Number(data.packaging_charge) === 0);
+      const billable = computeOrderBillableAmounts(items, {
+        isPackagingComp: dataPkgComp,
+        explicitPackagingCharge:
+          data.packaging_charge !== undefined && data.packaging_charge !== null
+            ? Number(data.packaging_charge)
+            : undefined,
+        explicitPackagingQty:
+          data.packaging_qty !== undefined && data.packaging_qty !== null
+            ? Number(data.packaging_qty)
+            : undefined,
+      });
+      const calculatedSubtotal = billable.itemsMenuTotal + billable.packagingTotal;
 
       const subtotal = data.subtotal !== undefined && data.subtotal !== null ? Number(data.subtotal) : calculatedSubtotal;
       const tax = data.total_tax ?? data.tax_amount ?? data.tax ?? 0;
@@ -419,10 +430,10 @@ class PrintService {
       const total = data.total_amount !== undefined && data.total_amount !== null ? Number(data.total_amount) : Math.max(0, subtotal + Number(tax) - Number(discount));
 
       html += `
-          ${Number(data.packaging_charge) > 0 ? `<div class="row"><span>Packaging (${Number(data.packaging_qty) || 1} pkgs):</span> <span>Rs ${Number(data.packaging_charge).toFixed(2)}</span></div>` : ''}
+          ${billable.packagingQty > 0 ? `<div class="row"><span>Packaging (${billable.packagingQty} pkgs):</span> <span>${billable.packagingTotal === 0 ? 'Complimentary (Rs 0.00)' : `Rs ${billable.packagingTotal.toFixed(2)}`}</span></div>` : ''}
           <div class="row"><span>Subtotal:</span> <span>Rs ${Number(subtotal).toFixed(2)}</span></div>
+          ${Number(discount) > 0 ? `<div class="row"><span>Discount:</span> <span>-Rs ${Number(discount).toFixed(2)}</span></div><div class="row"><span>Taxable Amt:</span> <span>Rs ${Math.max(0, Number(subtotal) - Number(discount)).toFixed(2)}</span></div>` : ''}
           <div class="row"><span>Tax / VAT:</span> <span>Rs ${Number(tax).toFixed(2)}</span></div>
-          ${Number(discount) > 0 ? `<div class="row"><span>Discount:</span> <span>-Rs ${Number(discount).toFixed(2)}</span></div>` : ''}
           <div class="divider"></div>
           <div class="row total-row"><span>TOTAL:</span> <span>Rs ${Number(total).toFixed(2)}</span></div>
           

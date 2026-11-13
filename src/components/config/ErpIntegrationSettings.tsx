@@ -33,7 +33,7 @@ interface ErpIntegrationSettingsProps {
 
 export const ErpIntegrationSettings: React.FC<ErpIntegrationSettingsProps> = ({ businessId: propBusinessId }) => {
   const { user, activeBusiness, currentBusiness } = useAuth();
-  const effectiveBusinessId = propBusinessId || activeBusiness?.id || currentBusiness?.id || user?.business?.id || 'maya-forest-resort';
+  const effectiveBusinessId = propBusinessId || activeBusiness?.id || currentBusiness?.id || user?.business?.id || 'namaste-bistro';
   const [config, setConfig] = useState<ERPConfigData>({
     provider: 'NONE',
     apiUrl: '',

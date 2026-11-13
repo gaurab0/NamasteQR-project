@@ -78,7 +78,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onBookDemo }) => {
                 About NamasteQR
               </h3>
               <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-                NamasteQR is the modern operating system engineered exclusively for the hospitality sector. We empower fine dining restaurants, luxury hotels, artisan cafés, and multi-venue groups with cryptographically verified email authentication, relational kitchen architecture, and contactless digital dining operations.
+                NamasteQR is the modern operating system engineered exclusively for the hospitality sector. We empower fine dining restaurants, artisan cafés, bars, and multi-venue dining groups with cryptographically verified email authentication, relational kitchen architecture, and contactless digital dining operations.
               </p>
             </div>
 
@@ -187,7 +187,7 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onBookDemo }) => {
                 Supported Venues
               </span>
               <p className="text-xs text-zinc-400 leading-relaxed">
-                Fine Dining • Luxury Hotels • Artisan Bakeries • Craft Coffee Bars • Lounges
+                Fine Dining • Casual Dining • Artisan Bakeries • Craft Coffee Bars • Lounges
               </p>
             </div>
           </div>

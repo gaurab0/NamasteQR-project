@@ -44,7 +44,7 @@ import {
   User,
   LogOut
 } from 'lucide-react';
-import { canAccessTab, getFirstPermittedTab, isBusinessOwner } from '../utils/tabAccess';
+import { canAccessTab, getFirstPermittedTab, isBusinessOwner, normalizeLegacyRole } from '../utils/tabAccess';
 import { UserProfileModal } from '../components/profile/UserProfileModal';
 import { AddBranchModal } from '../components/franchise/AddBranchModal';
 import { FranchiseBranchList } from '../components/franchise/FranchiseBranchList';
@@ -317,11 +317,23 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
       });
     });
 
+    const unsubOpsCfg = socketService.subscribeToOperationsConfig((cfg: any) => {
+      if (!isMounted || !cfg) return;
+      updateBusiness({ operations_config: cfg });
+    });
+
+    const unsubOpsDay = socketService.subscribeToOperationalDay((day: any) => {
+      if (!isMounted || !day) return;
+      updateBusiness({ current_operational_day: day });
+    });
+
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
       unsubOrders?.();
       unsubTables?.();
+      unsubOpsCfg?.();
+      unsubOpsDay?.();
     };
   }, [businessId]);
 
@@ -469,15 +481,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
 
   const getRoleLabel = (role?: string) => {
     if (!role) return 'View-Only (Unassigned)';
-    switch (role) {
-      case 'HOTEL_OWNER':
+    switch (normalizeLegacyRole(role)) {
       case 'RESTAURANT_OWNER':
       case 'OWNER':
-        return 'Business Owner (Restaurant / Hotel)';
+        return 'Business Owner (Restaurant & Dining)';
       case 'ADMIN':
         return 'System Administrator';
       case 'MANAGER':
-      case 'HOTEL_MANAGER':
       case 'RESTAURANT_MANAGER':
         return 'General Manager';
       case 'FRONT_DESK':
@@ -494,13 +504,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
   };
 
   const getBusinessTypeLabel = (type: string) => {
-    switch (type) {
+    const upper = (type || '').toUpperCase();
+    switch (upper) {
       case 'RESTAURANT':
-        return 'Restaurant';
       case 'HOTEL':
-        return 'Hotel Property';
       case 'RESORT':
-        return 'Resort & Spa';
+        return 'Restaurant';
       case 'CAFE':
         return 'Café & Bakery';
       case 'BAR':
@@ -964,7 +973,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                   <div>
                     <div className="flex items-center gap-2.5">
                       <div className="w-10 h-10 rounded-xl bg-amber-500 text-zinc-950 flex items-center justify-center font-bold">
-                        {user.business?.type === 'HOTEL' ? '🏨' : user.business?.type === 'CAFE' ? '☕' : user.business?.type === 'BAR' ? '🍸' : '🍲'}
+                        {user.business?.type === 'CAFE' ? '☕' : user.business?.type === 'BAR' ? '🍸' : '🍲'}
                       </div>
                       <div>
                         <h3 className="text-lg font-bold text-zinc-900">
@@ -1055,7 +1064,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
                           <option value="RESTAURANT">Restaurant (Dining & Kitchen)</option>
                           <option value="CAFE">Café & Bakery</option>
                           <option value="BAR">Bar & Lounge</option>
-                          <option value="RESORT">Resort Dining</option>
                           <option value="OTHER">Dining & Food Venue</option>
                         </select>
                       </div>

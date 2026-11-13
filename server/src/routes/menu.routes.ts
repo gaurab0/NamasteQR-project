@@ -4,10 +4,15 @@ import { authenticate, optionalAuthenticate, requireResourceAccess, Authenticate
 import { db } from '../services/db.service';
 import { MenuItem, MenuCategory, FoodType, MenuStatus, MenuItemVariant } from '../types/rbac.types';
 import { generateMenuDocId, generateCategoryDocId } from '../utils/id.utils';
+import {
+  extractAndValidateMenuMatrix,
+  validateGroupedPayload,
+  normalizeImportKey,
+} from '../../../src/utils/menuImportValidator';
 
 const router = Router();
 
-const DEFAULT_BIZ_ID = 'maya-forest-resort';
+const DEFAULT_BIZ_ID = 'namaste-bistro';
 
 /**
  * Robust helper to resolve the business ID from query, header, body, or authenticated user
@@ -346,6 +351,8 @@ router.get('/', optionalAuthenticate, async (req: AuthenticatedRequest, res: Res
         display_style: (d.display_style as any) || 'auto',
         show_image: d.show_image,
         promo_badge: d.promo_badge || undefined,
+        station: (d.station as any) || 'KITCHEN',
+        erp_item_code: d.erp_item_code || undefined,
         order_index: d.order_index,
         preparation_time_mins: d.preparation_time_mins || 15,
         created_by: d.created_by || 'system',
@@ -442,6 +449,8 @@ router.get('/:id', optionalAuthenticate, async (req: AuthenticatedRequest, res: 
       display_style: (d.display_style as any) || 'auto',
       show_image: d.show_image,
       promo_badge: d.promo_badge || undefined,
+      station: (d.station as any) || 'KITCHEN',
+      erp_item_code: d.erp_item_code || undefined,
       order_index: d.order_index,
       preparation_time_mins: d.preparation_time_mins || 15,
       created_by: d.created_by || 'system',
@@ -753,6 +762,66 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
  */
 
 /**
+ * POST /api/menus/bulk-import/validate
+ * Pre-flight validation of raw Excel/CSV rows (and live DB merge conflict detection)
+ */
+router.post('/bulk-import/validate', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const businessId = await resolveBusinessId(req);
+    const { rawRows, items, mode = 'merge', pricingMode = 'inclusive', taxRate = 13 } = req.body;
+    const importMode = mode === 'replace' ? 'replace' : 'merge';
+
+    const existingItemsRaw = await prisma.menuItem.findMany({
+      where: { business_id: businessId },
+      select: { id: true, name: true, erp_item_code: true, category: true, variants: true },
+    });
+    const existingItems = existingItemsRaw.map((d) => ({
+      ...d,
+      variants: Array.isArray(d.variants) ? (d.variants as any[]) : null,
+    }));
+
+    if (Array.isArray(rawRows)) {
+      const result = extractAndValidateMenuMatrix(rawRows, {
+        pricingMode: pricingMode === 'exclusive' ? 'exclusive' : 'inclusive',
+        taxRate: Number(taxRate) || 0,
+        importMode,
+        existingItems,
+      });
+      return res.json({
+        success: true,
+        valid: result.errors.length === 0,
+        errors: result.errors,
+        warnings: result.warnings,
+        summary: result.summary,
+        parsedItems: result.items,
+      });
+    }
+
+    if (Array.isArray(items)) {
+      const result = validateGroupedPayload(items, existingItems, importMode);
+      return res.json({
+        success: true,
+        valid: result.errors.length === 0,
+        errors: result.errors,
+        warnings: result.warnings,
+        summary: result.summary,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: { code: 'EMPTY_PAYLOAD', message: 'Provide rawRows or items to validate.' },
+    });
+  } catch (err: any) {
+    console.error('Error during menu bulk import validation:', err);
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      error: { code: err.code || 'VALIDATION_ERROR', message: err.message || 'Failed to validate menu spreadsheet' },
+    });
+  }
+});
+
+/**
  * POST /api/menus/bulk-import
  * Bulk import or update menu items from Excel / CSV
  * Supports:
@@ -763,16 +832,84 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
   try {
     const businessId = await resolveBusinessId(req);
     const userId = req.user?.id || 'admin-user';
-    const { items, mode = 'merge', pricingMode = 'inclusive', taxRate = 13 } = req.body;
+    const { rawRows, items, mode = 'merge', pricingMode = 'inclusive', taxRate = 13 } = req.body;
+    const importMode = mode === 'replace' ? 'replace' : 'merge';
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'EMPTY_PAYLOAD', message: 'No items provided for import.' },
+    // 1. Fetch existing items & categories FIRST (before any delete/replace) so validation is authoritative
+    const existingItems = await prisma.menuItem.findMany({
+      where: { business_id: businessId },
+    });
+    const existingRefs = existingItems.map((d) => ({
+      id: d.id,
+      name: d.name,
+      erp_item_code: d.erp_item_code,
+      category: d.category || 'General',
+      variants: Array.isArray(d.variants) ? (d.variants as any[]) : null,
+    }));
+
+    let effectiveItems: any[] = [];
+    let validationWarnings: any[] = [];
+    let validationSummary: any = null;
+    if (Array.isArray(rawRows)) {
+      const validation = extractAndValidateMenuMatrix(rawRows, {
+        pricingMode: pricingMode === 'exclusive' ? 'exclusive' : 'inclusive',
+        taxRate: Number(taxRate) || 0,
+        importMode,
+        existingItems: existingRefs,
       });
+
+      if (validation.errors.length > 0) {
+        return res.status(422).json({
+          success: false,
+          error: {
+            code: 'IMPORT_VALIDATION_FAILED',
+            message: `Found ${validation.errors.length} blocking error(s) in the uploaded Excel sheet.`,
+          },
+          validation: {
+            errors: validation.errors,
+            warnings: validation.warnings,
+            summary: validation.summary,
+          },
+        });
+      }
+
+      if (validation.items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'EMPTY_PAYLOAD', message: 'No valid items detected in the spreadsheet.' },
+        });
+      }
+      effectiveItems = validation.items;
+      validationWarnings = validation.warnings;
+      validationSummary = validation.summary;
+    } else {
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'EMPTY_PAYLOAD', message: 'No items provided for import.' },
+        });
+      }
+
+      const validation = validateGroupedPayload(items, existingRefs, importMode);
+      if (validation.errors.length > 0) {
+        return res.status(422).json({
+          success: false,
+          error: {
+            code: 'IMPORT_VALIDATION_FAILED',
+            message: `Found ${validation.errors.length} blocking error(s) in the import payload.`,
+          },
+          validation: {
+            errors: validation.errors,
+            warnings: validation.warnings,
+            summary: validation.summary,
+          },
+        });
+      }
+      effectiveItems = items;
+      validationWarnings = validation.warnings;
+      validationSummary = validation.summary;
     }
 
-    // 1. Fetch existing categories and items for this business
     const existingCategories = await prisma.menuCategory.findMany({
       where: { business_id: businessId },
     });
@@ -781,22 +918,18 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
       categoryMap.set(cat.name.trim().toLowerCase(), cat.id);
     });
 
-    const existingItems = await prisma.menuItem.findMany({
-      where: { business_id: businessId },
-    });
-
-    // Map existing items by ERP code and lowercase trimmed name
+    // Map existing items by normalized ERP code and lowercase whitespace-collapsed name
     const itemByErpCode = new Map<string, any>();
     const itemByName = new Map<string, any>();
     existingItems.forEach((it) => {
       if (it.erp_item_code) {
-        itemByErpCode.set(String(it.erp_item_code).trim().toLowerCase(), it);
+        itemByErpCode.set(normalizeImportKey(it.erp_item_code), it);
       }
-      itemByName.set(it.name.trim().toLowerCase(), it);
+      itemByName.set(normalizeImportKey(it.name), it);
     });
 
     // If replace mode is requested, remove existing items and wipe previous categories
-    if (mode === 'replace') {
+    if (importMode === 'replace') {
       await prisma.menuItem.deleteMany({ where: { business_id: businessId } });
       await prisma.menuCategory.deleteMany({ where: { business_id: businessId } });
       categoryMap.clear();
@@ -821,15 +954,15 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
     let updatedCount = 0;
     const rateMultiplier = pricingMode === 'exclusive' ? (1 + (Number(taxRate) || 0) / 100) : 1;
 
-    for (const raw of items) {
-      const rawName = String(raw.name || raw['Item Name'] || raw.ProductName || '').trim();
+    for (const raw of effectiveItems) {
+      const rawName = String(raw.name || raw['Item Name'] || raw.ProductName || '').trim().replace(/\s+/g, ' ');
       if (!rawName) continue;
 
       const rawCode = raw.erp_item_code !== undefined && raw.erp_item_code !== null
-        ? String(raw.erp_item_code).trim()
-        : (raw.code ? String(raw.code).trim() : null);
+        ? String(raw.erp_item_code).trim().replace(/\s+/g, ' ')
+        : (raw.code ? String(raw.code).trim().replace(/\s+/g, ' ') : null);
 
-      const rawCategory = String(raw.category || raw.Group || raw.Category || 'General').trim();
+      const rawCategory = String(raw.category || raw.Group || raw.Category || 'General').trim().replace(/\s+/g, ' ');
       const catKey = rawCategory.toLowerCase();
 
       // Ensure category exists (with plural/singular tolerance)
@@ -867,14 +1000,20 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
       const rawPrice = Number(raw.price || raw.rate || raw.Rate || raw.BasePrice || 0);
       const finalPrice = Math.round(rawPrice * rateMultiplier * 100) / 100;
 
-      // Routing station
+      // Routing station (respect explicit station; only infer from category when omitted)
       let station = 'KITCHEN';
-      const rawStation = String(raw.station || '').toUpperCase();
-      if (rawStation.includes('BAR') && rawStation.includes('KITCHEN')) station = 'BOTH';
-      else if (rawStation.includes('BAR') || catKey.includes('beverage') || catKey.includes('drink')) station = 'BAR';
+      const rawStation = String(raw.station || '').toUpperCase().trim();
+      if (rawStation) {
+        if (rawStation.includes('BOTH')) station = 'BOTH';
+        else if (rawStation.includes('BAR') && rawStation.includes('KITCHEN')) station = 'BOTH';
+        else if (rawStation.includes('BAR')) station = 'BAR';
+        else station = 'KITCHEN';
+      } else if (catKey.includes('beverage') || catKey.includes('drink')) {
+        station = 'BAR';
+      }
 
-      // Check if item already exists (by ERP Code first, then by exact name)
-      const existing = (rawCode ? itemByErpCode.get(rawCode.toLowerCase()) : null) || itemByName.get(rawName.toLowerCase());
+      // Check if item already exists (by ERP Code first, then by normalized name)
+      const existing = (rawCode ? itemByErpCode.get(normalizeImportKey(rawCode)) : null) || itemByName.get(normalizeImportKey(rawName));
 
       const validVariants = raw.has_variants && Array.isArray(raw.variants) && raw.variants.length > 0
         ? raw.variants.map((v: any, i: number) => ({
@@ -889,7 +1028,7 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
           }))
         : null;
 
-      if (existing && mode === 'merge') {
+      if (existing && importMode === 'merge') {
         // Surgically update price and ERP code while preserving image, description, variants, etc.
         await prisma.menuItem.update({
           where: { id: existing.id },
@@ -921,7 +1060,10 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
             currency: 'Rs.',
             description: raw.description ? String(raw.description).trim() : '',
             image_url: raw.image_url ? String(raw.image_url).trim() : '',
-            food_type: raw.food_type === 'veg' || raw.food_type === 'non-veg' ? raw.food_type : (catKey.includes('veg') ? 'veg' : 'none'),
+            food_type:
+              raw.food_type === 'veg' || raw.food_type === 'non-veg' || raw.food_type === 'none'
+                ? raw.food_type
+                : (catKey.includes('veg') ? 'veg' : 'none'),
             status: 'available',
             is_available: true,
             is_packageable: raw.is_packageable !== false,
@@ -942,13 +1084,17 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
       createdCount,
       updatedCount,
       data: { createdCount, updatedCount, totalProcessed: createdCount + updatedCount },
+      validation: {
+        warnings: validationWarnings,
+        summary: validationSummary,
+      },
       message: `Menu import complete: ${createdCount} created, ${updatedCount} updated.`,
     });
   } catch (err: any) {
     console.error('Error during menu bulk import:', err);
-    return res.status(500).json({
+    return res.status(err.statusCode || 500).json({
       success: false,
-      error: { code: 'BULK_IMPORT_ERROR', message: err.message || 'Failed to bulk import menu' },
+      error: { code: err.code || 'BULK_IMPORT_ERROR', message: err.message || 'Failed to bulk import menu' },
     });
   }
 });

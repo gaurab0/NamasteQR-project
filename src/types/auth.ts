@@ -1,9 +1,9 @@
 import type { TabPermissionId } from './rbac';
 import type { KdsPrintMode } from './printer.types';
 
-export type BusinessType = 'RESTAURANT' | 'HOTEL' | 'CAFE' | 'RESORT' | 'BAR' | 'OTHER';
+export type BusinessType = 'RESTAURANT' | 'CAFE' | 'BAR' | 'OTHER';
 export type BusinessStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
-export type UserRole = 'RESTAURANT_OWNER' | 'HOTEL_OWNER' | 'ADMIN' | 'STAFF';
+export type UserRole = 'RESTAURANT_OWNER' | 'ADMIN' | 'STAFF';
 export type UserStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 
 export interface MenuItemCustomStyle {
@@ -35,6 +35,8 @@ export interface BusinessOperatingHours {
   openTime: string;
   closeTime: string;
   autoDateAdvance: boolean;
+  dailyResetTime?: string;
+  timezoneOffsetMinutes?: number;
   default_language?: string;
 }
 

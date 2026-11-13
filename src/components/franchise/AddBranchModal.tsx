@@ -171,7 +171,7 @@ export const AddBranchModal: React.FC<AddBranchModalProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Maya Forest Resort - Downtown"
+                  placeholder="e.g. Namaste Bistro - Downtown"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-200 focus:outline-hidden focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"

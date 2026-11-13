@@ -852,10 +852,22 @@ export class ClientRBACService {
   }
 
   public async getAllCashierSessionsApi(
-    businessId?: string
+    businessId?: string,
+    options?: {
+      dateString?: string;
+      startDate?: string;
+      endDate?: string;
+      allDates?: boolean;
+      cashierId?: string;
+    }
   ): Promise<CashierRegisterSession[]> {
     const params = new URLSearchParams();
     if (businessId) params.append('businessId', businessId);
+    if (options?.dateString) params.append('date_string', options.dateString);
+    if (options?.startDate) params.append('start_date', options.startDate);
+    if (options?.endDate) params.append('end_date', options.endDate);
+    if (options?.allDates) params.append('all_dates', 'true');
+    if (options?.cashierId && options.cashierId !== 'ALL') params.append('cashier_id', options.cashierId);
     const queryString = params.toString() ? `?${params.toString()}` : '';
     const res = await fetch(`/api/rbac/cashier-session/all${queryString}`, {
       headers: this.getAuthHeaders(undefined, businessId),

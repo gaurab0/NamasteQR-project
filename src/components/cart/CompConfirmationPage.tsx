@@ -14,10 +14,12 @@ import {
   UtensilsCrossed,
   UserCheck,
   Minus,
-  Plus
+  Plus,
+  Package
 } from 'lucide-react';
 import { CartItem, TableOrder } from '../../types/rbac';
 import { determineItemStation, getAllItemCategories } from '../../utils/menuUtils';
+import { computeOrderBillableAmounts } from '../../utils/taxCalculations';
 import { rbacService } from '../../services/rbac.service';
 import { Button } from '../ui/Button';
 
@@ -39,6 +41,7 @@ export interface CompConfirmationPageProps {
     compOrdererPhone?: string | null;
   };
   currencySymbol?: string;
+  packagingFee?: number;
   generalNotes?: string;
   onOrderConfirmed: (order: TableOrder) => void;
   onClearCart: () => void;
@@ -50,6 +53,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
   cartItems,
   tableInfo,
   currencySymbol = 'Rs.',
+  packagingFee = 10,
   generalNotes,
   onOrderConfirmed,
   onClearCart,
@@ -63,6 +67,8 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
   // Selected comp quantities per item (default: all quantities checked/comped)
   const getItemKey = (ci: CartItem) => `${ci.menuItem.id}_${ci.selected_variant?.id || 'base'}`;
   const [compQuantities, setCompQuantities] = useState<Record<string, number>>({});
+  // null = auto-comp packaging for comped quantities; true = make ALL packaging complimentary; false = bill all packaging
+  const [pkgCompOverride, setPkgCompOverride] = useState<boolean | null>(null);
 
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -75,6 +81,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
         initialCompQtys[getItemKey(ci)] = ci.quantity;
       });
       setCompQuantities(initialCompQtys);
+      setPkgCompOverride(null);
       setStep('PASSWORD');
       setPasswordInput('');
       setPasswordError(null);
@@ -134,23 +141,50 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
       nextQtys[key] = isAllFullySelected ? 0 : ci.quantity;
     });
     setCompQuantities(nextQtys);
+    setPkgCompOverride(null);
   };
 
   // Calculations
-  const compValueTotal = cartItems.reduce((acc, ci) => {
+  const packagingFeeRate = Math.max(0, Number(packagingFee ?? 10) || 0);
+  const draftBillItems = cartItems.map((ci) => {
     const key = getItemKey(ci);
     const compQty = Math.max(0, Math.min(ci.quantity, compQuantities[key] ?? ci.quantity));
     const price = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
-    return acc + price * compQty;
-  }, 0);
+    const isPkg = ci.menuItem.is_packageable !== false;
+    const pQty = isPkg ? Math.max(0, Math.min(ci.quantity, Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0))) : 0;
+    return {
+      price,
+      quantity: ci.quantity,
+      comp_qty: compQty,
+      is_comp: compQty >= ci.quantity,
+      is_packageable: isPkg,
+      is_packaged: pQty > 0,
+      pack_qty: pQty,
+    };
+  });
 
-  const payableTotal = cartItems.reduce((acc, ci) => {
-    const key = getItemKey(ci);
-    const compQty = Math.max(0, Math.min(ci.quantity, compQuantities[key] ?? ci.quantity));
-    const billedQty = Math.max(0, ci.quantity - compQty);
-    const price = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
-    return acc + price * billedQty;
-  }, 0);
+  const defaultBillSummary = computeOrderBillableAmounts(draftBillItems, {
+    packagingFeeRate,
+  });
+  const isDefaultAllPkgComp = defaultBillSummary.packagingQty > 0 && defaultBillSummary.packagingTotal === 0;
+
+  const billSummary = pkgCompOverride === null
+    ? defaultBillSummary
+    : computeOrderBillableAmounts(draftBillItems, {
+        packagingFeeRate,
+        isPackagingComp: pkgCompOverride === true ? true : undefined,
+        ...(pkgCompOverride === false
+          ? { explicitPackagingCharge: draftBillItems.reduce((s, it) => s + it.pack_qty * packagingFeeRate, 0) }
+          : {}),
+      });
+
+  const totalPackagingQty = billSummary.packagingQty;
+  const effectiveCompPackagingQty = pkgCompOverride === false ? 0 : billSummary.compPackagingQty;
+  const effectivePackagingCharge = billSummary.packagingTotal;
+  const effectiveCompPackagingValue = pkgCompOverride === false ? 0 : billSummary.compPackagingValue;
+  const isAllPkgComp = totalPackagingQty > 0 && effectivePackagingCharge === 0;
+  const compValueTotal = billSummary.compItemsValue + effectiveCompPackagingValue;
+  const payableTotal = billSummary.itemsMenuTotal + effectivePackagingCharge;
 
   const handleConfirmAndSend = async () => {
     if (cartItems.length === 0) return;
@@ -170,6 +204,12 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
         const isComp = compQty >= ci.quantity;
         const isPkg = ci.menuItem.is_packageable !== false;
         const pQty = isPkg ? Math.max(0, Math.min(ci.quantity, Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0))) : 0;
+        const compPackQty = pkgCompOverride === true
+          ? pQty
+          : pkgCompOverride === false
+            ? 0
+            : Math.min(pQty, compQty);
+        const billedPackQty = Math.max(0, pQty - compPackQty);
 
         return {
           item_id: ci.menuItem.id,
@@ -191,17 +231,12 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
           is_packageable: isPkg,
           is_packaged: pQty > 0,
           pack_qty: pQty,
-          packaging_charge: pQty * 10,
+          comp_pack_qty: compPackQty,
+          is_packaging_comp: pQty > 0 && compPackQty >= pQty,
+          packaging_charge: billedPackQty * packagingFeeRate,
           ordered_at: new Date().toISOString(),
         };
       });
-
-      const totalPackagingQty = cartItems.reduce((sum, ci) => {
-        if (ci.menuItem.is_packageable === false) return sum;
-        const pQty = Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0);
-        return sum + Math.max(0, Math.min(ci.quantity, pQty));
-      }, 0);
-      const totalPackagingCharge = totalPackagingQty * 10;
 
       const orderPayload = {
         business_id: tableInfo.businessId || 'default-biz',
@@ -219,10 +254,11 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
           `[Complementary Order] Auth by ${tableInfo.compOrdererName || 'Manager'} (${tableInfo.compOrdererPhone || '-'})`
         ].filter(Boolean).join(' • '),
         items: itemsPayload,
-        packaging_charge: totalPackagingCharge,
+        is_packaging_comp: isAllPkgComp,
+        packaging_charge: effectivePackagingCharge,
         packaging_qty: totalPackagingQty,
-        subtotal: payableTotal + totalPackagingCharge,
-        total_amount: payableTotal + totalPackagingCharge,
+        subtotal: payableTotal,
+        total_amount: payableTotal,
         currency: currencySymbol,
       };
 
@@ -406,6 +442,15 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                   const billedQty = ci.quantity - compQty;
                   const unitPrice = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
                   const payableLine = billedQty * unitPrice;
+                  const isPkg = ci.menuItem.is_packageable !== false;
+                  const pQty = isPkg ? Math.max(0, Math.min(ci.quantity, Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0))) : 0;
+                  const itemCompPackQty = pkgCompOverride === true
+                    ? pQty
+                    : pkgCompOverride === false
+                      ? 0
+                      : Math.min(pQty, compQty);
+                  const itemBilledPackQty = Math.max(0, pQty - itemCompPackQty);
+                  const itemPkgFee = itemBilledPackQty * packagingFeeRate;
 
                   return (
                     <div
@@ -458,6 +503,15 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                             <span className="text-[11px] text-zinc-500 block mt-0.5">
                               {currencySymbol} {unitPrice.toFixed(2)} each
                             </span>
+                            {pQty > 0 && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold mt-1 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-900">
+                                <Package className="w-3 h-3 text-amber-600" />
+                                <span>Pack: {pQty}</span>
+                                <span className={itemPkgFee === 0 ? 'text-emerald-700' : 'text-amber-700'}>
+                                  {itemPkgFee === 0 ? '• 🎁 Comp Pack' : `• +${currencySymbol} ${itemPkgFee.toFixed(2)}`}
+                                </span>
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -539,12 +593,67 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                 })}
               </div>
 
+              {/* Complimentary Packaging Toggle (shown whenever packaging exists) */}
+              {totalPackagingQty > 0 && (
+                <label
+                  htmlFor="toggle-comp-packaging"
+                  className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition select-none ${
+                    isAllPkgComp
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                      : 'bg-amber-50/70 border-amber-200 text-amber-950 hover:border-amber-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <input
+                      id="toggle-comp-packaging"
+                      type="checkbox"
+                      checked={isAllPkgComp}
+                      onChange={() => {
+                        if (isAllPkgComp) {
+                          setPkgCompOverride(pkgCompOverride === true && !isDefaultAllPkgComp ? null : false);
+                        } else {
+                          setPkgCompOverride(true);
+                        }
+                      }}
+                      className="w-4 h-4 rounded border-zinc-300 text-amber-600 focus:ring-amber-500 cursor-pointer shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold flex items-center gap-1.5">
+                        <Package className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>Make Packaging Complimentary</span>
+                      </div>
+                      <p className="text-[10px] opacity-80">
+                        {isAllPkgComp
+                          ? `All ${totalPackagingQty} container${totalPackagingQty === 1 ? '' : 's'} waived (Kitchen still packs ${totalPackagingQty})`
+                          : `${effectiveCompPackagingQty} of ${totalPackagingQty} auto-comped • ${totalPackagingQty - effectiveCompPackagingQty} billed`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`font-mono text-xs font-bold shrink-0 ${isAllPkgComp ? 'text-emerald-700' : 'text-amber-800'}`}>
+                    {isAllPkgComp ? 'FREE' : `+${currencySymbol} ${effectivePackagingCharge.toFixed(2)}`}
+                  </span>
+                </label>
+              )}
+
               {/* Price Breakdown */}
               <div className="p-3.5 bg-zinc-100 rounded-2xl border border-zinc-200 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between text-zinc-600 font-medium">
                   <span>Dishes in Order</span>
                   <span className="font-bold text-zinc-900">{cartItems.length} dishes</span>
                 </div>
+                {totalPackagingQty > 0 && (
+                  <div className="flex items-center justify-between text-zinc-700 font-medium">
+                    <span className="flex items-center gap-1">
+                      <Package className="w-3.5 h-3.5 text-amber-600" />
+                      <span>Packaging ({totalPackagingQty} {totalPackagingQty === 1 ? 'item' : 'items'})</span>
+                    </span>
+                    <span className={`font-mono font-bold ${effectivePackagingCharge === 0 ? 'text-emerald-700' : 'text-zinc-900'}`}>
+                      {effectivePackagingCharge === 0
+                        ? `Complimentary (${currencySymbol} 0.00)`
+                        : `+${currencySymbol} ${effectivePackagingCharge.toFixed(2)}`}
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-emerald-800 font-semibold">
                   <span className="flex items-center gap-1">
                     <Gift className="w-3.5 h-3.5 text-emerald-600" />

@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
+import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
+import { formatVenueDateStr, isSaleInRevenueWindow } from '../../utils/revenueWindow';
 import { useAuth } from '../../context/AuthContext';
 import { SaleRecord, MenuItem, TableOrder } from '../../types/rbac';
 import { Business } from '../../types/auth';
@@ -114,30 +116,27 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
     return '';
   };
 
-  // Filter sales based on chosen timeRange with timezone resilience
+  const { revenueWindow, opsConfig } = useSyncedOperationsState(
+    businessId,
+    effectiveBusiness?.operations_config,
+    effectiveBusiness?.current_operational_day
+  );
+
+  // Filter sales based on chosen timeRange synchronized to active revenueWindow
   const filteredSales = useMemo(() => {
     const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const todayUtc = now.toISOString().split('T')[0];
-    
-    // Calculate YYYY-MM-DD boundary dates
     const d7 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-    const d7Str = `${d7.getFullYear()}-${String(d7.getMonth() + 1).padStart(2, '0')}-${String(d7.getDate()).padStart(2, '0')}`;
+    const d7Str = formatVenueDateStr(d7, opsConfig);
 
     const d30 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
-    const d30Str = `${d30.getFullYear()}-${String(d30.getMonth() + 1).padStart(2, '0')}-${String(d30.getDate()).padStart(2, '0')}`;
+    const d30Str = formatVenueDateStr(d30, opsConfig);
 
     return sales.filter((sale) => {
-      const saleDateStr = getSaleDateStr(sale);
-
       if (timeRange === 'today') {
-        return (
-          saleDateStr === todayStr ||
-          saleDateStr === todayUtc ||
-          sale.date_string === todayStr ||
-          sale.date_string === todayUtc
-        );
+        return isSaleInRevenueWindow(sale, revenueWindow);
       }
+
+      const saleDateStr = getSaleDateStr(sale);
       if (timeRange === '7d') {
         return (
           (saleDateStr && saleDateStr >= d7Str) ||
@@ -152,7 +151,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
       }
       return true;
     });
-  }, [sales, timeRange]);
+  }, [sales, timeRange, revenueWindow, opsConfig]);
 
   // Aggregate Key Performance Indicators
   const kpi = useMemo(() => {

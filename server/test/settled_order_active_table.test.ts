@@ -16,7 +16,7 @@ async function runSettledOrderActiveTableTest() {
 
   try {
     // Setup Business & Table 6 (Patio)
-    await db.ensureBusiness(testBizId, 'Patio Dine-In Resort');
+    await db.ensureBusiness(testBizId, 'Patio Dine-In Bistro');
     await prisma.restaurantTable.create({
       data: {
         id: testTableId,

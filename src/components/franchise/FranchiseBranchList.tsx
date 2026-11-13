@@ -67,7 +67,7 @@ export const FranchiseBranchList: React.FC<FranchiseBranchListProps> = ({ onOpen
             </span>
           </div>
           <p className="text-xs text-zinc-500 mt-0.5">
-            Isolated operations, menus, tables, and sales across multiple restaurant & resort locations under your account.
+            Isolated operations, menus, tables, and sales across multiple restaurant & dining locations under your account.
           </p>
         </div>
 

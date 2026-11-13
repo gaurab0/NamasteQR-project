@@ -4,6 +4,7 @@ import { usePrinter } from '../../contexts/PrinterContext';
 import { SaleRecord, BusinessTaxConfig } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import { renderFormattedDate } from '../../utils/dateFormatter';
+import { computeOrderBillableAmounts } from '../../utils/taxCalculations';
 
 export const formatPanVatDisplay = (cfg?: BusinessTaxConfig | null) => {
   if (!cfg) return null;
@@ -45,25 +46,35 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
     await dispatchPrint('BILL', sale);
   };
 
-  const computedItemsSubtotal = (sale.items || [])
-    .filter((item) => (item.name || '').trim().length > 0)
-    .reduce((sum, item) => {
-      const qty = Number(item.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-      const isComp = Boolean(item.is_comp || compQty >= qty);
-      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
-      const uPrice = Number(item.unit_price ?? item.price ?? 0);
-      return sum + (billedQty * uPrice);
-    }, 0);
+  const namedSaleItems = (sale.items || []).filter((item) => (item.name || '').trim().length > 0);
+  const salePkgComp =
+    Boolean((sale as any).is_packaging_comp) ||
+    (Number(sale.packaging_qty || 0) > 0 &&
+      sale.packaging_charge !== undefined &&
+      sale.packaging_charge !== null &&
+      Number(sale.packaging_charge) === 0);
+  const saleBillable = computeOrderBillableAmounts(namedSaleItems, {
+    packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+    isPackagingComp: salePkgComp,
+    explicitPackagingCharge:
+      sale.packaging_charge !== undefined && sale.packaging_charge !== null
+        ? Number(sale.packaging_charge)
+        : undefined,
+    explicitPackagingQty:
+      sale.packaging_qty !== undefined && sale.packaging_qty !== null
+        ? Number(sale.packaging_qty)
+        : undefined,
+  });
 
-  const packagingCharge = Number(sale.packaging_charge || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.packaging_charge) || 0), 0);
-  const packagingQty = Number(sale.packaging_qty || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.pack_qty) || (it.is_packaged ? Number(it.quantity) || 1 : 0)), 0);
+  const computedItemsSubtotal = saleBillable.itemsMenuTotal;
+  const packagingCharge = saleBillable.packagingTotal;
+  const packagingQty = saleBillable.packagingQty;
 
-  const displaySubtotal = (sale.subtotal > 0 || computedItemsSubtotal === 0)
+  const displaySubtotal = (sale.subtotal > 0 || (computedItemsSubtotal === 0 && packagingCharge === 0))
     ? sale.subtotal
-    : computedItemsSubtotal;
+    : computedItemsSubtotal + packagingCharge;
 
-  const displayTotalAmount = (sale.total_amount > 0 || computedItemsSubtotal === 0)
+  const displayTotalAmount = (sale.total_amount > 0 || (computedItemsSubtotal === 0 && packagingCharge === 0))
     ? sale.total_amount
     : (displaySubtotal + (sale.total_tax || 0) - (sale.discount_amount || 0));
 
@@ -168,8 +179,6 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
                   ? 'Takeaway'
                   : sale.sale_type === 'DELIVERY'
                   ? 'Delivery'
-                  : sale.sale_type === 'ROOM_SERVICE'
-                  ? 'Room Service'
                   : 'Dine-In Restaurant'}
               </span>
             </div>
@@ -192,29 +201,8 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
               const uPrice = Number(item.unit_price ?? item.price ?? 0);
               const tPrice = isComp ? 0 : billedQty * uPrice;
-              const computedItemsSubtotal = (sale.items || [])
-    .filter((item) => (item.name || '').trim().length > 0)
-    .reduce((sum, item) => {
-      const qty = Number(item.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-      const isComp = Boolean(item.is_comp || compQty >= qty);
-      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
-      const uPrice = Number(item.unit_price ?? item.price ?? 0);
-      return sum + (billedQty * uPrice);
-    }, 0);
 
-  const packagingCharge = Number(sale.packaging_charge || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.packaging_charge) || 0), 0);
-  const packagingQty = Number(sale.packaging_qty || 0) || (sale.items || []).reduce((sum: number, it: any) => sum + (Number(it.pack_qty) || (it.is_packaged ? Number(it.quantity) || 1 : 0)), 0);
-
-  const displaySubtotal = (sale.subtotal > 0 || computedItemsSubtotal === 0)
-    ? sale.subtotal
-    : computedItemsSubtotal;
-
-  const displayTotalAmount = (sale.total_amount > 0 || computedItemsSubtotal === 0)
-    ? sale.total_amount
-    : (displaySubtotal + (sale.total_tax || 0) - (sale.discount_amount || 0));
-
-  return (
+              return (
                 <div key={idx} className="flex justify-between items-start">
                   <div className="flex-1 pr-2">
                     <span className="font-bold">{item.name}</span>
@@ -245,11 +233,11 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
 
           {/* Calculations Breakdown */}
           <div className="space-y-1 text-[11px]">
-            {packagingCharge > 0 && (
+            {packagingQty > 0 && (
               <div className="flex justify-between text-zinc-700 font-semibold">
                 <span>Packaging ({packagingQty} pkgs):</span>
                 <span>
-                  +{sale.currency} {packagingCharge.toFixed(2)}
+                  {packagingCharge === 0 ? `Complimentary (${sale.currency} 0.00)` : `+${sale.currency} ${packagingCharge.toFixed(2)}`}
                 </span>
               </div>
             )}
@@ -259,17 +247,6 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
                 {sale.currency} {displaySubtotal.toFixed(2)}
               </span>
             </div>
-
-            {sale.taxes.map((t, tIdx) => (
-              <div key={t.id || `${t.name}-${tIdx}`} className="flex justify-between text-zinc-600">
-                <span>
-                  {t.name} ({t.rate_percent}%):
-                </span>
-                <span>
-                  +{sale.currency} {t.amount.toFixed(2)}
-                </span>
-              </div>
-            ))}
 
             {sale.promo_code && sale.promo_discount && sale.promo_discount > 0 && (
               <div className="flex justify-between text-emerald-700 font-semibold">
@@ -290,6 +267,26 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
                 </span>
               </div>
             )}
+
+            {Math.max(Number(sale.discount_amount) || 0, Number(sale.promo_discount) || 0) > 0 && (
+              <div className="flex justify-between text-zinc-700 font-semibold border-t border-dashed border-zinc-200 pt-0.5">
+                <span>Taxable Amount:</span>
+                <span>
+                  {sale.currency} {Math.max(0, displaySubtotal - (Number(sale.discount_amount) || Number(sale.promo_discount) || 0)).toFixed(2)}
+                </span>
+              </div>
+            )}
+
+            {sale.taxes.map((t, tIdx) => (
+              <div key={t.id || `${t.name}-${tIdx}`} className="flex justify-between text-zinc-600">
+                <span>
+                  {t.name} ({t.rate_percent}%):
+                </span>
+                <span>
+                  +{sale.currency} {t.amount.toFixed(2)}
+                </span>
+              </div>
+            ))}
 
             <div className="border-b border-zinc-800 pt-1 my-1" />
 

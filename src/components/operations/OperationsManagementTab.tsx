@@ -5,6 +5,7 @@ import { BusinessOperatingHours, OperationalDayRecord } from '../../types/auth';
 import { SaleRecord, GLAccountLink, BusinessTaxConfig } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import { getEffectiveBusinessDate } from '../../utils/operationalDay';
+import { getActiveRevenueWindow } from '../../utils/revenueWindow';
 import {
   Clock,
   Calendar,
@@ -46,7 +47,7 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
   isViewOnly = false,
   initialSubTab,
 }) => {
-  const { user: authUser } = useAuth();
+  const { user: authUser, updateBusiness } = useAuth();
   const user = propUser || authUser;
   const currentBusiness = business || user?.business;
   const activeBizId = currentBusiness?.id || user?.business?.id || user?.id || '';
@@ -76,6 +77,7 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
     openTime: '09:00',
     closeTime: '23:00',
     autoDateAdvance: true,
+    dailyResetTime: '00:00',
   });
   const [currentDay, setCurrentDay] = useState<OperationalDayRecord | null>(null);
   const [history, setHistory] = useState<OperationalDayRecord[]>([]);
@@ -125,7 +127,14 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
       ]);
 
       if (opsData && (opsData as any).operations_config) {
-        setConfig((opsData as any).operations_config);
+        setConfig({
+          enabled: false,
+          openTime: '09:00',
+          closeTime: '23:00',
+          autoDateAdvance: true,
+          dailyResetTime: '00:00',
+          ...(opsData as any).operations_config,
+        });
       }
       if (opsData && (opsData as any).current_operational_day) {
         setCurrentDay((opsData as any).current_operational_day);
@@ -148,8 +157,19 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
     try {
       setSaving(true);
       setError('');
-      await rbacService.saveOperationsConfigApi(activeBizId, config);
-      setSuccessMsg('Automatic schedule & operational preferences saved successfully.');
+      const payloadConfig: BusinessOperatingHours = {
+        ...config,
+        dailyResetTime: config.dailyResetTime || '00:00',
+        timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+      };
+      await rbacService.saveOperationsConfigApi(activeBizId, payloadConfig);
+      setConfig(payloadConfig);
+      if (currentBusiness) {
+        updateBusiness({ ...currentBusiness, operations_config: payloadConfig } as Business);
+      }
+      setSuccessMsg(
+        `Schedule & daily revenue reset (${payloadConfig.dailyResetTime}) saved successfully.`
+      );
     } catch (err: any) {
       setError(err.message || 'Failed to save settings.');
     } finally {
@@ -176,6 +196,9 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
       const created = await rbacService.createOperationalDayApi(activeBizId, newDay);
       const dayRecord = created || newDay;
       setCurrentDay(dayRecord);
+      if (currentBusiness) {
+        updateBusiness({ ...currentBusiness, current_operational_day: dayRecord } as Business);
+      }
       setHistory((prev) => [dayRecord, ...prev]);
       setSuccessMsg(`Business Day started successfully for ${dateToUse}.`);
     } catch (err: any) {
@@ -189,9 +212,22 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
     if (config.enabled) return; // Inoperable when automated
     if (!currentDay || !currentDay.id) return;
 
+    let openOrderWarning = '';
+    try {
+      const orders = await rbacService.getTableOrdersApi(undefined, activeBizId);
+      const openCount = (orders || []).filter(
+        (o) => o.status !== 'COMPLETED' && o.status !== 'CANCELLED' && o.payment_status !== 'PAID'
+      ).length;
+      if (openCount > 0) {
+        openOrderWarning = `\n\nWarning: ${openCount} open unsettled order(s) still exist. New QR & POS orders will be blocked until the day is reopened, though existing table bills can still be settled.`;
+      }
+    } catch {
+      // non-fatal
+    }
+
     if (
       !window.confirm(
-        'Are you sure you want to close the business day? Ensure all tables are settled and bills are closed.'
+        `Are you sure you want to close the business day? New customer QR and counter POS orders will be paused.${openOrderWarning}`
       )
     )
       return;
@@ -211,8 +247,11 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
       await rbacService.updateOperationalDayApi(activeBizId, currentDay.id, updatedDay);
 
       setCurrentDay(updatedDay);
+      if (currentBusiness) {
+        updateBusiness({ ...currentBusiness, current_operational_day: updatedDay } as Business);
+      }
       setHistory((prev) => prev.map((h) => (h.id === currentDay.id ? updatedDay : h)));
-      setSuccessMsg('Business Day closed successfully. Daily register session finalized.');
+      setSuccessMsg('Business Day closed successfully. New orders are now paused.');
     } catch (err: any) {
       setError(err.message || 'Failed to close business day.');
     } finally {
@@ -244,9 +283,12 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
       await rbacService.updateOperationalDayApi(activeBizId, currentDay.id, updatedDay);
 
       setCurrentDay(updatedDay);
+      if (currentBusiness) {
+        updateBusiness({ ...currentBusiness, current_operational_day: updatedDay } as Business);
+      }
       setHistory((prev) => prev.map((h) => (h.id === currentDay.id ? updatedDay : h)));
       setReopenReason('');
-      setSuccessMsg('Business Day reopened. Emergency register access enabled.');
+      setSuccessMsg('Business Day reopened. Order taking & register access re-enabled.');
     } catch (err: any) {
       setError(err.message || 'Failed to reopen business day.');
     } finally {
@@ -269,6 +311,9 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
       await rbacService.updateOperationalDayApi(activeBizId, currentDay.id, updatedDay);
 
       setCurrentDay(updatedDay);
+      if (currentBusiness) {
+        updateBusiness({ ...currentBusiness, current_operational_day: updatedDay } as Business);
+      }
       setHistory((prev) => prev.map((h) => (h.id === currentDay.id ? updatedDay : h)));
       setManualDate('');
       setSuccessMsg(`Business Date manually overridden to ${manualDate}.`);
@@ -821,6 +866,28 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
                       className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white transition"
                     />
                   </div>
+                </div>
+
+                {/* Synchronized Daily Revenue Reset Time */}
+                <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-200/80 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label htmlFor="input-daily-revenue-reset-time" className="text-[11px] font-bold text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-600" /> Daily Revenue Reset Time
+                    </label>
+                    <span className="text-[10px] font-mono font-bold text-amber-800 bg-white px-2 py-0.5 rounded-full border border-amber-200">
+                      Active Day: {getActiveRevenueWindow(config, currentTime).businessDate}
+                    </span>
+                  </div>
+                  <input
+                    id="input-daily-revenue-reset-time"
+                    type="time"
+                    value={config.dailyResetTime || '00:00'}
+                    onChange={(e) => setConfig({ ...config, dailyResetTime: e.target.value || '00:00' })}
+                    className="w-full px-3 py-2 text-xs font-mono font-bold border border-amber-300 rounded-xl focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none bg-white transition"
+                  />
+                  <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                    Both Dashboard &amp; Cashier live revenue restart to Rs. 0 simultaneously at this time every day (works even when auto open/close is off).
+                  </p>
                 </div>
 
                 <button

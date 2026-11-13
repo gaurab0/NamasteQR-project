@@ -603,7 +603,8 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
       <MenuBulkImportModal
         isOpen={isBulkImportOpen}
         onClose={() => setIsBulkImportOpen(false)}
-        businessId={businessId || 'maya-forest-resort'}
+        businessId={businessId || 'namaste-bistro'}
+        existingItems={menuItems}
         onSuccess={() => {
           setSuccessMessage('Menu successfully updated from spreadsheet!');
           setSelectedCategory('All');

@@ -58,7 +58,7 @@ async function runDeepSystemE2ETests() {
     // 0. BUSINESS & USER SEEDING WITH ROLES
     // -------------------------------------------------------------------------
     console.log('👑 0. Provisioning Business and Multi-Role Staff Accounts');
-    await db.ensureBusiness(testBizId, 'Annapurna Grand Himalayan Resort', 'RESTAURANT');
+    await db.ensureBusiness(testBizId, 'Annapurna Grand Himalayan Bistro', 'RESTAURANT');
 
     // Create Owner
     const ownerUser = await db.ensureUser({
@@ -361,9 +361,9 @@ async function runDeepSystemE2ETests() {
     check('POS Lemonade Beverage station intelligently routed to BAR', posDrink?.station === 'BAR');
 
     // -------------------------------------------------------------------------
-    // 4. ORDERING METHODS: TAKEAWAY & DELIVERY & ROOM SERVICE
+    // 4. ORDERING METHODS: TAKEAWAY & DELIVERY & TERRACE DINE-IN
     // -------------------------------------------------------------------------
-    console.log('\n🥡 4. Ordering Methods: Takeaway, Delivery, and Room Service');
+    console.log('\n🥡 4. Ordering Methods: Takeaway, Delivery, and Terrace Dine-In');
 
     // 4a: Takeaway Sale
     const takeawaySale = await rbacService.createSale(testBizId, {
@@ -399,23 +399,23 @@ async function runDeepSystemE2ETests() {
     check('Delivery sale table label assigned "Delivery"', deliverySale.table_number === 'Delivery');
     check('Delivery sale delivery address notes preserved', deliverySale.notes === 'Deliver to Block B, Flat 402');
 
-    // 4c: Room Service Order
-    const roomTable = await rbacService.createTable(testBizId, {
-      table_number: 'Room 304',
+    // 4c: Terrace Dine-In Order
+    const terraceTable = await rbacService.createTable(testBizId, {
+      table_number: 'Terrace 304',
       floor: 'Floor 3',
       building: 'West Wing',
       capacity: 2,
       status: 'ACTIVE',
     }, { id: ownerUserId, role: 'RESTAURANT_OWNER' });
-    check('Room Service table created for Room 304 on Floor 3 West Wing',
-      roomTable.table_number === 'Room 304' && roomTable.floor === 'Floor 3' && roomTable.building === 'West Wing');
+    check('Terrace table created for Terrace 304 on Floor 3 West Wing',
+      terraceTable.table_number === 'Terrace 304' && terraceTable.floor === 'Floor 3' && terraceTable.building === 'West Wing');
 
-    const roomOrder = await rbacService.createTableOrder(testBizId, {
-      table_id: roomTable.id,
-      table_number: 'Room 304',
+    const terraceOrder = await rbacService.createTableOrder(testBizId, {
+      table_id: terraceTable.id,
+      table_number: 'Terrace 304',
       floor: 'Floor 3',
       building: 'West Wing',
-      customer_name: 'Hotel Guest Mr. Sharma',
+      customer_name: 'Dine-In Guest Mr. Sharma',
       items: [
         {
           item_id: 'dish-breakfast-1',
@@ -433,24 +433,24 @@ async function runDeepSystemE2ETests() {
         },
       ],
     });
-    check('Room Service order created with subtotal Rs. 1660 (650*2 + 180*2)', roomOrder.subtotal === 1660);
-    check('Room Service order preserves Floor and Building context', roomOrder.floor === 'Floor 3' && roomOrder.building === 'West Wing');
+    check('Terrace order created with subtotal Rs. 1660 (650*2 + 180*2)', terraceOrder.subtotal === 1660);
+    check('Terrace order preserves Floor and Building context', terraceOrder.floor === 'Floor 3' && terraceOrder.building === 'West Wing');
 
-    // Settle Room Service Order via CARD
-    const roomSale = await rbacService.createSale(testBizId, {
-      order_id: roomOrder.id,
-      table_id: roomTable.id,
-      table_number: 'Room 304',
-      customer_name: 'Hotel Guest Mr. Sharma',
-      sale_type: 'ROOM_SERVICE',
+    // Settle Terrace Dine-In Order via CARD
+    const terraceSale = await rbacService.createSale(testBizId, {
+      order_id: terraceOrder.id,
+      table_id: terraceTable.id,
+      table_number: 'Terrace 304',
+      customer_name: 'Dine-In Guest Mr. Sharma',
+      sale_type: 'DINE_IN',
       payment_method: 'CARD',
       payment_status: 'PAID',
-      subtotal: roomOrder.subtotal,
-      total_amount: roomOrder.total_amount,
-      items: roomOrder.items as any,
+      subtotal: terraceOrder.subtotal,
+      total_amount: terraceOrder.total_amount,
+      items: terraceOrder.items as any,
     }, { id: cashierUserId, role: 'CASHIER' });
-    check('Room service order settled via CARD payment', roomSale.payment_method === 'CARD');
-    check('Room service sale links to room table and order', roomSale.order_id === roomOrder.id);
+    check('Terrace order settled via CARD payment', terraceSale.payment_method === 'CARD');
+    check('Terrace sale links to terrace table and order', terraceSale.order_id === terraceOrder.id);
 
     // -------------------------------------------------------------------------
     // 5. BILL SETTLEMENT: PAYMENT METHODS, CREDIT-ONLY TABLE, 6-PIN, DEPOSIT, COMP
@@ -573,7 +573,7 @@ async function runDeepSystemE2ETests() {
     const fullCompSale = await rbacService.createSale(testBizId, {
       table_id: compTable.id,
       table_number: compTable.table_number,
-      customer_name: 'Resort Brand Ambassador',
+      customer_name: 'Bistro Brand Ambassador',
       sale_type: 'DINE_IN',
       payment_method: 'CASH',
       payment_status: 'PAID',

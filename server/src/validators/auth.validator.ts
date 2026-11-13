@@ -8,7 +8,7 @@ export const signupSchema = z.object({
     .trim()
     .min(2, 'Business name must be at least 2 characters')
     .max(100, 'Business name cannot exceed 100 characters'),
-  businessType: z.enum(['RESTAURANT', 'HOTEL', 'CAFE', 'RESORT', 'BAR', 'OTHER'], {
+  businessType: z.enum(['RESTAURANT', 'CAFE', 'BAR', 'OTHER'], {
     message: 'Please select a valid business type',
   }),
   address: z.string().trim().max(255).optional(),

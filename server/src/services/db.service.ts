@@ -12,7 +12,7 @@ import {
   UserRole 
 } from '../types';
 import { slugify, sanitizePhoneId, generateUserDocId } from '../utils/id.utils';
-import { sanitizeTabs, deriveAllowedTabs, isBusinessOwnerRole } from './tabAccess';
+import { sanitizeTabs, deriveAllowedTabs, isBusinessOwnerRole, normalizeLegacyRole, normalizeLegacyBusinessType } from './tabAccess';
 import type { TabPermissionId } from '../types/rbac.types';
 
 class PostgresDatabaseStore {
@@ -40,9 +40,9 @@ class PostgresDatabaseStore {
     return {
       id: d.id,
       name: d.name || 'Unnamed Venue',
-      business_type: (d.business_type as BusinessType) || fallbackType || 'RESTAURANT',
+      business_type: normalizeLegacyBusinessType(d.business_type || fallbackType) as BusinessType,
       status: (d.status as any) || 'ACTIVE',
-      tagline: d.tagline ?? (d.business_type === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+      tagline: d.tagline ?? 'Authentic Cuisine • Prepared Fresh to Order',
       location: d.location ?? 'Main Dining & Service Area',
       address: d.address || '',
       kitchen_hours: d.kitchen_hours ?? '07:30 AM – 10:30 PM',
@@ -70,7 +70,7 @@ class PostgresDatabaseStore {
       email: d.email,
       name: d.name || undefined,
       password_hash: d.password_hash || '',
-      role: d.role as UserRole,
+      role: (normalizeLegacyRole(d.role) || 'RESTAURANT_OWNER') as UserRole,
       status: d.status as any,
       allowed_tabs: Array.isArray(d.allowed_tabs) ? sanitizeTabs(d.allowed_tabs as any) : undefined,
       last_login_at: d.last_login_at,
@@ -158,7 +158,7 @@ class PostgresDatabaseStore {
 
       // If database has 0 businesses, initialize default
       if (this.businesses.size === 0) {
-        await this.ensureBusiness('maya-forest-resort', 'Maya Forest Resort', 'HOTEL');
+        await this.ensureBusiness('namaste-bistro', 'Namaste Bistro', 'RESTAURANT');
       }
 
       // 2. Sync Users
@@ -197,9 +197,9 @@ class PostgresDatabaseStore {
     const business: Business = {
       id: businessId,
       name,
-      business_type: businessType,
+      business_type: normalizeLegacyBusinessType(businessType) as BusinessType,
       status: 'ACTIVE',
-      tagline: extra?.tagline ?? (businessType === 'HOTEL' ? 'Luxury Hospitality & Premier Guest Stays' : 'Authentic Cuisine • Prepared Fresh to Order'),
+      tagline: extra?.tagline ?? 'Authentic Cuisine • Prepared Fresh to Order',
       location: (extra?.location ?? extra?.address) || 'Main Dining & Service Area',
       address: (extra?.address || extra?.location) ?? '',
       kitchen_hours: extra?.kitchen_hours ?? '07:30 AM – 10:30 PM',
@@ -369,7 +369,7 @@ class PostgresDatabaseStore {
     } catch (e) {}
 
     const formattedName = name || id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    const bType: BusinessType = type || (id.includes('hotel') || id.includes('resort') ? 'HOTEL' : 'RESTAURANT');
+    const bType: BusinessType = normalizeLegacyBusinessType(type || 'RESTAURANT') as BusinessType;
     return this.createBusiness(formattedName, bType, {
       id,
       date_format_nav: 'ENGLISH',
@@ -578,7 +578,7 @@ class PostgresDatabaseStore {
       email,
       name: data.name,
       password_hash: data.password_hash || '',
-      role: data.role || (biz?.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
+      role: (normalizeLegacyRole(data.role) || 'RESTAURANT_OWNER') as UserRole,
       status: 'ACTIVE',
       last_login_at: new Date(),
       created_at: new Date(),

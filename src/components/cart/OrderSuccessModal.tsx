@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { calculateBillTotals } from '../../utils/taxCalculations';
+import { calculateBillTotals, computeOrderBillableAmounts } from '../../utils/taxCalculations';
 import { TableOrder, OrderStatus, TableStatus, BusinessTaxConfig, SaleRecord, SaleTaxBreakdown, SalePaymentMethod } from '../../types/rbac';
 import { KdsPrintMode } from '../../types/printer.types';
 import { rbacService } from '../../services/rbac.service';
@@ -220,7 +220,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           setViewMode('payment');
         } else {
           setViewMode((currMode) => (currMode === 'payment' ? 'tracker' : currMode));
-          if (data.status === 'CANCELLED') {
+          if (data.status === 'CANCELLED' && (data.pay_first || data.payment_rejected_reason)) {
             alert('Payment was rejected: ' + (data.payment_rejected_reason || 'No reason provided'));
           }
         }
@@ -402,33 +402,32 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     }
   }, [allItemsServed, billRequested, viewMode]);
 
-  // Base Items Menu Sum (Non-cancelled items)
-  const itemsMenuTotal = useMemo(() => {
-    return nonCancelledItems.reduce((acc, it) => {
-      const qty = Number(it.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
-      const isComp = Boolean(it.is_comp || compQty >= qty);
-      const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
-      return acc + (Number(it.price) || 0) * billedQty;
-    }, 0);
-  }, [nonCancelledItems]);
+  // Base Items Menu Sum & Packaging (Non-cancelled items)
+  const packagingFeeRate = Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0);
+  const billable = useMemo(() => {
+    const isOrderPkgComp =
+      Boolean((liveOrder as any)?.is_packaging_comp) ||
+      (Number(liveOrder?.packaging_qty || 0) > 0 &&
+        liveOrder?.packaging_charge !== undefined &&
+        liveOrder?.packaging_charge !== null &&
+        Number(liveOrder.packaging_charge) === 0);
+    return computeOrderBillableAmounts(nonCancelledItems, {
+      packagingFeeRate,
+      isPackagingComp: isOrderPkgComp,
+      explicitPackagingCharge:
+        liveOrder?.packaging_charge !== undefined && liveOrder?.packaging_charge !== null
+          ? Number(liveOrder.packaging_charge)
+          : undefined,
+      explicitPackagingQty:
+        liveOrder?.packaging_qty !== undefined && liveOrder?.packaging_qty !== null
+          ? Number(liveOrder.packaging_qty)
+          : undefined,
+    });
+  }, [nonCancelledItems, packagingFeeRate, liveOrder]);
 
-  const packagingFeeRate = Number(taxConfig?.packaging_fee) || 10;
-  const packagingQty = useMemo(() => {
-    if (liveOrder?.packaging_qty !== undefined && Number(liveOrder.packaging_qty) > 0) {
-      return Number(liveOrder.packaging_qty);
-    }
-    return (liveOrder?.items || []).reduce((sum, it) => {
-      return sum + Math.max(0, Number(it.pack_qty) || (it.is_packaged ? Number(it.quantity) || 1 : 0));
-    }, 0);
-  }, [liveOrder?.packaging_qty, liveOrder?.items]);
-
-  const packagingCharge = useMemo(() => {
-    if (liveOrder?.packaging_charge !== undefined && Number(liveOrder.packaging_charge) > 0) {
-      return Number(liveOrder.packaging_charge);
-    }
-    return packagingQty * packagingFeeRate;
-  }, [liveOrder?.packaging_charge, packagingQty, packagingFeeRate]);
+  const itemsMenuTotal = billable.itemsMenuTotal;
+  const packagingQty = billable.packagingQty;
+  const packagingCharge = billable.packagingTotal;
 
   const billCalc = useMemo(() => {
     const savedFlatPromo =
@@ -1595,8 +1594,8 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                       <Package className="w-3.5 h-3.5 text-amber-600" />
                       <span>Packaging ({packagingQty} {packagingQty === 1 ? 'item' : 'items'})</span>
                     </span>
-                    <span className="font-mono font-semibold text-zinc-800">
-                      +{currencySymbol} {packagingCharge.toFixed(2)}
+                    <span className={`font-mono font-semibold ${packagingCharge === 0 ? 'text-emerald-700' : 'text-zinc-800'}`}>
+                      {packagingCharge === 0 ? `Complimentary (${currencySymbol} 0.00)` : `+${currencySymbol} ${packagingCharge.toFixed(2)}`}
                     </span>
                   </div>
                 )}

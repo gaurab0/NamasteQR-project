@@ -1,8 +1,9 @@
 import { Bell } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 
-import { MenuItem, MenuCategory, CartItem, TableOrder, CustomerTableSession, MenuItemVariant, MenuStatus, FoodType } from '../types/rbac';
+import { MenuItem, MenuCategory, CartItem, TableOrder, CustomerTableSession, MenuItemVariant, MenuStatus, FoodType, BusinessTaxConfig } from '../types/rbac';
 import { Business } from '../types/auth';
+import { computeOrderBillableAmounts } from '../utils/taxCalculations';
 import { useAuth } from '../context/AuthContext';
 import { rbacService } from '../services/rbac.service';
 import { socketService } from '../services/socket.service';
@@ -13,7 +14,7 @@ import { OrderSuccessModal } from '../components/cart/OrderSuccessModal';
 import { MenuItemDetailModal } from '../components/menu/MenuItemDetailModal';
 import { FinalTableBillPage } from '../components/billing/FinalTableBillPage';
 import { getThemeClasses } from '../utils/themeEngine';
-import { evaluateStoreStatus } from '../utils/operationalDay';
+import { useSyncedOperationsState } from '../hooks/useSyncedOperationsState';
 import {
   UtensilsCrossed,
   Search,
@@ -60,7 +61,17 @@ interface CustomerMenuPreviewPageProps {
 }
 
 const TABLE_SESSION_STORAGE_KEY = 'serveflow_customer_table_session';
+const SESSION_EXPIRED_REASON_KEY = 'serveflow_session_expired_reason';
 const SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // 3 hours
+
+const getActiveOrderStorageKeys = (bizId?: string | null, tableId?: string | null, tableNum?: string | null): string[] => {
+  const b = bizId || 'biz';
+  const keys: string[] = [];
+  if (tableId) keys.push(`serveflow_active_order_${b}_${tableId}`);
+  if (tableNum && tableNum !== tableId) keys.push(`serveflow_active_order_${b}_${tableNum}`);
+  if (keys.length === 0) keys.push(`serveflow_active_order_${b}_default`);
+  return keys;
+};
 
 export const cleanTableNumber = (num?: string | null): string => {
   if (!num) return '';
@@ -209,9 +220,14 @@ const MinimalistScrollContainer: React.FC<MinimalistScrollContainerProps> = ({
   );
 };
 
-function consolidateTableOrders(orders: TableOrder[]): TableOrder | null {
-  const active = orders.filter((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED' && !(o as any).settled);
-  if (active.length === 0) return null;
+function consolidateTableOrders(orders: TableOrder[], sessionId?: string | null): TableOrder | null {
+  const activeRaw = orders.filter((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED' && !(o as any).settled);
+  if (activeRaw.length === 0) return null;
+
+  const sessionScoped = sessionId
+    ? activeRaw.filter((o) => !o.session_id || o.session_id === sessionId)
+    : activeRaw;
+  const active = sessionScoped.length > 0 ? sessionScoped : activeRaw;
   if (active.length === 1) return active[0];
 
   active.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
@@ -224,8 +240,24 @@ function consolidateTableOrders(orders: TableOrder[]): TableOrder | null {
   const total = active.reduce((s, o) => s + (Number(o.total_amount) || 0), 0);
   const billReq = active.some((o) => o.bill_requested);
 
+  const nonCancelled = allItems.filter((i) => i && i.status !== 'CANCELLED');
+  let derivedStatus = root.status;
+  if (active.some((o) => o.status === 'AWAITING_PAYMENT')) {
+    derivedStatus = 'AWAITING_PAYMENT';
+  } else if (nonCancelled.length > 0) {
+    const allServed = nonCancelled.every((i) => i.status === 'SERVED' || i.status === 'COMPLETED' || Boolean(i.served_at));
+    const allReadyOrServed = nonCancelled.every((i) => i.status === 'READY' || i.status === 'SERVED' || i.status === 'COMPLETED' || Boolean(i.ready_at) || Boolean(i.served_at));
+    const anyPrepOrReady = nonCancelled.some((i) => i.status === 'PREPARING' || i.status === 'READY' || (i.status as any) === 'COOKING');
+    if (allServed) derivedStatus = 'SERVED';
+    else if (allReadyOrServed) derivedStatus = 'READY';
+    else if (anyPrepOrReady) derivedStatus = 'PREPARING';
+    else derivedStatus = 'RECEIVED';
+  }
+
   return {
     ...root,
+    status: derivedStatus,
+    pay_first: active.some((o) => o.pay_first && o.status === 'AWAITING_PAYMENT') ? true : root.pay_first,
     items: allItems,
     subtotal,
     packaging_charge: pkgCharge,
@@ -286,10 +318,43 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const [isCompConfirmOpen, setIsCompConfirmOpen] = useState(false);
   const [pendingCompCartItems, setPendingCompCartItems] = useState<CartItem[]>([]);
   const [pendingCompNotes, setPendingCompNotes] = useState<string>('');
+  const [taxConfig, setTaxConfig] = useState<BusinessTaxConfig | null>(null);
+
+  const isExplicitAdminPreview = Boolean(onNavigateBack || window.location.pathname === '/menu-preview');
 
   // Session Security & Expiration States (Option A)
-  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
-  const [sessionExpiredReason, setSessionExpiredReason] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState<boolean>(() => {
+    if (isExplicitAdminPreview) return false;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pathParts = window.location.pathname.split('/');
+      const hasQr = Boolean(urlParams.get('tableId') || urlParams.get('t') || urlParams.get('tableNumber') || (pathParts[1] === 't' && pathParts[2]));
+      if (hasQr) return false;
+      const hasActiveSession = Boolean(localStorage.getItem(TABLE_SESSION_STORAGE_KEY) || sessionStorage.getItem(TABLE_SESSION_STORAGE_KEY));
+      if (hasActiveSession) return false;
+      return Boolean(localStorage.getItem(SESSION_EXPIRED_REASON_KEY));
+    } catch {
+      return false;
+    }
+  });
+  const [sessionExpiredReason, setSessionExpiredReason] = useState<string | null>(() => {
+    if (isExplicitAdminPreview) return null;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pathParts = window.location.pathname.split('/');
+      const hasQr = Boolean(urlParams.get('tableId') || urlParams.get('t') || urlParams.get('tableNumber') || (pathParts[1] === 't' && pathParts[2]));
+      if (hasQr) return null;
+      const hasActiveSession = Boolean(localStorage.getItem(TABLE_SESSION_STORAGE_KEY) || sessionStorage.getItem(TABLE_SESSION_STORAGE_KEY));
+      if (hasActiveSession) return null;
+      return localStorage.getItem(SESSION_EXPIRED_REASON_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const sessionExpiredRef = useRef<boolean>(sessionExpired);
+  useEffect(() => {
+    sessionExpiredRef.current = sessionExpired;
+  }, [sessionExpired]);
 
   // Group Ordering Authority States (Requirement 4: Host vs View-Only Guests)
   const [isHost, setIsHost] = useState<boolean>(true);
@@ -375,7 +440,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       const cached = localStorage.getItem('serveflow_last_settled_payment');
       if (!cached) return null;
       const parsed = JSON.parse(cached);
-      if (parsed && (!parsed.amount || Number(parsed.amount) <= 0)) {
+      if (!parsed || typeof parsed.amount !== 'number' || isNaN(parsed.amount) || parsed.amount < 0) {
         return null;
       }
       return parsed;
@@ -384,10 +449,12 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     }
   });
 
-  const isStoreOpen = useMemo(() => {
-    if (!businessProfile) return true;
-    return evaluateStoreStatus(businessProfile.operations_config, businessProfile.current_operational_day);
-  }, [businessProfile?.operations_config, businessProfile?.current_operational_day]);
+  const { storeStatus } = useSyncedOperationsState(
+    businessProfile?.id || user?.business?.id,
+    businessProfile?.operations_config,
+    businessProfile?.current_operational_day
+  );
+  const isStoreOpen = !businessProfile ? true : storeStatus.isOpen;
 
   const [thankYouSettledBanner, setThankYouSettledBanner] = useState<{
     show: boolean;
@@ -398,16 +465,25 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const [isFinalBillPageOpen, setIsFinalBillPageOpen] = useState<boolean>(false);
   const kickOutTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [isTableBillConcluded, setIsTableBillConcluded] = useState<boolean>(() => {
+    if (isExplicitAdminPreview) return false;
     try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pathParts = window.location.pathname.split('/');
+      const hasQr = Boolean(urlParams.get('tableId') || urlParams.get('t') || urlParams.get('tableNumber') || (pathParts[1] === 't' && pathParts[2]));
+      if (hasQr) return false;
       const stored = localStorage.getItem('serveflow_table_bill_concluded');
       return stored === 'true';
     } catch {
       return false;
     }
   });
+  const isTableBillConcludedRef = useRef<boolean>(isTableBillConcluded);
+  useEffect(() => {
+    isTableBillConcludedRef.current = isTableBillConcluded;
+  }, [isTableBillConcluded]);
 
-  // Read-only condition: Once final bill is requested or table bill concluded, no ordering is allowed
-  const isReadOnlyMode = isTableBillConcluded || Boolean(activeOrder?.bill_requested);
+  // Read-only condition: Once final bill is requested, table bill concluded, or business day closed, no ordering is allowed
+  const isReadOnlyMode = isTableBillConcluded || Boolean(activeOrder?.bill_requested) || !isStoreOpen;
 
   // Requirement 4: Final bill gating - all non-cancelled items must be served
   const allItemsServed = useMemo(() => {
@@ -421,39 +497,57 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     return nonCancelledItems.every((i) => i.status === 'SERVED' || i.status === 'COMPLETED' || Boolean(i.served_at));
   }, [activeOrder]);
 
-  // Requirement 1: Table-bound cart persistence key
+  // Requirement 1: Table-bound cart persistence key (null until table resolves)
   const tableCartStorageKey = useMemo(() => {
-    const tId = tableParams.tableId || tableParams.tableNumber || 'default';
-    return `serveflow_table_cart_${tId}`;
+    const tId = tableParams.tableId || tableParams.tableNumber;
+    return tId ? `serveflow_table_cart_${tId}` : null;
   }, [tableParams.tableId, tableParams.tableNumber]);
 
-  // Restore cart from sessionStorage on table parameter resolution
+  const restoringCartForKeyRef = useRef<string | null>(null);
+
+  // Restore cart from localStorage / sessionStorage on table parameter resolution
   useEffect(() => {
     if (!tableCartStorageKey) return;
     try {
-      const savedCart = sessionStorage.getItem(tableCartStorageKey);
+      const altKey = tableParams.tableNumber && tableParams.tableId && tableParams.tableNumber !== tableParams.tableId
+        ? `serveflow_table_cart_${tableParams.tableNumber}`
+        : null;
+      const savedCart =
+        localStorage.getItem(tableCartStorageKey) ||
+        sessionStorage.getItem(tableCartStorageKey) ||
+        (altKey ? (localStorage.getItem(altKey) || sessionStorage.getItem(altKey)) : null);
       if (savedCart) {
         const parsed = JSON.parse(savedCart);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          restoringCartForKeyRef.current = tableCartStorageKey;
           setCartItems(parsed);
         }
       }
     } catch (e) {
-      console.warn('Failed to restore cart from sessionStorage:', e);
+      console.warn('Failed to restore cart from storage:', e);
     }
   }, [tableCartStorageKey]);
 
-  // Persist cart to sessionStorage on updates
+  // Persist cart to localStorage & sessionStorage on updates (StrictMode-safe: never wipe before restored state commits)
   useEffect(() => {
     if (!tableCartStorageKey) return;
+    if (restoringCartForKeyRef.current === tableCartStorageKey) {
+      if (cartItems.length === 0) {
+        return;
+      }
+      restoringCartForKeyRef.current = null;
+    }
     try {
       if (cartItems.length > 0) {
-        sessionStorage.setItem(tableCartStorageKey, JSON.stringify(cartItems));
+        const serialized = JSON.stringify(cartItems);
+        localStorage.setItem(tableCartStorageKey, serialized);
+        sessionStorage.setItem(tableCartStorageKey, serialized);
       } else {
+        localStorage.removeItem(tableCartStorageKey);
         sessionStorage.removeItem(tableCartStorageKey);
       }
     } catch (e) {
-      console.warn('Failed to persist cart to sessionStorage:', e);
+      console.warn('Failed to persist cart to storage:', e);
     }
   }, [cartItems, tableCartStorageKey]);
 
@@ -496,6 +590,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     setIsTrackerOpen(false);
     setSuccessOrderData(null);
     // 2. Open dedicated Final Table Bill page (NOT a popup)
+    pushCustomerHistoryGuard('bill');
     setIsFinalBillPageOpen(true);
   };
 
@@ -515,6 +610,74 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     );
   };
 
+  const clearStoredSessionData = (bizId?: string | null, tableId?: string | null, tableNum?: string | null) => {
+    try {
+      sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
+      sessionStorage.removeItem('serveflow_customer_active');
+      sessionStorage.removeItem('serveflow_customer_last_url');
+      localStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
+      const tIds = [tableId, tableNum].filter(Boolean) as string[];
+      for (const tid of tIds) {
+        sessionStorage.removeItem(`serveflow_table_cart_${tid}`);
+        localStorage.removeItem(`serveflow_table_cart_${tid}`);
+        localStorage.removeItem(`serveflow_host_token_${tid}`);
+      }
+      for (const k of getActiveOrderStorageKeys(bizId, tableId, tableNum)) {
+        localStorage.removeItem(k);
+      }
+    } catch {}
+  };
+
+  const persistActiveOrder = (order: TableOrder | null, bizIdOverride?: string | null, tableIdOverride?: string | null, tableNumOverride?: string | null) => {
+    if (!order) return;
+    const isCancelledOrSettled =
+      order.status === 'CANCELLED' ||
+      (order.pay_first
+        ? order.status === 'COMPLETED'
+        : (order.status === 'COMPLETED' || order.payment_status === 'PAID' || Boolean((order as any).settled)));
+    if (isCancelledOrSettled) return;
+    const bId = bizIdOverride || order.business_id || tableParams.businessId || user?.business?.id;
+    const tId = tableIdOverride || order.table_id || tableParams.tableId;
+    const tNum = tableNumOverride || order.table_number || tableParams.tableNumber;
+    if (!bId || (!tId && !tNum)) return;
+    try {
+      const [primaryKey] = getActiveOrderStorageKeys(bId, tId, tNum);
+      localStorage.setItem(primaryKey, JSON.stringify(order));
+    } catch {}
+  };
+
+  const expireCustomerSession = (
+    reason: string,
+    overrides?: { businessId?: string | null; tableId?: string | null; tableNumber?: string | null }
+  ) => {
+    const bId = overrides?.businessId ?? tableParams.businessId ?? activeOrder?.business_id;
+    const tId = overrides?.tableId ?? tableParams.tableId ?? activeOrder?.table_id;
+    const tNum = overrides?.tableNumber ?? tableParams.tableNumber ?? activeOrder?.table_number;
+
+    setActiveOrder(null);
+    setIsTrackerOpen(false);
+    setIsCartOpen(false);
+    setCartItems([]);
+    setIsFinalBillPageOpen(false);
+    setSuccessOrderData(null);
+    lastTargetOrderIdRef.current = null;
+
+    clearStoredSessionData(bId, tId, tNum);
+    isTableBillConcludedRef.current = false;
+    setIsTableBillConcluded(false);
+    setSettledPaymentInfo(null);
+    setThankYouSettledBanner({ show: false });
+    try {
+      localStorage.removeItem('serveflow_table_bill_concluded');
+      localStorage.removeItem('serveflow_last_settled_payment');
+      localStorage.setItem(SESSION_EXPIRED_REASON_KEY, reason);
+    } catch {}
+
+    sessionExpiredRef.current = true;
+    setSessionExpired(true);
+    setSessionExpiredReason(reason);
+  };
+
   // Handle table settlement cleanup and thank-you notification
   const handleOrderSettled = (orderId?: string, tableNum?: string, orderObj?: TableOrder | null) => {
     // 1. Gather all possible candidate order objects in priority order
@@ -523,9 +686,13 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     let cachedActiveOrder: TableOrder | null = null;
     try {
       const bId = tableParams.businessId || user?.business?.id || 'biz';
-      const tKey = tableParams.tableNumber || tableParams.tableId || 'default';
-      const stored = localStorage.getItem(`serveflow_active_order_${bId}_${tKey}`);
-      if (stored) cachedActiveOrder = JSON.parse(stored);
+      for (const key of getActiveOrderStorageKeys(bId, tableParams.tableId, tableParams.tableNumber)) {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          cachedActiveOrder = JSON.parse(stored);
+          break;
+        }
+      }
     } catch {}
     if (cachedActiveOrder) {
       candidates.push(cachedActiveOrder);
@@ -543,37 +710,53 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         resolvedMode = formatPaymentMode(cand.payment_method);
       }
 
-      const amt = Number(cand.total_amount ?? cand.subtotal);
-      if (!isNaN(amt) && amt > 0) {
-        resolvedAmount = amt;
-        break;
-      }
-
-      // Calculate from items if direct amount was 0 or undefined
-      if (Array.isArray(cand.items) && cand.items.length > 0) {
-        const itemSum = cand.items.reduce((acc, item) => {
-          if (item.status === 'CANCELLED') return acc;
-          return acc + (Number(item.price || 0) * Number(item.quantity || 1));
-        }, 0);
-        if (itemSum > 0) {
-          resolvedAmount = itemSum;
+      const rawAmt = cand.total_amount ?? cand.subtotal;
+      if (rawAmt !== undefined && rawAmt !== null) {
+        const amt = Number(rawAmt);
+        if (!isNaN(amt) && amt >= 0) {
+          resolvedAmount = amt;
           break;
         }
       }
+
+      // Calculate from items if direct amount was undefined
+      if (Array.isArray(cand.items) && cand.items.length > 0) {
+        const candPkgComp =
+          Boolean((cand as any).is_packaging_comp) ||
+          (Number(cand.packaging_qty || 0) > 0 &&
+            cand.packaging_charge !== undefined &&
+            cand.packaging_charge !== null &&
+            Number(cand.packaging_charge) === 0);
+        const billable = computeOrderBillableAmounts(cand.items, {
+          packagingFeeRate: Number(taxConfig?.packaging_fee ?? 10),
+          isPackagingComp: candPkgComp,
+          explicitPackagingCharge:
+            cand.packaging_charge !== undefined && cand.packaging_charge !== null
+              ? Number(cand.packaging_charge)
+              : undefined,
+        });
+        resolvedAmount = billable.itemsMenuTotal + billable.packagingTotal;
+        break;
+      }
     }
 
-    if ((!resolvedAmount || resolvedAmount <= 0) && settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0) {
+    if (
+      (resolvedAmount === undefined || isNaN(resolvedAmount)) &&
+      typeof settledPaymentInfo?.amount === 'number' &&
+      !isNaN(settledPaymentInfo.amount) &&
+      settledPaymentInfo.amount >= 0
+    ) {
       resolvedAmount = Number(settledPaymentInfo.amount);
       if (settledPaymentInfo.currency) resolvedCurrency = settledPaymentInfo.currency;
       if (settledPaymentInfo.mode) resolvedMode = settledPaymentInfo.mode;
     }
 
-    if (!resolvedAmount || resolvedAmount <= 0) {
+    if (resolvedAmount === undefined || isNaN(resolvedAmount)) {
       try {
         const cached = localStorage.getItem('serveflow_last_settled_payment');
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed?.amount && Number(parsed.amount) > 0) {
+          if (typeof parsed?.amount === 'number' && !isNaN(parsed.amount) && parsed.amount >= 0) {
             resolvedAmount = Number(parsed.amount);
             if (parsed.currency) resolvedCurrency = parsed.currency;
             if (parsed.mode) resolvedMode = parsed.mode;
@@ -582,20 +765,25 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       } catch {}
     }
 
+    const hasResolvedAmount = typeof resolvedAmount === 'number' && !isNaN(resolvedAmount) && resolvedAmount >= 0;
     const info: { mode: string; amount?: number; currency: string } = {
       mode: resolvedMode,
       currency: resolvedCurrency,
-      ...(resolvedAmount && resolvedAmount > 0 ? { amount: resolvedAmount } : {}),
+      ...(hasResolvedAmount ? { amount: resolvedAmount } : {}),
     };
 
     setSettledPaymentInfo(info);
-    if (info.amount && info.amount > 0) {
+    if (hasResolvedAmount) {
       try {
         localStorage.setItem('serveflow_last_settled_payment', JSON.stringify(info));
       } catch {}
     }
 
     // 1. Wipe local active order and close all sub-modals/pages
+    const bId = orderObj?.business_id || tableParams.businessId || activeOrder?.business_id || user?.business?.id;
+    const tId = orderObj?.table_id || tableParams.tableId || activeOrder?.table_id;
+    const tNum = tableNum || orderObj?.table_number || tableParams.tableNumber || activeOrder?.table_number;
+
     setActiveOrder(null);
     setIsTrackerOpen(false);
     setIsCartOpen(false);
@@ -605,15 +793,15 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     lastTargetOrderIdRef.current = null;
 
     // 2. Clear table session & order cache from storage
+    clearStoredSessionData(bId, tId, tNum);
     try {
-      sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-      const bId = tableParams.businessId || 'biz';
-      const tKey = tableParams.tableNumber || tableParams.tableId || 'default';
-      localStorage.removeItem(`serveflow_active_order_${bId}_${tKey}`);
+      localStorage.removeItem(SESSION_EXPIRED_REASON_KEY);
       localStorage.setItem('serveflow_table_bill_concluded', 'true');
     } catch {}
 
     // 3. Mark session concluded to automatically show thank-you card
+    isTableBillConcludedRef.current = true;
+    sessionExpiredRef.current = true;
     setIsTableBillConcluded(true);
     setSessionExpired(true);
     setSessionExpiredReason(
@@ -621,36 +809,99 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     );
     setThankYouSettledBanner({
       show: true,
-      tableNumber: tableNum || tableParams.tableNumber,
+      tableNumber: tNum,
     });
   };
 
-  // Hardware / Browser Back button interception (Trap popstate to avoid exiting web app or popping into admin)
-  useEffect(() => {
-    // Push a virtual history state so pressing back triggers popstate instead of exiting
-    window.history.pushState({ menuView: true }, '', window.location.href);
+  const navStateRef = useRef({
+    isDetailModalOpen: false,
+    isCartOpen: false,
+    isTrackerOpen: false,
+    hasSuccessOrderData: false,
+    isFinalBillPageOpen: false,
+    billRequested: false,
+    awaitingPayment: false,
+  });
+  navStateRef.current = {
+    isDetailModalOpen,
+    isCartOpen,
+    isTrackerOpen,
+    hasSuccessOrderData: Boolean(successOrderData),
+    isFinalBillPageOpen,
+    billRequested: Boolean(activeOrder?.bill_requested),
+    awaitingPayment: activeOrder?.status === 'AWAITING_PAYMENT' || successOrderData?.status === 'AWAITING_PAYMENT',
+  };
 
-    const handlePopState = (e: PopStateEvent) => {
-      // If final bill page is open or bill has been requested, stay locked on final bill! Customer must not go back to menu.
-      if (isFinalBillPageOpen || Boolean(activeOrder?.bill_requested)) {
-        window.history.pushState({ billView: true }, '', window.location.href);
+  const recentCancelReasonRef = useRef<{ reason: string; at: number } | null>(null);
+
+  const pushCustomerHistoryGuard = (view?: string) => {
+    if (isExplicitAdminPreview) return;
+    try {
+      const targetUrl = (() => {
+        const saved = sessionStorage.getItem('serveflow_customer_last_url');
+        if (saved && saved.startsWith('/menu')) return saved;
+        return window.location.href;
+      })();
+      if (view) {
+        if (window.history.state?.view !== view) {
+          window.history.pushState({ menuView: true, menuGuard: true, view }, '', targetUrl);
+        }
+      } else if (!window.history.state?.menuGuard) {
+        window.history.pushState({ menuView: true, menuGuard: true }, '', targetUrl);
+      }
+    } catch {}
+  };
+
+  // Ensure at least one user-activated history guard exists on first tap/interaction (bypasses Chrome History Manipulation Intervention)
+  useEffect(() => {
+    if (isExplicitAdminPreview) return;
+    const ensureGuardOnInteraction = () => {
+      if (!window.history.state?.menuGuard) {
+        pushCustomerHistoryGuard();
+      }
+    };
+    window.addEventListener('pointerdown', ensureGuardOnInteraction, { passive: true });
+    window.addEventListener('keydown', ensureGuardOnInteraction, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', ensureGuardOnInteraction);
+      window.removeEventListener('keydown', ensureGuardOnInteraction);
+    };
+  }, [isExplicitAdminPreview]);
+
+  // Hardware / Browser Back button interception (Trap popstate to avoid exiting web app or losing customer view)
+  useEffect(() => {
+    const handlePopState = () => {
+      const s = navStateRef.current;
+      const safeMenuUrl = (() => {
+        try {
+          const saved = sessionStorage.getItem('serveflow_customer_last_url');
+          if (saved && saved.startsWith('/menu')) return saved;
+        } catch {}
+        return window.location.pathname.startsWith('/menu') ? window.location.href : '/menu';
+      })();
+
+      // If final bill page is open, bill has been requested, or pay-first payment is awaiting confirmation, stay locked!
+      if (s.isFinalBillPageOpen || s.billRequested || s.awaitingPayment) {
+        window.history.pushState({ billView: true, menuGuard: true }, '', safeMenuUrl);
         return;
       }
 
       // If modal/drawer is open, close it rather than navigating away
-      if (isDetailModalOpen) {
+      if (s.isDetailModalOpen) {
         setIsDetailModalOpen(false);
-        window.history.pushState({ menuView: true }, '', window.location.href);
+        setSelectedDetailItem(null);
+        window.history.pushState({ menuView: true, menuGuard: true }, '', safeMenuUrl);
         return;
       }
-      if (isCartOpen) {
+      if (s.isCartOpen) {
         setIsCartOpen(false);
-        window.history.pushState({ menuView: true }, '', window.location.href);
+        window.history.pushState({ menuView: true, menuGuard: true }, '', safeMenuUrl);
         return;
       }
-      if (isTrackerOpen) {
+      if (s.isTrackerOpen || s.hasSuccessOrderData) {
         setIsTrackerOpen(false);
-        window.history.pushState({ menuView: true }, '', window.location.href);
+        setSuccessOrderData(null);
+        window.history.pushState({ menuView: true, menuGuard: true }, '', safeMenuUrl);
         return;
       }
 
@@ -658,21 +909,135 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       if (onNavigateBack) {
         try {
           sessionStorage.removeItem('serveflow_customer_active');
-          sessionStorage.removeItem('serveflow_customer_table_session');
+          sessionStorage.removeItem('serveflow_customer_last_url');
+          sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
         } catch {}
         onNavigateBack();
         return;
       }
 
-      // Root menu: Keep unauthenticated customers safely on menu without disruptive pop-ups or admin backdoors!
-      window.history.pushState({ menuView: true }, '', window.location.href);
+      // Root menu: Keep unauthenticated customers safely on menu without losing progress!
+      window.history.pushState({ menuView: true, menuGuard: true }, '', safeMenuUrl);
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [isDetailModalOpen, isCartOpen, isTrackerOpen, isFinalBillPageOpen, activeOrder?.bill_requested, onNavigateBack]);
+  }, [onNavigateBack]);
+
+  const syncTableSessionAndOrders = async (params: {
+    businessId?: string;
+    tableId?: string;
+    tableNumber?: string;
+    sessionId?: string | null;
+    cachedOrderId?: string;
+  }) => {
+    const { businessId, tableId, tableNumber, sessionId, cachedOrderId } = params;
+    if (!businessId || !tableId) return;
+
+    try {
+      const [tables, orders] = await Promise.all([
+        rbacService.getTablesApi(businessId).catch(() => null),
+        rbacService.getTableOrdersApi(tableId, businessId).catch(() => null),
+      ]);
+
+      const table = Array.isArray(tables) ? tables.find((t) => t.id === tableId) : undefined;
+      if (table) {
+        setTableParams((prev) => ({
+          ...prev,
+          creditOnly: Boolean(table.credit_only),
+          creditCustomerName: table.credit_customer_name || null,
+          creditCustomerPhone: table.credit_customer_phone || null,
+          creditPin: table.credit_pin || null,
+          creditGlAccountId: table.credit_gl_account_id || null,
+          creditGlAccountNumber: table.credit_gl_account_number || null,
+          creditGlAccountName: table.credit_gl_account_name || null,
+          compEnabled: Boolean(table.comp_enabled),
+          compOrdererName: table.comp_orderer_name || null,
+          compOrdererPhone: table.comp_orderer_phone || null,
+        }));
+      }
+
+      const consolidatedActive = Array.isArray(orders) ? consolidateTableOrders(orders, sessionId) : null;
+      const targetId = cachedOrderId || lastTargetOrderIdRef.current;
+
+      const isTableSessionInvalid = Boolean(
+        table &&
+        (
+          table.status === 'ACTIVE' ||
+          !table.current_session_id ||
+          (sessionId && table.current_session_id !== sessionId)
+        )
+      );
+
+      if (isTableSessionInvalid) {
+        const matchesCurrentSession = (o: TableOrder) =>
+          Boolean((targetId && o.id === targetId) || (sessionId && o.session_id === sessionId));
+
+        const paidMatch = Array.isArray(orders)
+          ? orders.find((o) =>
+              matchesCurrentSession(o) &&
+              o.status !== 'CANCELLED' &&
+              (o.payment_status === 'PAID' || Boolean((o as any).sale_id))
+            )
+          : undefined;
+        if (paidMatch) {
+          handleOrderSettled(paidMatch.id, paidMatch.table_number || tableNumber, paidMatch);
+          return;
+        }
+
+        const cancelledMatch = Array.isArray(orders)
+          ? orders.find((o) => matchesCurrentSession(o) && o.status === 'CANCELLED')
+          : undefined;
+        if (cancelledMatch) {
+          const reason = cancelledMatch.payment_rejected_reason
+            ? `Order cancelled: ${cancelledMatch.payment_rejected_reason}. Please scan the table QR code to start a new order.`
+            : 'Your order was cancelled by the cashier. Please scan the table QR code to start a new order.';
+          expireCustomerSession(reason, { businessId, tableId, tableNumber });
+          return;
+        }
+
+        const expireMsg = (table?.current_session_id && sessionId && table.current_session_id !== sessionId)
+          ? `A new session has started on Table #${tableNumber || ''}. Please scan the table QR code to join the current session.`
+          : 'This dining table session has ended or was reset by staff. Please scan the table QR code to start a new order.';
+        expireCustomerSession(expireMsg, { businessId, tableId, tableNumber });
+        return;
+      }
+
+      if (consolidatedActive) {
+        setActiveOrder(consolidatedActive);
+        setSuccessOrderData((prev: any) => (prev && prev.status === 'AWAITING_PAYMENT' ? prev : null));
+        persistActiveOrder(consolidatedActive, businessId, tableId, tableNumber);
+        if (consolidatedActive.bill_requested) {
+          setIsFinalBillPageOpen(true);
+        } else if (consolidatedActive.status === 'AWAITING_PAYMENT') {
+          setIsTrackerOpen(true);
+        }
+        return;
+      }
+
+      if (Array.isArray(orders) && targetId) {
+        const settledMatch = orders.find(
+          (o) =>
+            o.id === targetId &&
+            o.status !== 'CANCELLED' &&
+            (o.payment_status === 'PAID' || Boolean((o as any).sale_id))
+        );
+        if (settledMatch) {
+          handleOrderSettled(settledMatch.id, settledMatch.table_number || tableNumber, settledMatch);
+          return;
+        }
+        const cancelledMatch = orders.find((o) => o.id === targetId && o.status === 'CANCELLED');
+        if (cancelledMatch) {
+          const reason = cancelledMatch.payment_rejected_reason
+            ? `Order cancelled: ${cancelledMatch.payment_rejected_reason}. Please scan the table QR code to start a new order.`
+            : 'Your order was cancelled by the cashier. Please scan the table QR code to start a new order.';
+          expireCustomerSession(reason, { businessId, tableId, tableNumber });
+        }
+      }
+    } catch {}
+  };
 
   // Parse URL query parameters, sanitize history, and bind active table session
   useEffect(() => {
@@ -704,6 +1069,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     let activeFloor = urlFloor;
     let activeBuilding = urlBuilding;
     let activeSessionId: string | null = null;
+    let cachedActiveId: string | undefined;
 
     if (hasQrScanInUrl) {
       // 1. Fresh QR Scan: Sanitize URL address bar immediately so search history and bookmarks only store clean /menu
@@ -717,7 +1083,10 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         cleanUrl.searchParams.delete('t');
         const remainingQuery = cleanUrl.searchParams.toString();
         const cleanPath = '/menu' + (remainingQuery ? `?${remainingQuery}` : '');
-        window.history.replaceState({}, document.title, cleanPath);
+        window.history.replaceState({ menuView: true }, document.title, cleanPath);
+        if (!isAdminPreview) {
+          sessionStorage.setItem('serveflow_customer_last_url', cleanPath);
+        }
       } catch (e) {
         console.warn('URL address bar sanitization note:', e);
       }
@@ -730,25 +1099,30 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         floor: urlFloor,
         building: urlBuilding,
       });
-      const alreadyConcluded = localStorage.getItem('serveflow_table_bill_concluded') === 'true';
-      if (!alreadyConcluded) {
-        setSessionExpired(false);
-        setSessionExpiredReason(null);
-        setIsTableBillConcluded(false);
-        setSettledPaymentInfo(null);
-        try {
-          localStorage.removeItem('serveflow_table_bill_concluded');
-          localStorage.removeItem('serveflow_last_settled_payment');
-        } catch {}
-      }
+      // Fresh QR scan always resets prior concluded/expired flags from earlier dining visits
+      sessionExpiredRef.current = false;
+      isTableBillConcludedRef.current = false;
+      setSessionExpired(false);
+      setSessionExpiredReason(null);
+      setIsTableBillConcluded(false);
+      setSettledPaymentInfo(null);
+      setThankYouSettledBanner({ show: false });
+      try {
+        localStorage.removeItem('serveflow_table_bill_concluded');
+        localStorage.removeItem('serveflow_last_settled_payment');
+        localStorage.removeItem(SESSION_EXPIRED_REASON_KEY);
+      } catch {}
 
       // Check if this browser already had a host token for this table
       let existingHostToken: string | undefined = undefined;
       try {
-        const savedRaw = sessionStorage.getItem(TABLE_SESSION_STORAGE_KEY);
+        const savedRaw = sessionStorage.getItem(TABLE_SESSION_STORAGE_KEY) || localStorage.getItem(TABLE_SESSION_STORAGE_KEY);
         if (savedRaw) {
           const parsed = JSON.parse(savedRaw);
-          if (parsed.tableId === urlTableId && parsed.hostToken) {
+          if (
+            parsed.hostToken &&
+            (parsed.tableId === urlTableId || (urlTableNum && parsed.tableNumber === urlTableNum))
+          ) {
             existingHostToken = parsed.hostToken;
           }
         }
@@ -773,36 +1147,51 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           if (!isUserHost) {
             setCartItems([]);
             try {
-              sessionStorage.removeItem(tableCartStorageKey);
+              const tKey = res.table?.id || urlTableId;
+              sessionStorage.removeItem(`serveflow_table_cart_${tKey}`);
+              localStorage.removeItem(`serveflow_table_cart_${tKey}`);
             } catch {}
           }
 
+          const confirmedTableId = res.table?.id || urlTableId;
+          const confirmedBizId = res.table?.business_id || urlBizId;
+          const confirmedTableNum = res.table?.table_number || urlTableNum || 'Table';
+          const generatedSessionId = res.session_id || res.table?.current_session_id || `sess_${Date.now()}`;
+
           if (res.active_order) {
             setActiveOrder(res.active_order);
+            persistActiveOrder(res.active_order, confirmedBizId, confirmedTableId, confirmedTableNum);
             if (res.active_order.bill_requested) {
               setIsFinalBillPageOpen(true);
-            }
-          } else {
-            const confirmedTableId = res.table?.id || urlTableId;
-            const confirmedBizId = res.table?.business_id || urlBizId;
-            if (confirmedTableId) {
-              rbacService.getTableOrdersApi(confirmedTableId, confirmedBizId).then((orders) => {
-                const active = orders.find((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED' && !(o as any).settled);
-                if (active) {
-                  setActiveOrder(active);
-                  if (active.bill_requested) {
-                    setIsFinalBillPageOpen(true);
-                  }
-                }
-              }).catch(() => {});
+            } else if (res.active_order.status === 'AWAITING_PAYMENT') {
+              setIsTrackerOpen(true);
             }
           }
-
-          const generatedSessionId = res.session_id || res.table?.current_session_id || `sess_${Date.now()}`;
+          if (confirmedTableId && confirmedBizId) {
+            rbacService.getTableOrdersApi(confirmedTableId, confirmedBizId).then((orders) => {
+              const consolidated = consolidateTableOrders(orders, generatedSessionId);
+              if (consolidated) {
+                setActiveOrder(consolidated);
+                persistActiveOrder(consolidated, confirmedBizId, confirmedTableId, confirmedTableNum);
+                if (consolidated.bill_requested) {
+                  setIsFinalBillPageOpen(true);
+                } else if (consolidated.status === 'AWAITING_PAYMENT') {
+                  setIsTrackerOpen(true);
+                }
+              } else if (!res.active_order) {
+                setActiveOrder(null);
+                try {
+                  for (const k of getActiveOrderStorageKeys(confirmedBizId, confirmedTableId, confirmedTableNum)) {
+                    localStorage.removeItem(k);
+                  }
+                } catch {}
+              }
+            }).catch(() => {});
+          }
           const sessionPayload: CustomerTableSession = {
             businessId: urlBizId || res.table?.business_id || '',
-            tableId: res.table?.id || urlTableId,
-            tableNumber: res.table?.table_number || urlTableNum || 'Table',
+            tableId: confirmedTableId,
+            tableNumber: confirmedTableNum,
             floor: res.table?.floor ?? urlFloor,
             building: res.table?.building ?? urlBuilding,
             sessionId: generatedSessionId,
@@ -822,7 +1211,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           };
 
           try {
-            sessionStorage.setItem(TABLE_SESSION_STORAGE_KEY, JSON.stringify(sessionPayload));
+            const serialized = JSON.stringify(sessionPayload);
+            sessionStorage.setItem(TABLE_SESSION_STORAGE_KEY, serialized);
+            localStorage.setItem(TABLE_SESSION_STORAGE_KEY, serialized);
             if (token && sessionPayload.tableId) {
               localStorage.setItem(`serveflow_host_token_${sessionPayload.tableId}`, token);
             }
@@ -847,7 +1238,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             compOrdererPhone: sessionPayload.compOrdererPhone,
           });
 
-          // Successful table check-in clears any prior concluded flags from previous dining
+          // Successful table check-in clears any prior concluded/expired flags from previous dining
+          isTableBillConcludedRef.current = false;
+          sessionExpiredRef.current = false;
           setIsTableBillConcluded(false);
           setSessionExpired(false);
           setSessionExpiredReason(null);
@@ -855,6 +1248,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           try {
             localStorage.removeItem('serveflow_table_bill_concluded');
             localStorage.removeItem('serveflow_last_settled_payment');
+            localStorage.removeItem(SESSION_EXPIRED_REASON_KEY);
           } catch {}
         }).catch((err) => {
           console.warn('Table check-in scan registration note:', err);
@@ -871,27 +1265,33 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           isHost: true,
         };
         try {
-          sessionStorage.setItem(TABLE_SESSION_STORAGE_KEY, JSON.stringify(fallbackSession));
+          const serialized = JSON.stringify(fallbackSession);
+          sessionStorage.setItem(TABLE_SESSION_STORAGE_KEY, serialized);
+          localStorage.setItem(TABLE_SESSION_STORAGE_KEY, serialized);
         } catch {}
       }
-    } else {
-      // 2. URL has no table parameters (User reloaded tab, or revisited from search history / bookmark)
+    } else if (!isExplicitAdminPreview) {
+      // 2. URL has no table parameters (User navigated back, reloaded tab, reopened browser, or returned to /menu)
       try {
-        const savedSessionRaw = sessionStorage.getItem(TABLE_SESSION_STORAGE_KEY);
+        const savedSessionRaw = sessionStorage.getItem(TABLE_SESSION_STORAGE_KEY) || localStorage.getItem(TABLE_SESSION_STORAGE_KEY);
         if (savedSessionRaw) {
           const savedSession: CustomerTableSession = JSON.parse(savedSessionRaw);
           const elapsed = Date.now() - (savedSession.scannedAt || 0);
 
           if (elapsed > SESSION_TIMEOUT_MS) {
             // Expired via 3-hour timeout
-            sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-            setSessionExpired(true);
-            setSessionExpiredReason(
-              `The dining session for Table #${savedSession.tableNumber || ''} has timed out. If you are seated at this table, please scan the QR code on your table to start a new order.`
+            expireCustomerSession(
+              `The dining session for Table #${savedSession.tableNumber || ''} has timed out. If you are seated at this table, please scan the QR code on your table to start a new order.`,
+              { businessId: savedSession.businessId, tableId: savedSession.tableId, tableNumber: savedSession.tableNumber }
             );
             activeBizId = savedSession.businessId || activeBizId;
           } else {
-            // Restore table parameters and host authority from valid tab session
+            // Re-sync sessionStorage in case browser closed tab / wiped sessionStorage on mobile back
+            try {
+              sessionStorage.setItem(TABLE_SESSION_STORAGE_KEY, savedSessionRaw);
+            } catch {}
+
+            // Restore table parameters and host authority from valid session
             activeBizId = savedSession.businessId || activeBizId;
             activeTableId = savedSession.tableId;
             activeTableNum = savedSession.tableNumber;
@@ -924,35 +1324,6 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               compOrdererName: savedSession.compOrdererName,
               compOrdererPhone: savedSession.compOrdererPhone,
             });
-
-            // Verify table session with backend in background
-            if (activeBizId && activeTableId) {
-              rbacService.getTablesApi(activeBizId).then((tables) => {
-                const table = tables.find((t) => t.id === activeTableId);
-                if (table) {
-                  setTableParams((prev) => ({
-                    ...prev,
-                    creditOnly: Boolean(table.credit_only),
-                    creditCustomerName: table.credit_customer_name || null,
-                    creditCustomerPhone: table.credit_customer_phone || null,
-                    creditPin: table.credit_pin || null,
-                    creditGlAccountId: table.credit_gl_account_id || null,
-                    creditGlAccountNumber: table.credit_gl_account_number || null,
-                    creditGlAccountName: table.credit_gl_account_name || null,
-                    compEnabled: Boolean(table.comp_enabled),
-                    compOrdererName: table.comp_orderer_name || null,
-                    compOrdererPhone: table.comp_orderer_phone || null,
-                  }));
-                }
-                if (table && activeSessionId && table.current_session_id && table.current_session_id !== activeSessionId) {
-                  sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-                  setSessionExpired(true);
-                  setSessionExpiredReason(
-                    `A new session has started on Table #${savedSession.tableNumber || ''}. Please scan the table QR code to join the current session.`
-                  );
-                }
-              }).catch(() => {});
-            }
           }
         }
       } catch (err) {
@@ -960,32 +1331,35 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       }
     }
 
-    // Check localStorage for previously placed order for this table
-    if (activeBizId && (activeTableNum || activeTableId)) {
-      const tableOrderKey = `serveflow_active_order_${activeBizId || 'biz'}_${activeTableNum || activeTableId || 'default'}`;
+    // Check localStorage for previously placed order for this table & verify live session/order with backend
+    if (!hasQrScanInUrl && activeBizId && (activeTableNum || activeTableId)) {
       try {
-        const cached = localStorage.getItem(tableOrderKey);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed && parsed.id && parsed.status !== 'COMPLETED' && parsed.status !== 'CANCELLED') {
-            setActiveOrder(parsed);
-            if (parsed.bill_requested) {
-              setIsFinalBillPageOpen(true);
+        for (const key of getActiveOrderStorageKeys(activeBizId, activeTableId, activeTableNum)) {
+          const cached = localStorage.getItem(key);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (parsed && parsed.id && parsed.status !== 'COMPLETED' && parsed.status !== 'CANCELLED') {
+              cachedActiveId = parsed.id;
+              setActiveOrder(parsed);
+              if (parsed.bill_requested) {
+                setIsFinalBillPageOpen(true);
+              } else if (parsed.status === 'AWAITING_PAYMENT') {
+                setIsTrackerOpen(true);
+              }
+              break;
             }
           }
         }
       } catch {}
 
       if (activeTableId) {
-        rbacService.getTableOrdersApi(activeTableId, activeBizId).then((orders) => {
-          const active = orders.find((o) => o.status !== 'CANCELLED' && o.status !== 'COMPLETED' && !(o as any).settled);
-          if (active) {
-            setActiveOrder(active);
-            if (active.bill_requested) {
-              setIsFinalBillPageOpen(true);
-            }
-          }
-        }).catch(() => {});
+        syncTableSessionAndOrders({
+          businessId: activeBizId,
+          tableId: activeTableId,
+          tableNumber: activeTableNum,
+          sessionId: activeSessionId,
+          cachedOrderId: cachedActiveId,
+        });
       }
     }
 
@@ -1020,11 +1394,30 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       );
 
       if (isOurOrder) {
-        setActiveOrder((prev) => (prev ? { ...prev, ...updatedOrder } : (updatedOrder as any)));
-        setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updatedOrder } : (updatedOrder as any)));
-        if (updatedOrder.bill_requested) {
-          setIsFinalBillPageOpen(true);
+        if (updatedOrder.status === 'CANCELLED') {
+          const cancelReason = updatedOrder.payment_rejected_reason
+            ? `Order cancelled: ${updatedOrder.payment_rejected_reason}. Please scan the table QR code to start a new order.`
+            : 'Your order was cancelled by the cashier. Please scan the table QR code to start a new order.';
+          recentCancelReasonRef.current = { reason: cancelReason, at: Date.now() };
+          if (tableId && targetBizId) {
+            rbacService.getTableOrdersApi(tableId, targetBizId).then((orders) => {
+              const remaining = consolidateTableOrders(orders, tableParams.sessionId);
+              if (remaining) {
+                setActiveOrder(remaining);
+                persistActiveOrder(remaining, targetBizId, tableId, tableParams.tableNumber);
+                setSuccessOrderData((prev: any) => (prev && prev.status === 'AWAITING_PAYMENT' ? prev : null));
+              } else {
+                expireCustomerSession(cancelReason);
+              }
+            }).catch(() => {
+              expireCustomerSession(cancelReason);
+            });
+          } else {
+            expireCustomerSession(cancelReason);
+          }
+          return;
         }
+
         const isPayFirst = Boolean(updatedOrder.pay_first ?? activeOrder?.pay_first ?? successOrderData?.pay_first);
         const isSettled = isPayFirst
           ? updatedOrder.status === 'COMPLETED'
@@ -1033,18 +1426,56 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
              Boolean((updatedOrder as any).settled));
 
         if (isSettled) {
-          sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-          setSessionExpired(true);
-          setIsTableBillConcluded(true);
-          setSessionExpiredReason('Your table order and billing process has been concluded. Thank you for dining with us!');
-          setIsFinalBillPageOpen(false);
-          try {
-            localStorage.setItem('serveflow_table_bill_concluded', 'true');
-          } catch {}
           handleOrderSettled(updatedOrder.id, tableParams.tableNumber, {
             ...(activeOrder || successOrderData || {}),
             ...updatedOrder,
           });
+          return;
+        }
+
+        setActiveOrder((prev) => {
+          if (!prev) {
+            const single = updatedOrder as any;
+            persistActiveOrder(single, targetBizId, tableId, tableParams.tableNumber);
+            return single;
+          }
+          const isSingleMatchingOrder =
+            prev.id === updatedOrder.id &&
+            !prev.is_follow_up &&
+            !(prev.items || []).some((it: any) => (it.round_number || 1) > 1);
+          if (isSingleMatchingOrder) {
+            const next = { ...prev, ...updatedOrder };
+            persistActiveOrder(next, targetBizId, tableId, tableParams.tableNumber);
+            return next;
+          }
+          // Multi-round order: optimistically update matching items by item_key while preserving all rounds
+          const updatedItemByKey = new Map<string, any>();
+          for (const it of updatedOrder.items || []) {
+            if ((it as any).item_key) updatedItemByKey.set((it as any).item_key, it);
+          }
+          const mergedItems = (prev.items || []).map((it: any) =>
+            it.item_key && updatedItemByKey.has(it.item_key) ? { ...it, ...updatedItemByKey.get(it.item_key) } : it
+          );
+          const next = {
+            ...prev,
+            bill_requested: prev.bill_requested || updatedOrder.bill_requested,
+            items: mergedItems,
+          };
+          persistActiveOrder(next, targetBizId, tableId, tableParams.tableNumber);
+          return next;
+        });
+        if (tableId && targetBizId && (activeOrder?.id !== updatedOrder.id || (activeOrder?.items || []).some((it: any) => (it.round_number || 1) > 1))) {
+          rbacService.getTableOrdersApi(tableId, targetBizId).then((orders) => {
+            const consolidated = consolidateTableOrders(orders, tableParams.sessionId);
+            if (consolidated) {
+              setActiveOrder(consolidated);
+              persistActiveOrder(consolidated, targetBizId, tableId, tableParams.tableNumber);
+            }
+          }).catch(() => {});
+        }
+        setSuccessOrderData((prev: any) => (prev && prev.id === updatedOrder.id ? { ...prev, ...updatedOrder } : prev));
+        if (updatedOrder.bill_requested) {
+          setIsFinalBillPageOpen(true);
         }
       }
     });
@@ -1052,46 +1483,39 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     const unsubTable = socketService.subscribeToTables((tableData) => {
       if (tableId && tableData.id === tableId) {
         if (tableData.status === 'ACTIVE' && (!tableData.current_session_id || (tableParams.sessionId && tableData.current_session_id !== tableParams.sessionId))) {
-          sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-          setSessionExpired(true);
+          // If order update already handled bill settlement or cancellation, do not overwrite its screen/reason
+          if (sessionExpiredRef.current) return;
+
+          if (recentCancelReasonRef.current && Date.now() - recentCancelReasonRef.current.at < 5000) {
+            expireCustomerSession(recentCancelReasonRef.current.reason);
+            return;
+          }
 
           let cachedActiveOrder: TableOrder | null = null;
           try {
             const bId = tableParams.businessId || user?.business?.id || 'biz';
-            const tKey = tableParams.tableNumber || tableParams.tableId || 'default';
-            const stored = localStorage.getItem(`serveflow_active_order_${bId}_${tKey}`);
-            if (stored) cachedActiveOrder = JSON.parse(stored);
+            for (const key of getActiveOrderStorageKeys(bId, tableParams.tableId, tableParams.tableNumber)) {
+              const stored = localStorage.getItem(key);
+              if (stored) {
+                cachedActiveOrder = JSON.parse(stored);
+                break;
+              }
+            }
           } catch {}
 
           const existingOrder = activeOrder || successOrderData || cachedActiveOrder;
-          const hasOrderItems = existingOrder && (
-            (Array.isArray(existingOrder.items) && existingOrder.items.length > 0) ||
-            (existingOrder.total_amount !== undefined && Number(existingOrder.total_amount) > 0) ||
-            (existingOrder.subtotal !== undefined && Number(existingOrder.subtotal) > 0)
+          const isExistingPaid = Boolean(
+            existingOrder &&
+            existingOrder.status !== 'CANCELLED' &&
+            (existingOrder.payment_status === 'PAID' || Boolean((existingOrder as any).sale_id))
           );
 
-          if (hasOrderItems) {
-            setIsTableBillConcluded(true);
-            setIsFinalBillPageOpen(false);
-            setSessionExpiredReason(
-              'Your table order and billing process has been concluded. Thank you for dining with us!'
-            );
+          if (isExistingPaid && existingOrder && (!existingOrder.pay_first || existingOrder.status === 'COMPLETED')) {
             handleOrderSettled(existingOrder.id, tableParams.tableNumber, existingOrder);
+          } else if (existingOrder?.status === 'CANCELLED') {
+            expireCustomerSession('Your order was cancelled by the cashier. Please scan the table QR code to start a new order.');
           } else {
-            setSessionExpiredReason('This dining table session was reset by staff. Please re-scan table QR to start a new order.');
-            setIsTableBillConcluded(false);
-            setIsFinalBillPageOpen(false);
-            setSettledPaymentInfo(null);
-            try {
-              localStorage.removeItem('serveflow_last_settled_payment');
-              localStorage.removeItem('serveflow_table_bill_concluded');
-            } catch {}
-            setActiveOrder(null);
-            setIsTrackerOpen(false);
-            setIsCartOpen(false);
-            setCartItems([]);
-            setSuccessOrderData(null);
-            lastTargetOrderIdRef.current = null;
+            expireCustomerSession('This dining table session was reset by staff. Please re-scan table QR to start a new order.');
           }
         }
       }
@@ -1099,19 +1523,16 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
     const unsubReconnect = socketService.onReconnect(async () => {
       // Re-fetch on reconnect to catch missed events during socket downtime
-      const targetOrderId = activeOrder?.id || successOrderData?.id;
       const effectiveBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
-      const tableId = tableParams.tableId || activeOrder?.table_id;
-      if (!targetOrderId || !tableId || !effectiveBizId) return;
-
-      try {
-        const orders = await rbacService.getTableOrdersApi(tableId, effectiveBizId);
-        const updated = orders.find((o) => o.id === targetOrderId);
-        if (updated) {
-          setActiveOrder((prev) => (prev ? { ...prev, ...updated } : updated));
-          setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updated } : updated));
-        }
-      } catch {}
+      const effectiveTableId = tableParams.tableId || activeOrder?.table_id;
+      if (!effectiveTableId || !effectiveBizId) return;
+      await syncTableSessionAndOrders({
+        businessId: effectiveBizId,
+        tableId: effectiveTableId,
+        tableNumber: tableParams.tableNumber,
+        sessionId: tableParams.sessionId,
+        cachedOrderId: activeOrder?.id || successOrderData?.id || lastTargetOrderIdRef.current || undefined,
+      });
     });
 
     return () => {
@@ -1121,95 +1542,85 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     };
   }, [tableParams.businessId, user?.business?.id, activeOrder?.business_id, tableParams.tableId, activeOrder?.id, successOrderData?.id, tableParams.sessionId, tableParams.tableNumber]);
 
-  // Layer 1: Page Visibility API (handles mobile sleep & tab switching)
+  // Layer 1: Page Visibility API & bfcache pageshow (handles mobile sleep, tab switching, and back/forward cache)
   useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState !== 'visible') return;
-
-      // Ensure socket reconnection is proactively triggered if dropped during sleep
+    const syncOnResume = async () => {
       if (!socketService.isConnected()) {
         socketService.connect();
       }
-
-      const targetOrderId = activeOrder?.id || successOrderData?.id;
       const effectiveBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
       const tableId = tableParams.tableId || activeOrder?.table_id;
+      if (!tableId || !effectiveBizId || sessionExpiredRef.current) return;
 
-      // Only refetch if we have an active live order that hasn't been settled
-      if (!targetOrderId || !tableId || !effectiveBizId) return;
-      if (isTrackerOpen === false && successOrderData === null) return;
+      await syncTableSessionAndOrders({
+        businessId: effectiveBizId,
+        tableId,
+        tableNumber: tableParams.tableNumber,
+        sessionId: tableParams.sessionId,
+        cachedOrderId: activeOrder?.id || successOrderData?.id || lastTargetOrderIdRef.current || undefined,
+      });
+    };
 
-      try {
-        const orders = await rbacService.getTableOrdersApi(tableId, effectiveBizId);
-        const updated = orders.find((o) => o.id === targetOrderId);
-        if (updated) {
-          setActiveOrder((prev) => (prev ? { ...prev, ...updated } : updated));
-          setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updated } : updated));
-        }
-      } catch {
-        // silent — socket will catch up if REST fails
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncOnResume();
+      }
+    };
+
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        syncOnResume();
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
   }, [
     activeOrder?.id,
     activeOrder?.business_id,
     activeOrder?.table_id,
     successOrderData?.id,
     tableParams.tableId,
+    tableParams.tableNumber,
+    tableParams.sessionId,
     tableParams.businessId,
     user?.business?.id,
-    isTrackerOpen,
-    Boolean(successOrderData),
   ]);
 
-  // Layer 3: Periodic Polling Fallback (Safety Net)
+  // Layer 3: Periodic Polling Fallback (Safety Net when socket is disconnected)
   useEffect(() => {
-    // Only poll for active, non-concluded orders
-    const targetOrderId = activeOrder?.id || successOrderData?.id;
-    const currentOrder = activeOrder || successOrderData;
-    const isPending = currentOrder &&
-      currentOrder.status !== 'COMPLETED' &&
-      currentOrder.status !== 'CANCELLED' &&
-      currentOrder.payment_status !== 'PAID';
-
     const effectiveBizId = tableParams.businessId || user?.business?.id || activeOrder?.business_id;
     const tableId = tableParams.tableId || activeOrder?.table_id;
 
-    if (!isPending || !targetOrderId || !tableId || !effectiveBizId) return;
-    if (isTrackerOpen === false && successOrderData === null) return;
+    if (!tableId || !effectiveBizId || sessionExpired) return;
 
     const intervalId = setInterval(async () => {
-      // Skip if socket is live — no need to poll
       if (socketService.isConnected()) return;
-
-      try {
-        const orders = await rbacService.getTableOrdersApi(tableId, effectiveBizId);
-        const updated = orders.find((o) => o.id === targetOrderId);
-        if (updated) {
-          setActiveOrder((prev) => (prev ? { ...prev, ...updated } : updated));
-          setSuccessOrderData((prev: any) => (prev ? { ...prev, ...updated } : updated));
-        }
-      } catch {}
-    }, 45_000); // 45 seconds
+      await syncTableSessionAndOrders({
+        businessId: effectiveBizId,
+        tableId,
+        tableNumber: tableParams.tableNumber,
+        sessionId: tableParams.sessionId,
+        cachedOrderId: activeOrder?.id || successOrderData?.id || lastTargetOrderIdRef.current || undefined,
+      });
+    }, 45_000);
 
     return () => clearInterval(intervalId);
   }, [
     activeOrder?.id,
-    activeOrder?.status,
-    activeOrder?.payment_status,
     activeOrder?.business_id,
     activeOrder?.table_id,
     successOrderData?.id,
-    successOrderData?.status,
-    successOrderData?.payment_status,
     tableParams.tableId,
+    tableParams.tableNumber,
+    tableParams.sessionId,
     tableParams.businessId,
     user?.business?.id,
-    isTrackerOpen,
-    Boolean(successOrderData),
+    sessionExpired,
   ]);
 
   // Real-time Socket.io listener for Menu Items, Categories, and Business Profile
@@ -1236,13 +1647,17 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const loadData = async (bId?: string) => {
     try {
       setLoading(true);
-      const [itemsData, catsData, bizData] = await Promise.all([
+      const [itemsData, catsData, bizData, taxCfgData] = await Promise.all([
         rbacService.getMenusApi(bId).catch(() => []),
         rbacService.getCategoriesApi(bId).catch(() => []),
         rbacService.getBusinessProfileApi(bId).catch(() => null),
+        bId ? rbacService.getTaxConfigApi(bId).catch(() => null) : Promise.resolve(null),
       ]);
       setMenuItems(itemsData);
       setCategories(catsData);
+      if (taxCfgData) {
+        setTaxConfig(taxCfgData);
+      }
       if (bizData) {
         setBusinessProfile(bizData);
         try {
@@ -1297,6 +1712,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
   // Item Card Modal Trigger: Opens full card for customisation
   const handleOpenItemCard = (item: MenuItem) => {
+    pushCustomerHistoryGuard('detail');
     setSelectedDetailItem(item);
     setIsDetailModalOpen(true);
   };
@@ -1469,8 +1885,9 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
   const handleOpenOrderTracker = () => {
     if (activeOrder) {
+      pushCustomerHistoryGuard('tracker');
+      setSuccessOrderData(activeOrder.status === 'AWAITING_PAYMENT' ? activeOrder : null);
       setIsTrackerOpen(true);
-      setSuccessOrderData(activeOrder);
     } else {
       setNoOrderToast(true);
       setTimeout(() => setNoOrderToast(false), 3500);
@@ -1507,19 +1924,12 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const handleBillSettledOrRequested = () => {
     // 1. Empty the cart
     setCartItems([]);
-    // 2. Keep active order state with bill_requested: true so the final bill tab stays open
-    setActiveOrder((prev) => (prev ? { ...prev, bill_requested: true } : null));
-    // 3. Update localStorage cache
-    const tableOrderKey = `serveflow_active_order_${tableParams.businessId || 'biz'}_${tableParams.tableNumber || tableParams.tableId || 'default'}`;
-    try {
-      if (activeOrder) {
-        localStorage.setItem(tableOrderKey, JSON.stringify({ ...activeOrder, bill_requested: true }));
-      }
-    } catch {}
-    // 4. Conclude session in sessionStorage
-    try {
-      sessionStorage.removeItem(TABLE_SESSION_STORAGE_KEY);
-    } catch {}
+    // 2. Keep active order state with bill_requested: true so the final bill tab stays open across back/reload until paid
+    setActiveOrder((prev) => {
+      const next = prev ? { ...prev, bill_requested: true } : null;
+      if (next) persistActiveOrder(next);
+      return next;
+    });
   };
 
   // Order items based on custom admin sequence from Theme Studio
@@ -1688,32 +2098,62 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             </div>
 
             {/* Headline and Main Message */}
-            <div className="space-y-3">
-              <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white">
-                Thank You for Dining with Us!
-              </h2>
-              <p className="text-base sm:text-lg font-semibold text-zinc-700 dark:text-zinc-200 max-w-md mx-auto leading-relaxed">
-                {settledPaymentInfo?.amount && Number(settledPaymentInfo.amount) > 0 ? (
-                  <>Payment received: {settledPaymentInfo.mode || 'Cash'} <span className="notranslate font-mono font-bold">{(settledPaymentInfo.currency || 'Rs.').trim()} {Number(settledPaymentInfo.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>
-                ) : settledPaymentInfo?.mode ? (
-                  `Payment received via ${settledPaymentInfo.mode}`
-                ) : (
-                  'Payment received successfully'
-                )}
-              </p>
-            </div>
+            {isTableBillConcluded || thankYouSettledBanner.show ? (
+              <>
+                <div className="space-y-3">
+                  <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white">
+                    Thank You for Dining with Us!
+                  </h2>
+                  <p className="text-base sm:text-lg font-semibold text-zinc-700 dark:text-zinc-200 max-w-md mx-auto leading-relaxed">
+                    {typeof settledPaymentInfo?.amount === 'number' && !isNaN(settledPaymentInfo.amount) ? (
+                      Number(settledPaymentInfo.amount) === 0 ? (
+                        <>Complimentary Order — <span className="notranslate font-mono font-bold">{(settledPaymentInfo.currency || 'Rs.').trim()} 0.00</span> Paid</>
+                      ) : (
+                        <>Payment received: {settledPaymentInfo.mode || 'Cash'} <span className="notranslate font-mono font-bold">{(settledPaymentInfo.currency || 'Rs.').trim()} {Number(settledPaymentInfo.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>
+                      )
+                    ) : settledPaymentInfo?.mode ? (
+                      `Payment received via ${settledPaymentInfo.mode}`
+                    ) : (
+                      'Payment received successfully'
+                    )}
+                  </p>
+                </div>
 
-            {/* Status Details Box */}
-            <div className="p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs text-zinc-600 dark:text-zinc-300 space-y-2">
-              <div className="flex items-center justify-center gap-2 font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>Dining Session Concluded</span>
-              </div>
-              <p className="text-xs leading-relaxed opacity-85">
-                {sessionExpiredReason ||
-                  'Your table order and billing process has been concluded. Thank you for dining with us!'}
-              </p>
-            </div>
+                {/* Status Details Box */}
+                <div className="p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs text-zinc-600 dark:text-zinc-300 space-y-2">
+                  <div className="flex items-center justify-center gap-2 font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>Dining Session Concluded</span>
+                  </div>
+                  <p className="text-xs leading-relaxed opacity-85">
+                    {sessionExpiredReason ||
+                      'Your table order and billing process has been concluded. Thank you for dining with us!'}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-3">
+                  <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white">
+                    Dining Session Expired
+                  </h2>
+                  <p className="text-sm sm:text-base font-medium text-zinc-600 dark:text-zinc-300 max-w-md mx-auto leading-relaxed">
+                    {sessionExpiredReason ||
+                      'This dining session has ended. Please scan the QR code on your table to start a new order.'}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs text-zinc-600 dark:text-zinc-300 space-y-2">
+                  <div className="flex items-center justify-center gap-2 font-bold text-amber-600 dark:text-amber-400 text-sm">
+                    <QrCode className="w-4 h-4 shrink-0" />
+                    <span>Session Ended</span>
+                  </div>
+                  <p className="text-xs leading-relaxed opacity-85">
+                    Scan the table QR code if you would like to begin a new dining session.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </main>
 
@@ -1743,7 +2183,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
     );
   }
 
-  if (!isStoreOpen && tableParams.tableNumber) {
+  if (!isStoreOpen && (tableParams.tableNumber || !user)) {
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-6 text-center ${theme.pageBg} ${theme.text}`}>
         <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
@@ -1817,7 +2257,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               <button
                 id="btn-topbar-view-cart"
                 type="button"
-                onClick={() => setIsCartOpen(true)}
+                onClick={() => { pushCustomerHistoryGuard('cart'); setIsCartOpen(true); }}
                 className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
                 title="View Cart"
               >
@@ -1854,7 +2294,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               <button
                 id="btn-topbar-view-cart"
                 type="button"
-                onClick={() => setIsCartOpen(true)}
+                onClick={() => { pushCustomerHistoryGuard('cart'); setIsCartOpen(true); }}
                 className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 shrink-0"
                 title="View Table Cart"
               >
@@ -1937,7 +2377,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               <button
                 id="btn-banner-view-cart"
                 type="button"
-                onClick={() => setIsCartOpen(true)}
+                onClick={() => { pushCustomerHistoryGuard('cart'); setIsCartOpen(true); }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-zinc-950 border border-amber-600/30 transition cursor-pointer shadow-xs active:scale-95"
               >
                 <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
@@ -2117,7 +2557,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                 <button
                   id="btn-hero-view-cart"
                   type="button"
-                  onClick={() => setIsCartOpen(true)}
+                  onClick={() => { pushCustomerHistoryGuard('cart'); setIsCartOpen(true); }}
                   className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md cursor-pointer active:scale-95"
                 >
                   <ShoppingBag className="w-3.5 h-3.5 text-zinc-950" />
@@ -3137,7 +3577,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           <button
             id="btn-floating-view-cart"
             type="button"
-            onClick={() => setIsCartOpen(true)}
+            onClick={() => { pushCustomerHistoryGuard('cart'); setIsCartOpen(true); }}
             className="pointer-events-auto max-w-md w-full bg-zinc-950 hover:bg-zinc-900 text-white p-3 rounded-2xl shadow-2xl border border-amber-500/40 flex items-center justify-between gap-3 cursor-pointer transition active:scale-[0.98] ring-1 ring-black/10 backdrop-blur-md"
           >
             <div className="flex items-center gap-2.5 min-w-0">
@@ -3223,6 +3663,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           compOrdererName: tableParams.compOrdererName,
           compOrdererPhone: tableParams.compOrdererPhone,
         }}
+        packagingFee={taxConfig?.packaging_fee}
         isHost={isHost}
         hostToken={hostToken}
         onUpdateQuantity={handleUpdateQuantity}
@@ -3231,26 +3672,24 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         onClearCart={handleClearCart}
         onOrderConfirmed={(orderData) => {
           setIsCartOpen(false);
-          setSuccessOrderData(orderData);
+          pushCustomerHistoryGuard('tracker');
+          setSuccessOrderData(orderData.status === 'AWAITING_PAYMENT' ? orderData : null);
           setActiveOrder((prev) => {
-            if (!prev) return orderData;
-            const combinedItems = [...(prev.items || []), ...(orderData.items || [])];
-            const combinedSubtotal = (Number(prev.subtotal) || 0) + (Number(orderData.subtotal) || 0);
-            const combinedPkg = (Number(prev.packaging_charge) || 0) + (Number(orderData.packaging_charge) || 0);
-            const combinedPkgQty = (Number(prev.packaging_qty) || 0) + (Number(orderData.packaging_qty) || 0);
-            const combinedTotal = (Number(prev.total_amount) || 0) + (Number(orderData.total_amount) || 0);
-            const combinedTax = (Number(prev.tax_amount) || 0) + (Number(orderData.tax_amount) || 0);
-            return {
-              ...prev,
-              order_number: prev.order_number || orderData.order_number,
-              items: combinedItems,
-              subtotal: combinedSubtotal,
-              packaging_charge: combinedPkg,
-              packaging_qty: combinedPkgQty,
-              total_amount: combinedTotal,
-              tax_amount: combinedTax,
-              bill_requested: prev.bill_requested || orderData.bill_requested,
-            };
+            const next = !prev
+              ? orderData
+              : {
+                  ...prev,
+                  order_number: prev.order_number || orderData.order_number,
+                  items: [...(prev.items || []), ...(orderData.items || [])],
+                  subtotal: (Number(prev.subtotal) || 0) + (Number(orderData.subtotal) || 0),
+                  packaging_charge: (Number(prev.packaging_charge) || 0) + (Number(orderData.packaging_charge) || 0),
+                  packaging_qty: (Number(prev.packaging_qty) || 0) + (Number(orderData.packaging_qty) || 0),
+                  total_amount: (Number(prev.total_amount) || 0) + (Number(orderData.total_amount) || 0),
+                  tax_amount: (Number(prev.tax_amount) || 0) + (Number(orderData.tax_amount) || 0),
+                  bill_requested: prev.bill_requested || orderData.bill_requested,
+                };
+            persistActiveOrder(next);
+            return next;
           });
           setIsTrackerOpen(true);
         }}
@@ -3280,11 +3719,29 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
           compOrdererName: tableParams.compOrdererName,
           compOrdererPhone: tableParams.compOrdererPhone,
         }}
-        currencySymbol={businessProfile?.currency || 'Rs.'}
+        currencySymbol={taxConfig?.currency_symbol || businessProfile?.currency || 'Rs.'}
+        packagingFee={taxConfig?.packaging_fee}
         onOrderConfirmed={(orderData) => {
           setIsCompConfirmOpen(false);
-          setSuccessOrderData(orderData);
-          setActiveOrder(orderData);
+          pushCustomerHistoryGuard('tracker');
+          setSuccessOrderData(orderData.status === 'AWAITING_PAYMENT' ? orderData : null);
+          setActiveOrder((prev) => {
+            const next = !prev
+              ? orderData
+              : {
+                  ...prev,
+                  order_number: prev.order_number || orderData.order_number,
+                  items: [...(prev.items || []), ...(orderData.items || [])],
+                  subtotal: (Number(prev.subtotal) || 0) + (Number(orderData.subtotal) || 0),
+                  packaging_charge: (Number(prev.packaging_charge) || 0) + (Number(orderData.packaging_charge) || 0),
+                  packaging_qty: (Number(prev.packaging_qty) || 0) + (Number(orderData.packaging_qty) || 0),
+                  total_amount: (Number(prev.total_amount) || 0) + (Number(orderData.total_amount) || 0),
+                  tax_amount: (Number(prev.tax_amount) || 0) + (Number(orderData.tax_amount) || 0),
+                  bill_requested: prev.bill_requested || orderData.bill_requested,
+                };
+            persistActiveOrder(next);
+            return next;
+          });
           setIsTrackerOpen(true);
         }}
         onClearCart={handleClearCart}

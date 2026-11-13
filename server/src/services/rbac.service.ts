@@ -33,6 +33,9 @@ import { realtimeEmitter } from '../lib/socket';
 import { auditService } from './audit.service';
 import { incrementSequence } from '../utils/sequence.util';
 import { generateMenuDocId, generateCategoryDocId, slugify } from '../utils/id.utils';
+import { getActiveRevenueWindow } from '../../../src/utils/revenueWindow';
+import { evaluateStoreStatusDetailed } from '../../../src/utils/operationalDay';
+import { calculateBillTotals, computeOrderBillableAmounts } from '../../../src/utils/taxCalculations';
 import {
   canAccessResource,
   accessKindOf,
@@ -46,6 +49,7 @@ import {
   findInvalidTabs,
   isBusinessOwnerRole,
   isManagerRole,
+  normalizeLegacyRole,
   TAB_PERMISSION_IDS,
   type TabPermissionId,
 } from './tabAccess';
@@ -59,7 +63,7 @@ export class RBACService {
    * access is decided only by the account's allowed tabs (see ./tabAccess.ts, working.md section 19).
    */
   private static readonly KNOWN_ROLES: ReadonlySet<string> = new Set([
-    'OWNER', 'MANAGER', 'ADMIN', 'RESTAURANT_OWNER', 'HOTEL_OWNER', 'RESTAURANT_MANAGER', 'HOTEL_MANAGER',
+    'OWNER', 'MANAGER', 'ADMIN', 'RESTAURANT_OWNER', 'RESTAURANT_MANAGER',
     'FRONT_DESK', 'KITCHEN_STAFF', 'HOUSEKEEPING', 'CASHIER',
   ]);
 
@@ -68,11 +72,11 @@ export class RBACService {
    */
   public normalizeRole(roleString?: string): AppRole {
     if (!roleString) return 'KITCHEN_STAFF';
-    const upper = roleString.toUpperCase().trim();
-    if (upper === 'MANAGER' || upper === 'RESTAURANT_MANAGER' || upper === 'HOTEL_MANAGER') {
+    const upper = normalizeLegacyRole(roleString);
+    if (upper === 'MANAGER' || upper === 'RESTAURANT_MANAGER') {
       return 'MANAGER';
     }
-    if (upper === 'OWNER' || upper === 'RESTAURANT_OWNER' || upper === 'HOTEL_OWNER' || upper === 'ADMIN') {
+    if (upper === 'OWNER' || upper === 'RESTAURANT_OWNER' || upper === 'ADMIN') {
       return upper as AppRole;
     }
     if (upper === 'STAFF' || upper === 'WAITER') {
@@ -1182,7 +1186,7 @@ export class RBACService {
 
   private async seedDefaultCheckIns(businessId: string, userId: string): Promise<CheckIn[]> {
     const defaults: Array<Omit<CheckIn, 'id' | 'business_id' | 'handled_by_user_id' | 'created_at' | 'updated_at'>> = [
-      { guest_name: 'Alexander Wright', guest_phone: '+14155550192', guest_email: 'alex.wright@example.com', room_or_table_number: 'Room 304 (Deluxe Suite)', check_in_date: new Date(), check_out_date: null, status: 'CHECKED_IN', total_amount: 450, deposit_paid: 100, notes: 'VIP Guest - Early breakfast requested' },
+      { guest_name: 'Alexander Wright', guest_phone: '+14155550192', guest_email: 'alex.wright@example.com', room_or_table_number: 'Table 04 (VIP Booth)', check_in_date: new Date(), check_out_date: null, status: 'CHECKED_IN', total_amount: 450, deposit_paid: 100, notes: 'VIP Guest - Early breakfast requested' },
       { guest_name: 'Elena Rostova', guest_phone: '+14155550183', guest_email: 'elena.r@example.com', room_or_table_number: 'Table 12 (Garden Patio)', check_in_date: new Date(), check_out_date: null, status: 'CHECKED_IN', total_amount: 85, deposit_paid: 0, notes: 'Anniversary celebration' }
     ];
 
@@ -1618,6 +1622,46 @@ export class RBACService {
     });
   }
 
+  private async clearTableSessionIfNoActiveOrders(
+    businessId: string,
+    tableId?: string | null,
+    tableNumber?: string | null,
+    excludeOrderId?: string
+  ): Promise<void> {
+    if (!tableId && !tableNumber) return;
+    try {
+      const remaining = await prisma.tableOrder.count({
+        where: {
+          business_id: businessId,
+          ...(excludeOrderId ? { id: { not: excludeOrderId } } : {}),
+          ...(tableId ? { table_id: tableId } : { table_number: tableNumber! }),
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        },
+      });
+      if (remaining > 0) return;
+
+      await prisma.restaurantTable.updateMany({
+        where: {
+          business_id: businessId,
+          ...(tableId ? { id: tableId } : { table_number: tableNumber! }),
+        },
+        data: {
+          status: 'ACTIVE',
+          current_session_id: null,
+          host_token: null,
+          last_scanned_at: null,
+        },
+      });
+      realtimeEmitter.tableUpdated(businessId, {
+        id: tableId || '',
+        table_number: tableNumber || '',
+        status: 'ACTIVE',
+        current_session_id: null,
+        host_token: null,
+      });
+    } catch (e) {}
+  }
+
   /**
    * Reset/Clear table session manually (Manager / Staff)
    * Cancels any active guest session, resets status to ACTIVE, clears host_token & current_session_id
@@ -1752,7 +1796,18 @@ export class RBACService {
         });
         if (activeOrders.length > 0) {
           hasActiveOrders = true;
-          const d: any = activeOrders[0];
+          const sortedAsc = [...activeOrders].sort(
+            (a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+          const d: any = sortedAsc[0];
+          const allItems = sortedAsc.flatMap((o: any) => (o.items as any[]) || []);
+          const totalSubtotal = sortedAsc.reduce((s: number, o: any) => s + Number(o.subtotal || 0), 0);
+          const totalTax = sortedAsc.reduce((s: number, o: any) => s + Number(o.tax_amount || 0), 0);
+          const totalAmount = sortedAsc.reduce((s: number, o: any) => s + Number(o.total_amount || 0), 0);
+          const totalPkgCharge = sortedAsc.reduce((s: number, o: any) => s + Number(o.packaging_charge || 0), 0);
+          const totalPkgQty = sortedAsc.reduce((s: number, o: any) => s + Number(o.packaging_qty || 0), 0);
+          const anyBillReq = sortedAsc.some((o: any) => Boolean(o.bill_requested));
+          const anyAwaitingPayment = sortedAsc.some((o: any) => o.status === 'AWAITING_PAYMENT');
           activeOrder = {
             id: d.id,
             business_id: d.business_id,
@@ -1761,20 +1816,22 @@ export class RBACService {
             order_number: d.order_number || null,
             floor: d.floor || null,
             building: d.building || null,
-            items: (d.items as any) || [],
-            subtotal: Number(d.subtotal),
-            tax_amount: Number(d.tax_amount || 0),
-            total_amount: Number(d.total_amount),
+            items: allItems,
+            subtotal: totalSubtotal,
+            tax_amount: totalTax,
+            packaging_charge: totalPkgCharge,
+            packaging_qty: totalPkgQty,
+            total_amount: totalAmount,
             currency: d.currency || 'Rs.',
             customer_name: d.customer_name || null,
             customer_phone: d.customer_phone || null,
             customer_pan: d.customer_pan || null,
             order_notes: d.order_notes || null,
-            status: d.status as OrderStatus,
-            pay_first: Boolean(d.pay_first),
+            status: (anyAwaitingPayment ? 'AWAITING_PAYMENT' : d.status) as OrderStatus,
+            pay_first: anyAwaitingPayment ? true : Boolean(d.pay_first),
             credit_only: Boolean(d.credit_only),
             session_id: d.session_id || null,
-            bill_requested: Boolean(d.bill_requested),
+            bill_requested: anyBillReq,
             bill_requested_at: d.bill_requested_at ? new Date(d.bill_requested_at) : null,
             payment_method: d.payment_method || null,
             payment_status: d.payment_status || null,
@@ -1975,6 +2032,39 @@ export class RBACService {
     return isDrink ? 'BAR' : 'KITCHEN';
   }
 
+  private async getBusinessOperationsState(businessId: string): Promise<{
+    operations_config: any;
+    current_operational_day: any;
+  }> {
+    try {
+      const biz = await prisma.business.findUnique({
+        where: { id: businessId },
+        select: { operations_config: true, current_operational_day: true },
+      });
+      return {
+        operations_config: (biz?.operations_config as any) || null,
+        current_operational_day: (biz?.current_operational_day as any) || null,
+      };
+    } catch {
+      return { operations_config: null, current_operational_day: null };
+    }
+  }
+
+  public async assertStoreAcceptingOrders(businessId: string): Promise<{
+    operations_config: any;
+    current_operational_day: any;
+  }> {
+    const state = await this.getBusinessOperationsState(businessId);
+    const status = evaluateStoreStatusDetailed(state.operations_config, state.current_operational_day);
+    if (!status.isOpen) {
+      const err: any = new Error(status.reason || 'Store is closed. Cannot accept orders when the business day is closed.');
+      err.statusCode = 403;
+      err.code = 'STORE_CLOSED';
+      throw err;
+    }
+    return state;
+  }
+
   /**
    * Create or update customer table order (Digital Ordering via Cart UI)
    * If customer hasn't settled/requested bill, re-ordering in the same session appends items and immediately updates the bill.
@@ -1999,6 +2089,8 @@ export class RBACService {
     if (!orderData.items || orderData.items.length === 0) {
       throw new Error('Cannot place an empty order. Please add at least 1 item.');
     }
+
+    await this.assertStoreAcceptingOrders(businessId);
 
     const now = new Date();
 
@@ -2091,6 +2183,13 @@ export class RBACService {
             if (lastScannedMs < fourHoursAgo) {
               throw new Error('Table QR session has expired (timeout). Please scan the live QR code on your table.');
             }
+          }
+          // Validate active QR session when client passes an explicit session_id
+          if (orderData.session_id && tableSnap.current_session_id !== orderData.session_id) {
+            const err: any = new Error('Your dining session has expired. Please scan the QR code on your table to start a new order.');
+            err.statusCode = 403;
+            err.code = 'SESSION_EXPIRED';
+            throw err;
           }
           // Validate Host ordering authority: Only the Table Host who first scanned can place orders
           if (tableSnap.host_token) {
@@ -2265,21 +2364,13 @@ export class RBACService {
 
       // Calculate round-specific financial totals
       const activeNewItems = roundTaggedItems.filter((item) => item.status !== 'CANCELLED');
-      const roundMenuTotal = activeNewItems.reduce((sum, item) => {
-        const qty = Number(item.quantity) || 1;
-        const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-        const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
-        return sum + (Number(item.price) || 0) * billedQty;
-      }, 0);
-
-      const roundPackagingTotal = activeNewItems.reduce((sum, item) => {
-        const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
-        const fee = Number(item.packaging_charge ?? (packQty * Number(taxConfig.packaging_fee ?? 10))) || 0;
-        return sum + fee;
-      }, 0);
-      const roundPackagingQty = activeNewItems.reduce((sum, item) => {
-        return sum + Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
-      }, 0);
+      const roundBillable = computeOrderBillableAmounts(activeNewItems, {
+        packagingFeeRate: Number(taxConfig.packaging_fee ?? 10),
+        isPackagingComp: Boolean((orderData as any).is_packaging_comp),
+      });
+      const roundMenuTotal = roundBillable.itemsMenuTotal;
+      const roundPackagingTotal = roundBillable.packagingTotal;
+      const roundPackagingQty = roundBillable.packagingQty;
 
       const {
         subtotal: roundSubtotal,
@@ -2399,28 +2490,15 @@ export class RBACService {
 
     // Otherwise, create a brand new Table Order
     const orderId = `ORD-${Date.now().toString(36).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`;
-    const itemsMenuTotal = newItems.reduce((sum, item) => {
-      const qty = Number(item.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-      const billedQty = item.is_comp ? 0 : Math.max(0, qty - compQty);
-      return sum + (Number(item.price) || 0) * billedQty;
-    }, 0);
-
-    const isAllComp = newItems.length > 0 && newItems.every((item) => {
-      const qty = Number(item.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-      return Boolean(item.is_comp || compQty >= qty);
-    });
-
     const taxConfig = await this.getTaxConfig(businessId);
-    const packagingTotal = newItems.reduce((sum, item) => {
-      const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
-      const fee = Number(item.packaging_charge ?? (packQty * Number(taxConfig.packaging_fee ?? 10))) || 0;
-      return sum + fee;
-    }, 0);
-    const totalPackagingQty = newItems.reduce((sum, item) => {
-      return sum + Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
-    }, 0);
+    const orderBillable = computeOrderBillableAmounts(newItems, {
+      packagingFeeRate: Number(taxConfig.packaging_fee ?? 10),
+      isPackagingComp: Boolean((orderData as any).is_packaging_comp),
+    });
+    const itemsMenuTotal = orderBillable.itemsMenuTotal;
+    const isAllComp = orderBillable.isAllComp;
+    const packagingTotal = orderBillable.packagingTotal;
+    const totalPackagingQty = orderBillable.packagingQty;
     const {
       subtotal,
       taxAmount,
@@ -2613,7 +2691,7 @@ export class RBACService {
 
         const isOrderSettled = Boolean(
           d.pay_first
-            ? effectiveStatus === 'COMPLETED'
+            ? (effectiveStatus === 'COMPLETED' && (d.payment_status === 'PAID' || Boolean(d.sale_id)))
             : (effectiveStatus === 'COMPLETED' || d.payment_status === 'PAID' || Boolean(d.sale_id))
         );
 
@@ -2635,6 +2713,8 @@ export class RBACService {
           items: healedItems,
           subtotal: Number(d.subtotal) || 0,
           tax_amount: Number(d.tax_amount) || 0,
+          packaging_charge: Number(d.packaging_charge) || 0,
+          packaging_qty: Number(d.packaging_qty) || 0,
           total_amount: Number(d.total_amount) || 0,
           currency: d.currency || 'Rs.',
           customer_name: d.customer_name || 'Guest',
@@ -2729,13 +2809,16 @@ export class RBACService {
       nextStatus = 'COMPLETED' as any;
     }
 
-    // If the whole order is marked READY or SERVED, keep line-items in sync
+    // If the whole order is marked READY, SERVED, or CANCELLED, keep line-items in sync
     const items = ((currentOrder.items as any[]) || []).map((it: any) => {
-      if (nextStatus === 'READY' && it.status !== 'SERVED') {
+      if (nextStatus === 'READY' && it.status !== 'SERVED' && it.status !== 'CANCELLED') {
         return { ...it, status: 'READY', ready_at: it.ready_at || now.toISOString() };
       }
-      if (nextStatus === 'SERVED') {
+      if (nextStatus === 'SERVED' && it.status !== 'CANCELLED') {
         return { ...it, status: 'SERVED', served_at: it.served_at || now.toISOString() };
+      }
+      if (nextStatus === 'CANCELLED' && it.status !== 'CANCELLED') {
+        return { ...it, status: 'CANCELLED', cancelled_at: it.cancelled_at || now.toISOString() };
       }
       return it;
     });
@@ -2749,21 +2832,6 @@ export class RBACService {
         served_at: servedAt,
       },
     });
-
-    // Reset table session if a pay_first order was completed
-    if (nextStatus === 'COMPLETED' && currentOrder.pay_first && currentOrder.table_id) {
-      try {
-        await prisma.restaurantTable.updateMany({
-          where: { id: currentOrder.table_id },
-          data: {
-            status: 'ACTIVE',
-            current_session_id: null,
-            host_token: null,
-            last_scanned_at: null,
-          },
-        });
-      } catch (e) {}
-    }
 
     auditService.log({
       userId: user?.id || 'staff',
@@ -2795,13 +2863,40 @@ export class RBACService {
       sale_id: updated.sale_id || null,
       source: updated.source || (updated.sale_id ? 'POS_MANUAL' : 'QR'),
       pos_sale_id: updated.sale_id || null,
-      settled: Boolean(updated.pay_first ? updated.status === 'COMPLETED' : (updated.status === 'COMPLETED' || updated.payment_status === 'PAID' || Boolean(updated.sale_id))),
+      settled: Boolean(updated.pay_first ? (updated.status === 'COMPLETED' && (updated.payment_status === 'PAID' || Boolean(updated.sale_id))) : (updated.status === 'COMPLETED' || updated.payment_status === 'PAID' || Boolean(updated.sale_id))),
       ready_at: updated.ready_at ? new Date(updated.ready_at) : null,
       served_at: updated.served_at ? new Date(updated.served_at) : null,
       created_at: new Date(updated.created_at),
       updated_at: new Date(updated.updated_at),
     };
     realtimeEmitter.orderUpdated(businessId, resOrder);
+
+    // Reset table session if a pay_first order was completed
+    if (nextStatus === 'COMPLETED' && currentOrder.pay_first && currentOrder.table_id) {
+      try {
+        await prisma.restaurantTable.updateMany({
+          where: { id: currentOrder.table_id },
+          data: {
+            status: 'ACTIVE',
+            current_session_id: null,
+            host_token: null,
+            last_scanned_at: null,
+          },
+        });
+        realtimeEmitter.tableUpdated(businessId, {
+          id: currentOrder.table_id,
+          table_number: currentOrder.table_number,
+          status: 'ACTIVE',
+          current_session_id: null,
+          host_token: null,
+        });
+      } catch (e) {}
+    }
+
+    if (nextStatus === 'CANCELLED') {
+      await this.clearTableSessionIfNoActiveOrders(businessId, currentOrder.table_id, currentOrder.table_number, orderId);
+    }
+
     return resOrder;
   }
 
@@ -2867,24 +2962,27 @@ export class RBACService {
 
     // Determine overall order status and amounts based on active (non-cancelled) items
     const activeItems = items.filter((it) => it.status !== 'CANCELLED');
-    const itemsMenuTotal = activeItems.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
     const taxConfig = await this.getTaxConfig(businessId);
-    const packagingTotal = activeItems.reduce((sum, item) => {
-      const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
-      const fee = Number(item.packaging_charge ?? (packQty * Number(taxConfig.packaging_fee ?? 10))) || 0;
-      return sum + fee;
-    }, 0);
-    const totalPackagingQty = activeItems.reduce((sum, item) => {
-      return sum + Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? item.quantity : 0)) || 0);
-    }, 0);
+    const existingOrderPkgComp =
+      Boolean((currentData as any).is_packaging_comp) ||
+      (Number(currentData.packaging_qty || 0) > 0 &&
+        currentData.packaging_charge !== undefined &&
+        currentData.packaging_charge !== null &&
+        Number(currentData.packaging_charge) === 0);
+    const itemStatusBillable = computeOrderBillableAmounts(activeItems, {
+      packagingFeeRate: Number(taxConfig.packaging_fee ?? 10),
+      isPackagingComp: existingOrderPkgComp,
+    });
+    const itemsMenuTotal = itemStatusBillable.itemsMenuTotal;
+    const packagingTotal = itemStatusBillable.packagingTotal;
+    const totalPackagingQty = itemStatusBillable.packagingQty;
     const {
       subtotal: newSubtotal,
       taxAmount: newTax,
       computedTaxes,
-      totalAmount: preDiscountTotal,
-    } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, taxConfig);
-    const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, currentData, taxConfig);
-    const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
+      discountAmount: promoDiscount,
+      totalAmount: newTotal,
+    } = this.calculateOrderTotalsWithDiscount(itemsMenuTotal + packagingTotal, currentData, taxConfig);
 
     let nextOrderStatus: OrderStatus = currentData.status;
     const isAlreadySettled = currentData.status === 'COMPLETED' || (!currentData.pay_first && (currentData.payment_status === 'PAID' || Boolean(currentData.sale_id)));
@@ -2937,6 +3035,8 @@ export class RBACService {
           status: nextOrderStatus,
           subtotal: newSubtotal,
           tax_amount: newTax,
+          taxes: computedTaxes as any,
+          promo_discount: promoDiscount,
           packaging_charge: packagingTotal,
           packaging_qty: totalPackagingQty,
           total_amount: newTotal,
@@ -2946,38 +3046,6 @@ export class RBACService {
       });
     } catch (e: any) {
       console.warn('Prisma updateTableOrderItemStatus error:', e.message);
-    }
-
-    // Reset table session if a pay_first order was completed
-    if (nextOrderStatus === ('COMPLETED' as any) && currentData.pay_first && currentData.table_id) {
-      try {
-        await prisma.restaurantTable.updateMany({
-          where: { id: currentData.table_id },
-          data: {
-            status: 'ACTIVE',
-            current_session_id: null,
-            host_token: null,
-            last_scanned_at: null,
-          },
-        });
-      } catch (e) {}
-    }
-
-    // If order was cancelled completely, check if table can be marked ACTIVE and session reset
-    if (nextOrderStatus === 'CANCELLED' && currentData.table_id) {
-      try {
-        await prisma.restaurantTable.updateMany({
-          where: { id: currentData.table_id },
-          data: {
-            status: 'ACTIVE',
-            current_session_id: null,
-            host_token: null,
-            last_scanned_at: null,
-          },
-        });
-      } catch (e) {
-        console.warn('Table status update on order cancellation note:', e);
-      }
     }
 
     auditService.log({
@@ -3001,6 +3069,8 @@ export class RBACService {
       subtotal: Number(d.subtotal) || 0,
       tax_amount: Number(d.tax_amount) || 0,
       taxes: (d.taxes as any) || [],
+      packaging_charge: d.packaging_charge !== undefined && d.packaging_charge !== null ? Number(d.packaging_charge) : packagingTotal,
+      packaging_qty: d.packaging_qty !== undefined && d.packaging_qty !== null ? Number(d.packaging_qty) : totalPackagingQty,
       total_amount: Number(d.total_amount) || 0,
       currency: d.currency || 'Rs.',
       customer_name: d.customer_name || 'Guest',
@@ -3010,7 +3080,7 @@ export class RBACService {
       pay_first: Boolean(d.pay_first),
       payment_status: (d.payment_status as any) || null,
       payment_method: d.payment_method || null,
-      settled: Boolean(d.pay_first ? d.status === 'COMPLETED' : (d.status === 'COMPLETED' || d.payment_status === 'PAID' || Boolean(d.sale_id))),
+      settled: Boolean(d.pay_first ? (d.status === 'COMPLETED' && (d.payment_status === 'PAID' || Boolean(d.sale_id))) : (d.status === 'COMPLETED' || d.payment_status === 'PAID' || Boolean(d.sale_id))),
       payment_confirmed_at: d.payment_confirmed_at ? new Date(d.payment_confirmed_at) : null,
       payment_confirmed_by: d.payment_confirmed_by || null,
       sale_id: d.sale_id || null,
@@ -3021,6 +3091,34 @@ export class RBACService {
       updated_at: new Date(d.updated_at),
     };
     realtimeEmitter.orderUpdated(businessId, resOrder);
+
+    // Reset table session if a pay_first order was completed
+    if (nextOrderStatus === ('COMPLETED' as any) && currentData.pay_first && currentData.table_id) {
+      try {
+        await prisma.restaurantTable.updateMany({
+          where: { id: currentData.table_id },
+          data: {
+            status: 'ACTIVE',
+            current_session_id: null,
+            host_token: null,
+            last_scanned_at: null,
+          },
+        });
+        realtimeEmitter.tableUpdated(businessId, {
+          id: currentData.table_id,
+          table_number: currentData.table_number,
+          status: 'ACTIVE',
+          current_session_id: null,
+          host_token: null,
+        });
+      } catch (e) {}
+    }
+
+    // If order was cancelled completely, check if table can be marked ACTIVE and session reset
+    if (nextOrderStatus === 'CANCELLED') {
+      await this.clearTableSessionIfNoActiveOrders(businessId, currentData.table_id, currentData.table_number, orderId);
+    }
+
     return resOrder;
   }
 
@@ -3098,8 +3196,8 @@ export class RBACService {
   }
 
   /**
-   * Calculate order subtotal, tax breakdown, and pre-discount grand total from menu item sum
-   * Supports both Exclusive of VAT% and Inclusive of VAT% modes.
+   * Calculate order subtotal, tax breakdown, and grand total from menu item sum
+   * Delegates to shared calculateBillTotals (supports Exclusive & Inclusive of VAT%).
    */
   public calculateOrderTaxBreakdown(
     itemsMenuTotal: number,
@@ -3111,115 +3209,108 @@ export class RBACService {
     totalAmount: number;
     isInclusive: boolean;
   } {
-    const round2 = (n: number) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-    const rawTotal = Math.max(0, round2(itemsMenuTotal));
-    const taxEnabled = taxConfig ? taxConfig.tax_enabled !== false : true;
-    const isInclusive = Boolean(
-      taxConfig?.tax_inclusive ??
-        (Array.isArray(taxConfig?.rates) && taxConfig!.rates.some((r) => r.enabled && r.is_inclusive))
-    );
+    const calc = calculateBillTotals({ itemsMenuTotal, taxConfig });
+    return {
+      subtotal: calc.subtotal,
+      taxAmount: calc.totalTax,
+      computedTaxes: calc.taxesList,
+      totalAmount: calc.grandTotal,
+      isInclusive: calc.isInclusive,
+    };
+  }
 
-    const enabledRates: Array<{ id?: string; name: string; rate_percent: number }> = [];
-    if (taxEnabled) {
-      if (taxConfig && Array.isArray(taxConfig.rates) && taxConfig.rates.length > 0) {
-        taxConfig.rates.forEach((r) => {
-          if (!r.enabled) return;
-          const pct = Number(r.rate_percent) || 0;
-          if (pct > 0) {
-            enabledRates.push({ id: r.id, name: r.name, rate_percent: pct });
-          }
-        });
-      } else if (!taxConfig) {
-        enabledRates.push({ id: 'vat', name: 'VAT', rate_percent: 13 });
-      }
+  public resolvePromoPercent(
+    promoCode?: string | null,
+    explicitPercent?: number | null,
+    taxConfig?: BusinessTaxConfig | null
+  ): number {
+    const explicit = Number(explicitPercent) || 0;
+    if (explicit > 0) return explicit;
+    const code = (promoCode || '').trim().toUpperCase();
+    if (!code || taxConfig?.active_promo_enabled === false) return 0;
+    if (
+      taxConfig?.active_promo_code &&
+      code === taxConfig.active_promo_code.trim().toUpperCase()
+    ) {
+      return Number(taxConfig.active_promo_percent) || 10;
     }
-
-    const totalRatePercent = enabledRates.reduce((acc, r) => acc + r.rate_percent, 0);
-
-    if (!taxEnabled || totalRatePercent <= 0) {
-      return {
-        subtotal: rawTotal,
-        taxAmount: 0,
-        computedTaxes: [],
-        totalAmount: rawTotal,
-        isInclusive,
-      };
-    }
-
-    if (isInclusive) {
-      const totalAmount = rawTotal;
-      const subtotal = round2(totalAmount / (1 + totalRatePercent / 100));
-      const targetTax = round2(totalAmount - subtotal);
-      const computedTaxes = enabledRates.map((r) => ({
-        id: r.id,
-        name: r.name,
-        rate_percent: r.rate_percent,
-        amount: round2((subtotal * r.rate_percent) / 100),
-        is_inclusive: true,
-      }));
-      const sumTaxes = round2(computedTaxes.reduce((s, t) => s + t.amount, 0));
-      const diff = round2(targetTax - sumTaxes);
-      if (diff !== 0 && computedTaxes.length > 0) {
-        computedTaxes[0].amount = round2(Math.max(0, computedTaxes[0].amount + diff));
-      }
-      return {
-        subtotal,
-        taxAmount: targetTax,
-        computedTaxes,
-        totalAmount,
-        isInclusive: true,
-      };
-    } else {
-      const subtotal = rawTotal;
-      const computedTaxes = enabledRates.map((r) => ({
-        id: r.id,
-        name: r.name,
-        rate_percent: r.rate_percent,
-        amount: round2((subtotal * r.rate_percent) / 100),
-        is_inclusive: false,
-      }));
-      const taxAmount = round2(computedTaxes.reduce((s, t) => s + t.amount, 0));
-      const totalAmount = round2(subtotal + taxAmount);
-      return {
-        subtotal,
-        taxAmount,
-        computedTaxes,
-        totalAmount,
-        isInclusive: false,
-      };
-    }
+    if (code === 'WELCOME10') return 10;
+    if (code === 'VIP20') return 20;
+    return 0;
   }
 
   /**
-   * Resolve promo discount against pre-discount Grand Total (never combined with VAT)
+   * Resolve promo discount against Gross Pre-Discount Subtotal (before VAT).
    */
   public resolveOrderPromoDiscount(
-    preDiscountTotal: number,
+    subtotal: number,
     orderData: { promo_code?: string | null; promo_discount?: number | null; promo_discount_percent?: number | null },
     taxConfig?: BusinessTaxConfig | null
   ): number {
     const round2 = (n: number) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-    const code = (orderData?.promo_code || '').trim().toUpperCase();
-    let pct = Number(orderData?.promo_discount_percent) || 0;
-    if (!pct && code) {
-      if (taxConfig?.active_promo_enabled === false) {
-        pct = 0;
-      } else if (
-        taxConfig?.active_promo_code &&
-        code === taxConfig.active_promo_code.trim().toUpperCase()
-      ) {
-        pct = Number(taxConfig.active_promo_percent) || 10;
-      } else if (code === 'WELCOME10') {
-        pct = 10;
-      } else if (code === 'VIP20') {
-        pct = 20;
-      }
-    }
+    const pct = this.resolvePromoPercent(orderData?.promo_code, orderData?.promo_discount_percent, taxConfig);
     if (pct > 0) {
-      return Math.min(preDiscountTotal, round2((preDiscountTotal * pct) / 100));
+      return Math.min(subtotal, round2((subtotal * pct) / 100));
     }
     const flat = Math.max(0, round2(Number(orderData?.promo_discount) || 0));
-    return Math.min(preDiscountTotal, flat);
+    return Math.min(subtotal, flat);
+  }
+
+  /**
+   * Single-pass order/sale calculation applying discounts on Subtotal BEFORE VAT.
+   */
+  public calculateOrderTotalsWithDiscount(
+    itemsMenuTotal: number,
+    discountSource: {
+      promo_code?: string | null;
+      promo_discount?: number | null;
+      promo_discount_percent?: number | null;
+      discount_percent?: number | null;
+      discount_amount?: number | null;
+    } | null | undefined,
+    taxConfig?: BusinessTaxConfig | null
+  ): {
+    subtotal: number;
+    taxableSubtotal: number;
+    discountAmount: number;
+    promoDiscountAmount: number;
+    taxAmount: number;
+    computedTaxes: any[];
+    serviceChargeAmount: number;
+    totalAmount: number;
+    isInclusive: boolean;
+  } {
+    const promoDiscountPercent = this.resolvePromoPercent(
+      discountSource?.promo_code,
+      discountSource?.promo_discount_percent,
+      taxConfig
+    );
+    const manualDiscountPercent = Number(discountSource?.discount_percent) || 0;
+    const hasExplicitPromoCode = promoDiscountPercent > 0;
+    const flatDiscount =
+      manualDiscountPercent === 0 && !hasExplicitPromoCode
+        ? Number(discountSource?.discount_amount ?? discountSource?.promo_discount ?? 0) || 0
+        : 0;
+
+    const calc = calculateBillTotals({
+      itemsMenuTotal,
+      taxConfig,
+      manualDiscountPercent,
+      manualFlatDiscount: flatDiscount,
+      promoDiscountPercent,
+    });
+
+    return {
+      subtotal: calc.subtotal,
+      taxableSubtotal: calc.taxableSubtotal,
+      discountAmount: calc.totalDiscountAmount,
+      promoDiscountAmount: calc.promoDiscountAmount > 0 ? calc.promoDiscountAmount : calc.totalDiscountAmount,
+      taxAmount: calc.totalTax,
+      computedTaxes: calc.taxesList,
+      serviceChargeAmount: calc.serviceChargeAmount,
+      totalAmount: calc.grandTotal,
+      isInclusive: calc.isInclusive,
+    };
   }
 
   /**
@@ -3240,7 +3331,7 @@ export class RBACService {
           tax_inclusive: isInclusive,
           currency: cfg.currency || 'Rs.',
           currency_symbol: cfg.currency_symbol || 'Rs.',
-          packaging_fee: cfg.packaging_fee ? Number(cfg.packaging_fee) : 10,
+          packaging_fee: cfg.packaging_fee !== undefined && cfg.packaging_fee !== null ? Number(cfg.packaging_fee) : 10,
           rates: (cfg.rates as any[]) || [
             {
               id: 'vat',
@@ -3357,7 +3448,7 @@ export class RBACService {
           tax_inclusive: updated.tax_inclusive ?? false,
           currency: updated.currency || 'Rs.',
           currency_symbol: updated.currency_symbol || 'Rs.',
-          packaging_fee: Number(updated.packaging_fee) || 10,
+          packaging_fee: Number(updated.packaging_fee ?? 10),
           rates: updated.rates as any,
           invoice_prefix: updated.invoice_prefix || 'INV-',
           receipt_footer_note: updated.receipt_footer_note || null,
@@ -3379,7 +3470,7 @@ export class RBACService {
           tax_inclusive: updated.tax_inclusive ?? false,
           currency: updated.currency || 'Rs.',
           currency_symbol: updated.currency_symbol || 'Rs.',
-          packaging_fee: Number(updated.packaging_fee) || 10,
+          packaging_fee: Number(updated.packaging_fee ?? 10),
           rates: updated.rates as any,
           invoice_prefix: updated.invoice_prefix || 'INV-',
           receipt_footer_note: updated.receipt_footer_note || null,
@@ -3415,25 +3506,26 @@ export class RBACService {
 
       for (const od of activePrismaOrders) {
         const activeItems = ((od.items as any[]) || []).filter((it: any) => it.status !== 'CANCELLED');
-        const packagingTotal = activeItems.reduce((sum: number, it: any) => {
-          const packQty = Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
-          return sum + (Number(it.packaging_charge) || (packQty * Number(updated.packaging_fee ?? 10)));
-        }, 0);
-        const totalPackagingQty = activeItems.reduce((sum: number, it: any) => {
-          return sum + Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
-        }, 0);
-        const itemsMenuTotal = activeItems.reduce(
-          (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
-          0
-        );
+        const odPkgComp =
+          Boolean((od as any).is_packaging_comp) ||
+          (Number(od.packaging_qty || 0) > 0 &&
+            od.packaging_charge !== undefined &&
+            od.packaging_charge !== null &&
+            Number(od.packaging_charge) === 0);
+        const odBillable = computeOrderBillableAmounts(activeItems, {
+          packagingFeeRate: Number(updated.packaging_fee ?? 10),
+          isPackagingComp: odPkgComp,
+        });
+        const packagingTotal = odBillable.packagingTotal;
+        const totalPackagingQty = odBillable.packagingQty;
+        const itemsMenuTotal = odBillable.itemsMenuTotal;
         const {
           subtotal: newSubtotal,
           taxAmount: newTax,
           computedTaxes,
-          totalAmount: preDiscountTotal,
-        } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, updated);
-        const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, od as any, updated);
-        const newTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
+          discountAmount: promoDiscount,
+          totalAmount: newTotal,
+        } = this.calculateOrderTotalsWithDiscount(itemsMenuTotal + packagingTotal, od as any, updated);
 
         await prisma.tableOrder.update({
           where: { id: od.id },
@@ -3442,8 +3534,8 @@ export class RBACService {
             tax_amount: newTax,
             taxes: computedTaxes as any,
             promo_discount: promoDiscount,
-        packaging_charge: packagingTotal,
-        packaging_qty: totalPackagingQty,
+            packaging_charge: packagingTotal,
+            packaging_qty: totalPackagingQty,
             total_amount: newTotal,
           },
         }).catch(() => {});
@@ -3452,6 +3544,8 @@ export class RBACService {
           id: od.id,
           subtotal: newSubtotal,
           tax_amount: newTax,
+          packaging_charge: packagingTotal,
+          packaging_qty: totalPackagingQty,
           total_amount: newTotal,
         });
       }
@@ -3584,18 +3678,6 @@ export class RBACService {
         category: 'ASSET',
         mapping_key: 'ONLINE_SETTLEMENT',
         description: 'Online direct web orders and payment gateway disbursements',
-        is_active: true,
-        created_at: now,
-        updated_at: now,
-      },
-      {
-        id: 'gl-1110',
-        business_id: businessId,
-        account_number: '1110',
-        account_name: 'Guest Room Folio Receivable',
-        category: 'ASSET',
-        mapping_key: 'ROOM_CHARGE',
-        description: 'Dining tickets transferred to hotel guest room check-in folio',
         is_active: true,
         created_at: now,
         updated_at: now,
@@ -3986,11 +4068,25 @@ export class RBACService {
       if (filters?.date) {
         where.date_string = filters.date.includes('T') ? filters.date.split('T')[0] : filters.date;
       } else if (filters?.startDate || filters?.endDate) {
-        const startDay = filters.startDate ? (filters.startDate.includes('T') ? filters.startDate.split('T')[0] : filters.startDate) : undefined;
-        const endDay = filters.endDate ? (filters.endDate.includes('T') ? filters.endDate.split('T')[0] : filters.endDate) : undefined;
-        where.date_string = {};
-        if (startDay) where.date_string.gte = startDay;
-        if (endDay) where.date_string.lte = endDay;
+        const hasTimestamp =
+          Boolean(filters.startDate && filters.startDate.includes('T')) ||
+          Boolean(filters.endDate && filters.endDate.includes('T'));
+
+        if (hasTimestamp) {
+          where.created_at = {};
+          if (filters.startDate) {
+            const start = new Date(filters.startDate);
+            if (!Number.isNaN(start.getTime())) where.created_at.gte = start;
+          }
+          if (filters.endDate) {
+            const end = new Date(filters.endDate);
+            if (!Number.isNaN(end.getTime())) where.created_at.lt = end;
+          }
+        } else {
+          where.date_string = {};
+          if (filters.startDate) where.date_string.gte = filters.startDate;
+          if (filters.endDate) where.date_string.lte = filters.endDate;
+        }
       }
       if (filters?.cashierId) {
         where.cashier_id = filters.cashierId;
@@ -4147,8 +4243,12 @@ export class RBACService {
     user?: any,
     options?: { skipOrderCompletion?: boolean }
   ): Promise<SaleRecord> {
+    const opsState = !saleData.order_id && !options?.skipOrderCompletion
+      ? await this.assertStoreAcceptingOrders(businessId)
+      : await this.getBusinessOperationsState(businessId);
+
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const dateStr = getActiveRevenueWindow(opsState.operations_config, now).businessDate;
     const timestamp = now.getTime();
     const shortRandom = Math.floor(1000 + Math.random() * 9000);
     const id = saleData.id || `sale-${timestamp}-${shortRandom}`;
@@ -4301,34 +4401,42 @@ export class RBACService {
       : (saleData.order_id || null);
 
     const cleanSaleItems = (saleData.items || []).filter((it: any) => it && (it.name || '').trim().length > 0);
-    const calculatedMenuSubtotal = cleanSaleItems.reduce((sum: number, it: any) => {
-      const qty = Number(it.quantity) || 1;
-      const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
-      const billedQty = it.is_comp ? 0 : Math.max(0, qty - compQty);
-      return sum + billedQty * (Number(it.unit_price ?? it.price) || 0);
-    }, 0);
-    const packagingChargeTotal = Number(saleData.packaging_charge) || cleanSaleItems.reduce((sum: number, it: any) => {
-      const packQty = Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
-      return sum + (Number(it.packaging_charge) || (packQty * Number(taxConfig.packaging_fee ?? 10)));
-    }, 0);
-    const packagingQtyTotal = Number(saleData.packaging_qty) || cleanSaleItems.reduce((sum: number, it: any) => {
-      return sum + Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
-    }, 0);
-    const effectiveSubtotal = (Number(saleData.subtotal) <= 0 && calculatedMenuSubtotal > 0)
-      ? calculatedMenuSubtotal
-      : (Number(saleData.subtotal) || 0);
+    const saleBillable = computeOrderBillableAmounts(cleanSaleItems, {
+      packagingFeeRate: Number(taxConfig.packaging_fee ?? 10),
+      isPackagingComp: Boolean((saleData as any).is_packaging_comp),
+      explicitPackagingCharge:
+        saleData.packaging_charge !== undefined && saleData.packaging_charge !== null
+          ? Number(saleData.packaging_charge)
+          : undefined,
+      explicitPackagingQty:
+        saleData.packaging_qty !== undefined && saleData.packaging_qty !== null
+          ? Number(saleData.packaging_qty)
+          : undefined,
+    });
+    const calculatedMenuSubtotal = saleBillable.itemsMenuTotal;
+    const packagingChargeTotal = saleBillable.packagingTotal;
+    const packagingQtyTotal = saleBillable.packagingQty;
+
+    const hasExplicitTotal = saleData.total_amount !== undefined && saleData.total_amount !== null;
+    let effectiveSubtotal =
+      Number(saleData.subtotal) <= 0 && (calculatedMenuSubtotal > 0 || packagingChargeTotal > 0)
+        ? calculatedMenuSubtotal + packagingChargeTotal
+        : Number(saleData.subtotal) || 0;
 
     let effectiveTaxes = saleData.taxes || [];
     let effectiveTotalTax = Number(saleData.total_tax) || 0;
     let effectiveTotalAmount = Number(saleData.total_amount) || 0;
 
-    if (effectiveTotalAmount <= 0 && (calculatedMenuSubtotal > 0 || packagingChargeTotal > 0)) {
-      const { taxAmount: calcTax, computedTaxes: calcTaxes, totalAmount: calcGrand } =
-        this.calculateOrderTaxBreakdown(calculatedMenuSubtotal + packagingChargeTotal, taxConfig);
-      const disc = Number(saleData.discount_amount || saleData.promo_discount || 0);
-      effectiveTotalTax = calcTax;
-      effectiveTaxes = calcTaxes as any;
-      effectiveTotalAmount = Math.max(0, calcGrand - disc);
+    if ((!hasExplicitTotal || effectiveTotalAmount <= 0) && (calculatedMenuSubtotal > 0 || packagingChargeTotal > 0)) {
+      const calcRes = this.calculateOrderTotalsWithDiscount(
+        calculatedMenuSubtotal + packagingChargeTotal,
+        saleData as any,
+        taxConfig
+      );
+      effectiveSubtotal = calcRes.subtotal;
+      effectiveTotalTax = calcRes.taxAmount;
+      effectiveTaxes = calcRes.computedTaxes as any;
+      effectiveTotalAmount = calcRes.totalAmount;
     }
 
     const newSale: any = {
@@ -4338,7 +4446,7 @@ export class RBACService {
       business_id: businessId,
       order_id: posTableOrderId,
       table_id: saleData.table_id || null,
-      table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : saleData.sale_type === 'ROOM_SERVICE' ? 'Room Service' : 'Dine-In Restaurant'),
+      table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : 'Dine-In Restaurant'),
       customer_name: (() => {
         const typed = (saleData.customer_name || '').trim();
         const isDefault = !typed || /^(walk-in guest|guest)$/i.test(typed);
@@ -4356,6 +4464,7 @@ export class RBACService {
       promo_discount: Number(saleData.promo_discount) || 0,
       packaging_charge: packagingChargeTotal,
       packaging_qty: packagingQtyTotal,
+      is_packaging_comp: Boolean((saleData as any).is_packaging_comp) || (packagingQtyTotal > 0 && packagingChargeTotal === 0),
       taxes: effectiveTaxes,
       total_tax: effectiveTotalTax,
       service_charge: Number(saleData.service_charge) || 0,
@@ -4367,7 +4476,7 @@ export class RBACService {
       credit_gl_account_name: (saleData.payment_method === 'CREDIT' || saleData.payment_method === 'DEDUCT_FROM_DEPOSIT') ? (resolvedCreditGlName || saleData.credit_gl_account_name || null) : null,
       payment_status: saleData.payment_status || 'PAID',
       cashier_name: saleData.cashier_name || user?.name || (user?.email ? user.email.split('@')[0] : 'Cashier'),
-      cashier_id: saleData.cashier_id || user?.id || null,
+      cashier_id: saleData.cashier_id || user?.acting_as?.id || user?.id || null,
       notes: saleData.notes || '',
       comp_reason: (saleData as any).comp_reason || undefined,
       created_at: now.toISOString(),
@@ -4386,7 +4495,7 @@ export class RBACService {
           business_id: businessId,
           order_id: saleData.order_id || null,
           table_id: saleData.table_id || null,
-          table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : saleData.sale_type === 'ROOM_SERVICE' ? 'Room Service' : 'Dine-In Restaurant'),
+          table_number: saleData.table_number || (saleData.sale_type === 'TAKEAWAY' ? 'Takeaway' : saleData.sale_type === 'DELIVERY' ? 'Delivery' : 'Dine-In Restaurant'),
           customer_name: newSale.customer_name,
           customer_phone: newSale.customer_phone || null,
           customer_pan: newSale.customer_pan || null,
@@ -4428,10 +4537,11 @@ export class RBACService {
       console.warn('Prisma createSale error:', e.message);
     }
 
-    // Create comp record if any items are comped
+    // Create comp record if any items or packaging are comped
     try {
       const compItems = (saleData.items || []).filter((i: any) => i.is_comp || (i.comp_qty ?? 0) > 0);
-      if (compItems.length > 0) {
+      const hasCompPackaging = saleBillable.compPackagingQty > 0 && saleBillable.compPackagingValue > 0;
+      if (compItems.length > 0 || hasCompPackaging) {
         let settlingStaffName = user?.name;
         if (!settlingStaffName && user?.acting_as?.id) {
           try {
@@ -4501,6 +4611,17 @@ export class RBACService {
             variant_name: i.variant_name,
           };
         });
+        if (hasCompPackaging) {
+          compRecordItems.push({
+            item_id: 'packaging-comp',
+            name: `Complimentary Packaging (${saleBillable.compPackagingQty} pkgs)`,
+            comp_qty: saleBillable.compPackagingQty,
+            unit_price: Number(taxConfig.packaging_fee ?? 10),
+            comp_value: saleBillable.compPackagingValue,
+            category: 'Packaging',
+            variant_name: undefined,
+          });
+        }
         const totalCompValue = compRecordItems.reduce((acc: number, i: any) => acc + i.comp_value, 0);
         await prisma.compRecord.create({
           data: {
@@ -4570,8 +4691,6 @@ export class RBACService {
       if (!finalTableNumber) {
         finalTableNumber = saleData.sale_type === 'DELIVERY'
           ? 'Delivery'
-          : saleData.sale_type === 'ROOM_SERVICE'
-          ? 'Room Service'
           : (saleData.sale_type === 'TAKEAWAY' || !saleData.table_id ? 'Counter' : 'Dine-In');
       }
 
@@ -4687,6 +4806,7 @@ export class RBACService {
               ? { ...it, status: 'SERVED', served_at: it.served_at || now.toISOString() }
               : it
           );
+          const isSingleSettledOrder = matchingOrders.length === 1;
           await prisma.tableOrder.update({
             where: { id: ord.id },
             data: {
@@ -4697,6 +4817,16 @@ export class RBACService {
               bill_requested: false,
               items: updatedOrdItems as any,
               served_at: ord.served_at || now,
+              ...(isSingleSettledOrder
+                ? {
+                    subtotal: newSale.subtotal,
+                    tax_amount: newSale.total_tax,
+                    taxes: newSale.taxes as any,
+                    packaging_charge: newSale.packaging_charge ?? 0,
+                    packaging_qty: newSale.packaging_qty ?? 0,
+                    total_amount: newSale.total_amount,
+                  }
+                : {}),
             },
           });
         }
@@ -4725,6 +4855,49 @@ export class RBACService {
         });
       } catch (e) {}
 
+      // Emit settled order updates before resetting the table so client Thank You cards
+      // receive the exact settled amount before table status resets to ACTIVE.
+      const emittedOrderIds = new Set<string>();
+      if (matchingOrders && matchingOrders.length > 0) {
+        for (const ord of matchingOrders) {
+          emittedOrderIds.add(ord.id);
+          realtimeEmitter.orderUpdated(businessId, {
+            id: ord.id,
+            table_id: ord.table_id || targetTableId || '',
+            table_number: ord.table_number || targetTableNumber || '',
+            status: 'COMPLETED',
+            payment_status: 'PAID',
+            payment_method: newSale.payment_method || saleData.payment_method || ord.payment_method || 'Cash',
+            total_amount: newSale.total_amount,
+            subtotal: newSale.subtotal,
+            tax_amount: newSale.total_tax,
+            packaging_charge: newSale.packaging_charge ?? 0,
+            packaging_qty: newSale.packaging_qty ?? 0,
+            currency: ord.currency || newSale.currency || 'Rs.',
+            sale_id: newSale.id,
+            settled: true,
+          });
+        }
+      }
+      if (saleData.order_id && !emittedOrderIds.has(saleData.order_id)) {
+        realtimeEmitter.orderUpdated(businessId, {
+          id: saleData.order_id,
+          table_id: targetTableId || saleData.table_id || '',
+          table_number: targetTableNumber || saleData.table_number || '',
+          status: 'COMPLETED',
+          payment_status: 'PAID',
+          payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
+          total_amount: newSale.total_amount,
+          subtotal: newSale.subtotal,
+          tax_amount: newSale.total_tax,
+          packaging_charge: newSale.packaging_charge ?? 0,
+          packaging_qty: newSale.packaging_qty ?? 0,
+          currency: newSale.currency || 'Rs.',
+          sale_id: newSale.id,
+          settled: true,
+        });
+      }
+
       // Reset Table in Prisma only if all active orders on this table have been settled
       try {
         if (targetTableId) {
@@ -4750,6 +4923,8 @@ export class RBACService {
               id: targetTableId || '',
               table_number: targetTableNumber || '',
               status: 'ACTIVE',
+              current_session_id: null,
+              host_token: null,
             });
           }
         } else if (targetTableNumber) {
@@ -4775,45 +4950,12 @@ export class RBACService {
               id: targetTableId || '',
               table_number: targetTableNumber || '',
               status: 'ACTIVE',
+              current_session_id: null,
+              host_token: null,
             });
           }
         }
       } catch (e) {}
-
-      const emittedOrderIds = new Set<string>();
-      if (matchingOrders && matchingOrders.length > 0) {
-        for (const ord of matchingOrders) {
-          emittedOrderIds.add(ord.id);
-          realtimeEmitter.orderUpdated(businessId, {
-            id: ord.id,
-            table_id: ord.table_id || targetTableId || '',
-            table_number: ord.table_number || targetTableNumber || '',
-            status: 'COMPLETED',
-            payment_status: 'PAID',
-            payment_method: newSale.payment_method || saleData.payment_method || ord.payment_method || 'Cash',
-            total_amount: ord.total_amount ?? newSale.total_amount,
-            subtotal: ord.subtotal ?? newSale.subtotal,
-            currency: ord.currency || newSale.currency || 'Rs.',
-            sale_id: newSale.id,
-            settled: true,
-          });
-        }
-      }
-      if (saleData.order_id && !emittedOrderIds.has(saleData.order_id)) {
-        realtimeEmitter.orderUpdated(businessId, {
-          id: saleData.order_id,
-          table_id: targetTableId || saleData.table_id || '',
-          table_number: targetTableNumber || saleData.table_number || '',
-          status: 'COMPLETED',
-          payment_status: 'PAID',
-          payment_method: newSale.payment_method || saleData.payment_method || 'Cash',
-          total_amount: newSale.total_amount,
-          subtotal: newSale.subtotal,
-          currency: newSale.currency || 'Rs.',
-          sale_id: newSale.id,
-          settled: true,
-        });
-      }
     }
 
     auditService.log({
@@ -4823,6 +4965,8 @@ export class RBACService {
       eventType: 'SALE_RECORD_CREATED',
       status: `INVOICE_${invoiceNumber}_TOTAL_${newSale.total_amount}`,
     });
+
+    realtimeEmitter.saleCreated(businessId, newSale);
 
     return newSale;
   }
@@ -4842,7 +4986,7 @@ export class RBACService {
       console.warn('Prisma deleteSale error:', e.message);
     }
 
-
+    realtimeEmitter.saleDeleted(businessId, { id: saleId });
 
     auditService.log({
       userId: user?.id || 'admin',
@@ -4874,6 +5018,8 @@ export class RBACService {
       console.warn('Prisma deleteSalesByDate error:', e.message);
     }
 
+    realtimeEmitter.saleDeleted(businessId, { dateString });
+
     auditService.log({
       userId: user?.id || 'admin',
       email: user?.email || 'admin@namasteqr.com',
@@ -4901,6 +5047,8 @@ export class RBACService {
     } catch (e: any) {
       console.warn('Prisma deleteAllSales error:', e.message);
     }
+
+    realtimeEmitter.saleDeleted(businessId, { all: true });
 
     auditService.log({
       userId: user?.id || 'admin',
@@ -4935,7 +5083,7 @@ export class RBACService {
     }
 
     if (businessIds.length === 0) {
-      businessIds = ['maya-forest-resort'];
+      businessIds = ['namaste-bistro'];
     }
 
     let totalDeletedOrders = 0;
@@ -5256,26 +5404,27 @@ export class RBACService {
     if (order.payment_status === 'PAID') throw new Error('Order is already paid');
     
     const activeItems = ((order.items as any[]) || []).filter((it: any) => it.status !== 'CANCELLED');
-    const itemsMenuTotal = activeItems.reduce(
-      (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 1),
-      0
-    );
     const taxConfig = await this.getTaxConfig(businessId);
-    const packagingTotal = activeItems.reduce((sum: number, it: any) => {
-      const packQty = Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
-      return sum + (Number(it.packaging_charge) || (packQty * Number(taxConfig.packaging_fee ?? 10)));
-    }, 0);
-    const totalPackagingQty = activeItems.reduce((sum, it: any) => {
-      return sum + Math.max(0, Number(it.pack_qty ?? (it.is_packaged ? it.quantity : 0)) || 0);
-    }, 0);
+    const payFirstPkgComp =
+      Boolean((order as any).is_packaging_comp) ||
+      (Number(order.packaging_qty || 0) > 0 &&
+        order.packaging_charge !== undefined &&
+        order.packaging_charge !== null &&
+        Number(order.packaging_charge) === 0);
+    const payFirstBillable = computeOrderBillableAmounts(activeItems, {
+      packagingFeeRate: Number(taxConfig.packaging_fee ?? 10),
+      isPackagingComp: payFirstPkgComp,
+    });
+    const itemsMenuTotal = payFirstBillable.itemsMenuTotal;
+    const packagingTotal = payFirstBillable.packagingTotal;
+    const totalPackagingQty = payFirstBillable.packagingQty;
     const {
       subtotal: calcSubtotal,
       taxAmount: calcTax,
       computedTaxes,
-      totalAmount: preDiscountTotal,
-    } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, taxConfig);
-    const promoDiscount = this.resolveOrderPromoDiscount(preDiscountTotal, order, taxConfig);
-    const finalTotal = Math.max(0, Math.round((preDiscountTotal - promoDiscount) * 100) / 100);
+      discountAmount: promoDiscount,
+      totalAmount: finalTotal,
+    } = this.calculateOrderTotalsWithDiscount(itemsMenuTotal + packagingTotal, order as any, taxConfig);
     const serviceCharge = Math.round(
       computedTaxes
         .filter((t: any) => (t.name || '').toLowerCase().includes('service'))
@@ -5479,6 +5628,7 @@ export class RBACService {
       payment_status: 'CANCELLED' as const,
       payment_rejected_reason: reason || 'Payment rejected',
     });
+    await this.clearTableSessionIfNoActiveOrders(businessId, order.table_id, order.table_number, orderId);
   }
 
   /**

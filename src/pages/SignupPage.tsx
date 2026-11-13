@@ -35,9 +35,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
 
   const businessTypeOptions = [
     { value: 'RESTAURANT', label: 'Restaurant', description: 'Dine-in, casual, fine dining' },
-    { value: 'HOTEL', label: 'Hotel', description: 'Boutique, city, business hotels' },
     { value: 'CAFE', label: 'Café & Bakery', description: 'Coffee shop, bakery, bistro' },
-    { value: 'RESORT', label: 'Resort', description: 'Destination resort, vacation stays' },
     { value: 'BAR', label: 'Bar & Lounge', description: 'Pub, lounge, nightlife' },
     { value: 'OTHER', label: 'Other', description: 'Food truck, cloud kitchen, catering' },
   ];
@@ -108,7 +106,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
   return (
     <AuthLayout
       title="Create your business account"
-      subtitle="Join restaurants and hotels using NamasteQR for modern order management."
+      subtitle="Join restaurants, cafés, and dining venues using NamasteQR for modern order management."
       onNavigate={onNavigate}
     >
       {serverError && (
@@ -125,7 +123,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigate }) => {
         <Input
           id="business-name"
           label="Company / Business Name"
-          placeholder="e.g. Maya Forest Resort"
+          placeholder="e.g. Namaste Bistro"
           value={formData.businessName}
           onChange={(e) => {
             setFormData({ ...formData, businessName: e.target.value });

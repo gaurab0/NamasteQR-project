@@ -126,7 +126,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
     activeNonCancelledItems.reduce((sum, i) => sum + Number(i.price) * (Number(i.quantity) || 1), 0)
   );
 
-  const packagingFeeRate = Number(packagingFee) || 10;
+  const packagingFeeRate = Math.max(0, Number(packagingFee ?? 10) || 0);
   const draftPackagingQty = items.reduce((sum, ci) => {
     if (ci.menuItem.is_packageable === false) return sum;
     const pQty = Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0);
@@ -879,10 +879,12 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
                   <div className="flex items-center justify-between text-xs font-semibold text-zinc-600 pb-0.5">
                     <span className="flex items-center gap-1.5 text-zinc-700">
                       <Package className="w-3.5 h-3.5 text-amber-600" />
-                      <span>Packaging ({displayPackagingQty} {displayPackagingQty === 1 ? 'item' : 'items'} @ {currencySymbol}{packagingFeeRate})</span>
+                      <span>Packaging ({displayPackagingQty} {displayPackagingQty === 1 ? 'item' : 'items'}{displayPackagingCharge > 0 ? ` @ ${currencySymbol}${packagingFeeRate}` : ''})</span>
                     </span>
-                    <span className="font-mono text-zinc-900 font-bold notranslate">
-                      +{currencySymbol} {displayPackagingCharge.toFixed(2)}
+                    <span className={`font-mono font-bold notranslate ${displayPackagingCharge === 0 ? 'text-emerald-700' : 'text-zinc-900'}`}>
+                      {displayPackagingCharge === 0
+                        ? `Complimentary (${currencySymbol} 0.00)`
+                        : `+${currencySymbol} ${displayPackagingCharge.toFixed(2)}`}
                     </span>
                   </div>
                 )}

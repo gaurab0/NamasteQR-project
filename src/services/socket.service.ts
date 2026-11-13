@@ -11,7 +11,10 @@ class RealtimeSocketService {
   private menuListeners: Set<(data: any) => void> = new Set();
   private businessProfileListeners: Set<(data: any) => void> = new Set();
   private salesListeners: Set<(sale: any) => void> = new Set();
+  private salesDeletedListeners: Set<(payload: any) => void> = new Set();
   private cashierSessionListeners: Set<(session: any) => void> = new Set();
+  private operationsConfigListeners: Set<(config: any) => void> = new Set();
+  private operationalDayListeners: Set<(day: any) => void> = new Set();
   private reconnectListeners: Set<() => void> = new Set();
   private hasConnectedOnce = false;
 
@@ -107,12 +110,24 @@ class RealtimeSocketService {
       this.salesListeners.forEach((listener) => listener(sale));
     });
 
+    this.socket.on('sale:deleted', (payload: any) => {
+      this.salesDeletedListeners.forEach((listener) => listener(payload));
+    });
+
     this.socket.on('cashier_session:updated', (session: any) => {
       this.cashierSessionListeners.forEach((listener) => listener(session));
     });
 
     this.socket.on('business:updated', (data: any) => {
       this.businessProfileListeners.forEach((listener) => listener(data));
+    });
+
+    this.socket.on('operations_config:updated', (config: any) => {
+      this.operationsConfigListeners.forEach((listener) => listener(config));
+    });
+
+    this.socket.on('operational_day:updated', (day: any) => {
+      this.operationalDayListeners.forEach((listener) => listener(day));
     });
 
     return this.socket;
@@ -214,6 +229,30 @@ class RealtimeSocketService {
     this.connect();
     return () => {
       this.salesListeners.delete(callback);
+    };
+  }
+
+  public subscribeToSalesDeleted(callback: (payload: { id?: string; dateString?: string; all?: boolean }) => void): () => void {
+    this.salesDeletedListeners.add(callback);
+    this.connect();
+    return () => {
+      this.salesDeletedListeners.delete(callback);
+    };
+  }
+
+  public subscribeToOperationsConfig(callback: (config: any) => void): () => void {
+    this.operationsConfigListeners.add(callback);
+    this.connect();
+    return () => {
+      this.operationsConfigListeners.delete(callback);
+    };
+  }
+
+  public subscribeToOperationalDay(callback: (day: any) => void): () => void {
+    this.operationalDayListeners.add(callback);
+    this.connect();
+    return () => {
+      this.operationalDayListeners.delete(callback);
     };
   }
 

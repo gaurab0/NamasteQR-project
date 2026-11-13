@@ -4,7 +4,7 @@
  *
  * Run: node ./node_modules/tsx/dist/cli.mjs server/test/vat_inclusive_exclusive.test.ts
  */
-import { calculateBillTotals } from '../../src/utils/taxCalculations';
+import { calculateBillTotals, computeOrderBillableAmounts } from '../../src/utils/taxCalculations';
 import { buildSalesWorkbookData } from '../../src/utils/excelExport';
 import { rbacService } from '../src/services/rbac.service';
 import { prisma } from '../src/lib/prisma';
@@ -100,24 +100,25 @@ async function main() {
   );
 
   // 1c. Discount in Inclusive mode (10% promo on Rs. 400 @ 13% VAT):
-  // Subtotal and VAT must NOT change; discount (40) is deducted from Grand Total (400 -> 360)
+  // Discount applies on Subtotal (353.98 -> 35.40 off -> taxableSubtotal 318.58), VAT 13% on 318.58 = 41.42, Grand Total = 360.00
   const inDisc = calculateBillTotals({
     itemsMenuTotal: 400,
     taxConfig: inclusiveConfig,
     promoDiscountPercent: 10,
   });
   check(
-    'Inclusive 400 @ 13% VAT + 10% promo -> Subtotal 353.98, VAT 46.02, Discount 40, Final Grand Total 360',
+    'Inclusive 400 @ 13% VAT + 10% promo on subtotal -> Subtotal 353.98, Discount 35.40, Taxable 318.58, VAT 41.42, Grand Total 360',
     inDisc.subtotal === 353.98 &&
-      inDisc.totalTax === 46.02 &&
-      inDisc.promoDiscountAmount === 40 &&
-      inDisc.totalDiscountAmount === 40 &&
+      inDisc.promoDiscountAmount === 35.4 &&
+      inDisc.totalDiscountAmount === 35.4 &&
+      inDisc.taxableSubtotal === 318.58 &&
+      inDisc.totalTax === 41.42 &&
       inDisc.grandTotal === 360,
     inDisc
   );
 
   // 1d. Discount in Exclusive mode (10% promo + Rs. 12 flat on Rs. 400 @ 13% VAT):
-  // Subtotal (400) and VAT (52) must NOT change; discount (45.20 + 12 = 57.20) is deducted from Pre-Discount Grand Total (452 -> 394.80)
+  // Discount applies on Subtotal (400 -> 40 + 12 = 52 off -> taxableSubtotal 348), VAT 13% on 348 = 45.24, Grand Total = 393.24
   const exDisc = calculateBillTotals({
     itemsMenuTotal: 400,
     taxConfig: exclusiveConfig,
@@ -125,30 +126,34 @@ async function main() {
     manualFlatDiscount: 12,
   });
   check(
-    'Exclusive 400 @ 13% VAT + 10% promo + Rs. 12 flat -> Subtotal 400, VAT 52, Discount 57.20, Final Grand Total 394.80',
+    'Exclusive 400 @ 13% VAT + 10% promo + Rs. 12 flat on subtotal -> Subtotal 400, Discount 52, Taxable 348, VAT 45.24, Grand Total 393.24',
     exDisc.subtotal === 400 &&
-      exDisc.totalTax === 52 &&
-      exDisc.promoDiscountAmount === 45.2 &&
+      exDisc.promoDiscountAmount === 40 &&
       exDisc.manualDiscountAmount === 12 &&
-      exDisc.totalDiscountAmount === 57.2 &&
-      exDisc.grandTotal === 394.8,
+      exDisc.totalDiscountAmount === 52 &&
+      exDisc.taxableSubtotal === 348 &&
+      exDisc.totalTax === 45.24 &&
+      exDisc.grandTotal === 393.24,
     exDisc
   );
 
   // 1e. Inclusive mode with multiple taxes (13% VAT + 10% Service Charge = 23% total)
+  // Subtotal = 325.20; Rs. 50 flat off subtotal -> taxableSubtotal = 275.20; VAT = 35.78, SC = 27.52, TotalTax = 63.30, Grand Total = 338.50
   const inMulti = calculateBillTotals({
     itemsMenuTotal: 400,
     taxConfig: inclusiveWithServiceChargeConfig,
     manualFlatDiscount: 50,
   });
   check(
-    'Inclusive 400 @ 13% VAT + 10% SC + Rs. 50 flat discount -> Subtotal + TotalTax == 400, Grand Total == 350',
+    'Inclusive 400 @ 13% VAT + 10% SC + Rs. 50 flat on subtotal -> Taxable 275.20, TotalTax 63.30, Grand Total 338.50',
     inMulti.subtotal === 325.2 &&
-      inMulti.totalTax === 74.8 &&
-      inMulti.serviceChargeAmount === 32.52 &&
+      inMulti.totalDiscountAmount === 50 &&
+      inMulti.taxableSubtotal === 275.2 &&
+      inMulti.serviceChargeAmount === 27.52 &&
+      inMulti.totalTax === 63.3 &&
       Number((inMulti.subtotal + inMulti.totalTax - inMulti.totalDiscountAmount).toFixed(2)) ===
         inMulti.grandTotal &&
-      inMulti.grandTotal === 350,
+      inMulti.grandTotal === 338.5,
     inMulti
   );
 
@@ -165,6 +170,76 @@ async function main() {
       zeroBill.totalDiscountAmount === 0 &&
       zeroBill.grandTotal === 0,
     zeroBill
+  );
+
+  // 1g. computeOrderBillableAmounts edge cases (0-safe packaging & cancelled items)
+  const billableZeroPkg = computeOrderBillableAmounts(
+    [
+      { price: 200, quantity: 2, comp_qty: 2, is_comp: true, pack_qty: 2, packaging_charge: 0 },
+      { price: 100, quantity: 1, comp_qty: 0, is_comp: false, pack_qty: 1, status: 'CANCELLED' },
+    ],
+    { packagingFeeRate: 10, explicitPackagingCharge: 0, explicitPackagingQty: 2 }
+  );
+  check(
+    'computeOrderBillableAmounts excludes CANCELLED items and preserves explicit packaging_charge = 0',
+    billableZeroPkg.itemsMenuTotal === 0 &&
+      billableZeroPkg.packagingQty === 2 &&
+      billableZeroPkg.packagingTotal === 0 &&
+      billableZeroPkg.compPackagingQty === 2 &&
+      billableZeroPkg.isAllComp === true,
+    billableZeroPkg
+  );
+
+  const billablePartialPkg = computeOrderBillableAmounts(
+    [{ price: 200, quantity: 2, comp_qty: 1, is_comp: false, pack_qty: 2 }],
+    { packagingFeeRate: 10 }
+  );
+  check(
+    'computeOrderBillableAmounts auto-comps packaging matching comp_qty (1 of 2 packs free, 1 billed)',
+    billablePartialPkg.itemsMenuTotal === 200 &&
+      billablePartialPkg.packagingQty === 2 &&
+      billablePartialPkg.compPackagingQty === 1 &&
+      billablePartialPkg.packagingTotal === 10 &&
+      billablePartialPkg.compPackagingValue === 10,
+    billablePartialPkg
+  );
+
+  const billableOverridePkg = computeOrderBillableAmounts(
+    [{ price: 200, quantity: 2, comp_qty: 1, is_comp: false, pack_qty: 2 }],
+    { packagingFeeRate: 10, isPackagingComp: true }
+  );
+  check(
+    'computeOrderBillableAmounts waives 100% packaging when isPackagingComp = true while keeping packagingQty = 2',
+    billableOverridePkg.itemsMenuTotal === 200 &&
+      billableOverridePkg.packagingQty === 2 &&
+      billableOverridePkg.compPackagingQty === 2 &&
+      billableOverridePkg.packagingTotal === 0,
+    billableOverridePkg
+  );
+
+  const billableForcedBilled = computeOrderBillableAmounts(
+    [{ price: 200, quantity: 2, comp_qty: 1, is_comp: false, pack_qty: 2 }],
+    { packagingFeeRate: 10, explicitPackagingCharge: 20 }
+  );
+  check(
+    'computeOrderBillableAmounts zeroes compPackagingQty when explicitPackagingCharge equals grossPackagingTotal',
+    billableForcedBilled.packagingQty === 2 &&
+      billableForcedBilled.compPackagingQty === 0 &&
+      billableForcedBilled.packagingTotal === 20 &&
+      billableForcedBilled.compPackagingValue === 0,
+    billableForcedBilled
+  );
+
+  const billableZeroRate = computeOrderBillableAmounts(
+    [{ price: 200, quantity: 1, comp_qty: 0, is_comp: false, pack_qty: 1 }],
+    { packagingFeeRate: 0 }
+  );
+  check(
+    'computeOrderBillableAmounts honors packagingFeeRate = 0 without 0 || 10 coercion',
+    billableZeroRate.packagingQty === 1 &&
+      billableZeroRate.packagingTotal === 0 &&
+      billableZeroRate.grossPackagingTotal === 0,
+    billableZeroRate
   );
 
   console.log('\n🧪 2. Testing Excel Export & GL Journal Summary Balance (src/utils/excelExport.ts)');
@@ -286,10 +361,10 @@ async function main() {
           { item_id: 'd1', name: 'Chicken Momo', price: 200, quantity: 2, status: 'SERVED', station: 'KITCHEN' },
         ],
         subtotal: 400,
-        tax_amount: 52,
-        taxes: [{ id: 'vat', name: 'VAT', rate_percent: 13, amount: 52, is_inclusive: false }],
+        tax_amount: 46.8,
+        taxes: [{ id: 'vat', name: 'VAT', rate_percent: 13, amount: 46.8, is_inclusive: false }],
         promo_code: 'WELCOME10',
-        promo_discount: 45.2,
+        promo_discount: 40,
         total_amount: 406.8,
         status: 'SERVED',
         payment_status: 'UNPAID',
@@ -312,10 +387,10 @@ async function main() {
 
     const od1 = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     check(
-      'Switching to Inclusive mode recalculates unsettled order: Subtotal=353.98, VAT=46.02, WELCOME10 Promo=40.00, Total=360.00',
+      'Switching to Inclusive mode recalculates unsettled order: Subtotal=353.98, WELCOME10 Promo=35.40, VAT=41.42, Total=360.00',
       Number(od1?.subtotal) === 353.98 &&
-        Number(od1?.tax_amount) === 46.02 &&
-        Number(od1?.promo_discount) === 40 &&
+        Number(od1?.tax_amount) === 41.42 &&
+        Number(od1?.promo_discount) === 35.4 &&
         Number(od1?.total_amount) === 360,
       od1
     );
@@ -331,13 +406,63 @@ async function main() {
 
     const od2 = await prisma.tableOrder.findUnique({ where: { id: orderId } });
     check(
-      'Switching back to Exclusive mode recalculates unsettled order: Subtotal=400, VAT=52, WELCOME10 Promo=45.20, Total=406.80',
+      'Switching back to Exclusive mode recalculates unsettled order: Subtotal=400, WELCOME10 Promo=40.00, VAT=46.80, Total=406.80',
       Number(od2?.subtotal) === 400 &&
-        Number(od2?.tax_amount) === 52 &&
-        Number(od2?.promo_discount) === 45.2 &&
+        Number(od2?.tax_amount) === 46.8 &&
+        Number(od2?.promo_discount) === 40 &&
         Number(od2?.total_amount) === 406.8,
       od2
     );
+
+    // Verify updateTaxConfig preserves comp_qty and complimentary 0 packaging_charge on unsettled partial-comp order
+    const compOrderId = `ORD-COMP-PKG-${Date.now()}`;
+    await prisma.tableOrder.create({
+      data: {
+        id: compOrderId,
+        order_number: 'ORD-02',
+        business_id: BIZ,
+        table_id: null,
+        table_number: 'Table 2',
+        items: [
+          {
+            item_id: 'd2',
+            name: 'Veg Momo',
+            price: 200,
+            quantity: 2,
+            comp_qty: 1,
+            is_comp: false,
+            pack_qty: 2,
+            comp_pack_qty: 2,
+            is_packaging_comp: true,
+            packaging_charge: 0,
+            status: 'SERVED',
+          },
+        ],
+        subtotal: 200,
+        tax_amount: 26,
+        total_amount: 226,
+        packaging_qty: 2,
+        packaging_charge: 0,
+        status: 'SERVED',
+        payment_status: 'UNPAID',
+      },
+    });
+    await rbacService.updateTaxConfig(BIZ, {
+      tax_enabled: true,
+      tax_inclusive: false,
+      packaging_fee: 15,
+      rates: [{ id: 'vat', name: 'VAT', rate_percent: 13, enabled: true, is_inclusive: false }],
+    });
+    const odComp = await prisma.tableOrder.findUnique({ where: { id: compOrderId } });
+    check(
+      'updateTaxConfig preserves comp_qty and 0 complimentary packaging_charge on unsettled order',
+      Number(odComp?.subtotal) === 200 &&
+        Number(odComp?.packaging_charge) === 0 &&
+        Number(odComp?.packaging_qty) === 2 &&
+        Number(odComp?.total_amount) === 226,
+      odComp
+    );
+    await prisma.tableOrder.deleteMany({ where: { id: compOrderId } }).catch(() => {});
   } finally {
     await prisma.tableOrder.deleteMany({ where: { id: orderId } }).catch(() => {});
     await prisma.taxConfig.deleteMany({ where: { business_id: BIZ } }).catch(() => {});

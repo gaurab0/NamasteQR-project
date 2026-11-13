@@ -5,6 +5,7 @@ import { config } from '../config/env';
 import { db } from '../services/db.service';
 import { prisma } from './prisma';
 import { assertBusinessAccess, buildSessionBusiness } from '../middleware/auth.middleware';
+import { normalizeLegacyRole } from '../services/tabAccess';
 import { BusinessType, UserRole } from '../types';
 
 let io: SocketIOServer | null = null;
@@ -54,7 +55,7 @@ export async function authenticateSocket(socket: Socket, payloadToken?: string) 
         user = await db.findUserByEmail(decoded.email);
       }
       if (!user) {
-        const targetBizId = decoded.businessId || 'maya-forest-resort';
+        const targetBizId = decoded.businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
         const targetBizName = decoded.businessName;
         const targetBizType = decoded.businessType;
         const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
@@ -62,7 +63,7 @@ export async function authenticateSocket(socket: Socket, payloadToken?: string) 
           id: decoded.userId,
           business_id: business.id,
           email: decoded.email || `owner@${business.id}.app`,
-          role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
+          role: (normalizeLegacyRole(decoded.role) || 'RESTAURANT_OWNER') as UserRole,
         });
       }
 
@@ -76,7 +77,7 @@ export async function authenticateSocket(socket: Socket, payloadToken?: string) 
           email: user.email,
           name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
           created_at: user.created_at,
-          role: user.role,
+          role: (normalizeLegacyRole(user.role) || 'RESTAURANT_OWNER') as UserRole,
           status: user.status,
           allowed_tabs: await db.ensureAllowedTabsPersisted(user),
           custom_permissions: user.custom_permissions,
@@ -273,13 +274,22 @@ export const realtimeEmitter = {
   taxConfigUpdated(businessId: string, config: any) {
     emitToBusiness(businessId, 'tax_config:updated', config);
   },
-    saleCreated(businessId: string, sale: any) {
+  saleCreated(businessId: string, sale: any) {
     emitToBusiness(businessId, 'sale:created', sale);
+  },
+  saleDeleted(businessId: string, payload: { id?: string; dateString?: string; all?: boolean }) {
+    emitToBusiness(businessId, 'sale:deleted', payload);
   },
   cashierSessionUpdated(businessId: string, session: any) {
     emitToBusiness(businessId, 'cashier_session:updated', session);
   },
   businessProfileUpdated(businessId: string, business: any) {
     emitToBusiness(businessId, 'business:updated', business);
+  },
+  operationsConfigUpdated(businessId: string, config: any) {
+    emitToBusiness(businessId, 'operations_config:updated', config);
+  },
+  operationalDayUpdated(businessId: string, day: any) {
+    emitToBusiness(businessId, 'operational_day:updated', day);
   },
 };

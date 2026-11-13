@@ -38,7 +38,7 @@ async function runTests() {
   assert(isBusinessOwnerRole('OWNER'), 'OWNER is recognized as business owner');
   assert(isBusinessOwnerRole('ADMIN'), 'ADMIN is recognized as business owner');
   assert(isBusinessOwnerRole('RESTAURANT_OWNER'), 'RESTAURANT_OWNER is recognized as business owner');
-  assert(isBusinessOwnerRole('HOTEL_OWNER'), 'HOTEL_OWNER is recognized as business owner');
+  assert(isBusinessOwnerRole('HOTEL_OWNER'), 'Legacy HOTEL_OWNER normalizes to business owner without breaking');
   assert(!isBusinessOwnerRole('MANAGER'), 'MANAGER is NOT a business owner');
   assert(!isBusinessOwnerRole('WAITER'), 'WAITER is NOT a business owner');
 

@@ -1,4 +1,5 @@
 import { PrinterRole, ReceiptData } from '../types/printer.types';
+import { computeOrderBillableAmounts } from './taxCalculations';
 
 /**
  * ESC/POS Command Constants
@@ -292,8 +293,6 @@ export class EscPosEncoder {
         tableNo = 'Takeaway';
       } else if (data.sale_type === 'DELIVERY') {
         tableNo = 'Delivery';
-      } else if (data.sale_type === 'ROOM_SERVICE') {
-        tableNo = 'Room Service';
       } else {
         tableNo = 'Dine-In Restaurant';
       }
@@ -377,25 +376,44 @@ export class EscPosEncoder {
 
     // Totals section (for Bill)
     if (!isKotOrBar) {
-      const calculatedSubtotal = items.reduce((sum: number, it: any) => {
-        const q = Number(it.quantity) || 1;
-        const cq = Math.max(0, Math.min(q, Number(it.comp_qty) || (it.is_comp ? q : 0)));
-        const bq = it.is_comp ? 0 : Math.max(0, q - cq);
-        return sum + bq * Number(it.unit_price ?? it.price ?? 0);
-      }, 0);
+      const dataPkgComp =
+        Boolean(data.is_packaging_comp) ||
+        (Number(data.packaging_qty || 0) > 0 &&
+          data.packaging_charge !== undefined &&
+          data.packaging_charge !== null &&
+          Number(data.packaging_charge) === 0);
+      const billable = computeOrderBillableAmounts(items, {
+        isPackagingComp: dataPkgComp,
+        explicitPackagingCharge:
+          data.packaging_charge !== undefined && data.packaging_charge !== null
+            ? Number(data.packaging_charge)
+            : undefined,
+        explicitPackagingQty:
+          data.packaging_qty !== undefined && data.packaging_qty !== null
+            ? Number(data.packaging_qty)
+            : undefined,
+      });
+      const calculatedSubtotal = billable.itemsMenuTotal + billable.packagingTotal;
       const subtotal = data.subtotal !== undefined && data.subtotal !== null ? Number(data.subtotal) : calculatedSubtotal;
       const tax = Number(data.tax_amount ?? data.total_tax ?? data.tax ?? 0);
       const discount = Number(data.discount_amount ?? data.promo_discount ?? 0);
       const total = Number(data.total_amount ?? (subtotal + tax - discount));
 
-      const packagingCharge = Number(data.packaging_charge ?? 0);
-      const packagingQty = Number(data.packaging_qty ?? 0);
-      if (packagingCharge > 0) {
-        encoder.row(`Packaging (${packagingQty} pkgs):`, `Rs ${packagingCharge.toFixed(2)}`, cols);
+      const packagingCharge = billable.packagingTotal;
+      const packagingQty = billable.packagingQty;
+      if (packagingQty > 0) {
+        encoder.row(
+          `Packaging (${packagingQty} pkgs):`,
+          packagingCharge === 0 ? 'Complimentary (Rs 0.00)' : `Rs ${packagingCharge.toFixed(2)}`,
+          cols
+        );
       }
       encoder.row('Subtotal:', `Rs ${subtotal.toFixed(2)}`, cols);
+      if (discount > 0) {
+        encoder.row('Discount:', `-Rs ${discount.toFixed(2)}`, cols);
+        encoder.row('Taxable Amt:', `Rs ${Math.max(0, subtotal - discount).toFixed(2)}`, cols);
+      }
       if (tax > 0) encoder.row('Tax / VAT:', `Rs ${tax.toFixed(2)}`, cols);
-      if (discount > 0) encoder.row('Discount:', `-Rs ${discount.toFixed(2)}`, cols);
 
       encoder.divider('=', cols);
       encoder.bold(true).size('double-height');

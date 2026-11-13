@@ -1423,7 +1423,6 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                         <option value="RESTAURANT">Restaurant (Dining & Kitchen)</option>
                         <option value="CAFE">Café & Bakery</option>
                         <option value="BAR">Bar & Lounge</option>
-                        <option value="RESORT">Resort Dining</option>
                         <option value="OTHER">Dining & Food Venue</option>
                       </select>
                       <p className="text-[11px] text-zinc-500 mt-1">
@@ -1461,7 +1460,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                         className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition"
                       />
                       <p className="text-[11px] text-zinc-500 mt-1">
-                        Physical restaurant or hotel address displayed on receipts and headers.
+                        Physical restaurant or dining venue address displayed on receipts and headers.
                       </p>
                     </div>
 

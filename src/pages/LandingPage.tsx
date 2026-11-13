@@ -705,7 +705,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate, onBookDemo
                 Ready to elevate your guest experience with NamasteQR?
               </h2>
               <p className="text-sm sm:text-base text-zinc-300 max-w-xl leading-relaxed">
-                Join restaurants, cafés, and hotels taking contactless orders, boosting turnover, and streamlining kitchen operations. Zero setup fees or credit cards needed.
+                Join restaurants, cafés, and dining venues taking contactless orders, boosting turnover, and streamlining kitchen operations. Zero setup fees or credit cards needed.
               </p>
               <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
                 <Button

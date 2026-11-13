@@ -1,10 +1,10 @@
 import type { TabPermissionId } from './rbac.types';
 
-export type BusinessType = 'RESTAURANT' | 'HOTEL' | 'CAFE' | 'RESORT' | 'BAR' | 'OTHER';
+export type BusinessType = 'RESTAURANT' | 'CAFE' | 'BAR' | 'OTHER';
 
 export type BusinessStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 
-export type UserRole = 'RESTAURANT_OWNER' | 'HOTEL_OWNER' | 'ADMIN' | 'STAFF';
+export type UserRole = 'RESTAURANT_OWNER' | 'ADMIN' | 'STAFF';
 
 export type UserStatus = 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 

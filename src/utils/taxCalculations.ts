@@ -44,36 +44,25 @@ export interface BillCalculationInput {
 
 export interface BillCalculationResult {
   isInclusive: boolean;
-  /** Subtotal (reverse-calculated net amount in inclusive mode; menu items total in exclusive mode) */
+  /** Gross Pre-Discount Subtotal (reverse-calculated net amount in inclusive mode; menu items total in exclusive mode) */
   subtotal: number;
+  /** Post-discount taxable base = max(0, round2(subtotal - totalDiscountAmount)) */
+  taxableSubtotal: number;
   taxesList: SaleTaxBreakdown[];
   totalTax: number;
   serviceChargeAmount: number;
-  /** Pre-discount Grand Total = round2(subtotal + totalTax) */
+  /** Pre-discount Grand Total = round2(subtotal + preDiscountTax) */
   grossTotal: number;
   manualDiscountAmount: number;
   promoDiscountAmount: number;
   totalDiscountAmount: number;
-  /** Final payable Grand Total after deducting discounts from grossTotal */
+  /** Final payable Grand Total = round2(taxableSubtotal + totalTax) */
   grandTotal: number;
 }
 
 /**
- * Calculates Subtotal, Taxes, Discounts, and Grand Total for both Exclusive and Inclusive of VAT% modes.
- *
- * Rules:
- * 1. Exclusive mode:
- *    - subtotal = round2(itemsMenuTotal)
- *    - each tax = round2(subtotal * rate / 100)
- *    - grossTotal = round2(subtotal + totalTax)
- * 2. Inclusive mode:
- *    - grossTotal = round2(itemsMenuTotal)
- *    - subtotal = round2(grossTotal / (1 + totalRatePercent / 100))
- *    - exactTotalTax = round2(grossTotal - subtotal)
- *    - each tax = round2(subtotal * rate / 100), reconciled for any 1-paisa rounding residual so subtotal + totalTax === grossTotal
- * 3. Discounts (both modes):
- *    - Never combined with VAT (never deducted from subtotal before VAT calculation).
- *    - Deducted directly from grossTotal (pre-discount Grand Total).
+ * Calculates Subtotal, Discounts (applied to Subtotal before VAT), Taxes, and Grand Total
+ * for both Exclusive and Inclusive of VAT% modes.
  */
 export function calculateBillTotals(input: BillCalculationInput): BillCalculationResult {
   const packaging = Math.max(0, round2(input.packagingTotal || 0));
@@ -126,7 +115,6 @@ export function calculateBillTotals(input: BillCalculationInput): BillCalculatio
           rate_percent: Number(t.rate_percent) || 13,
         }));
     } else if (typeof orderTaxAmt === 'number' && orderTaxAmt === 0 && fallbackOrder && fallbackOrder.subtotal === fallbackOrder.total_amount && (fallbackOrder.subtotal || 0) > 0) {
-      // Explicitly 0 tax on order
       isTaxEnabled = false;
       activeRates = [];
     } else {
@@ -135,82 +123,75 @@ export function calculateBillTotals(input: BillCalculationInput): BillCalculatio
     }
   }
 
-  let subtotal = menuTotal;
+  const totalRatePercent = activeRates.reduce((sum, r) => sum + (Number(r.rate_percent) || 0), 0);
+  const hasActiveTax = isTaxEnabled && activeRates.length > 0 && totalRatePercent > 0 && menuTotal > 0;
+
+  // 1. Gross Pre-Discount Subtotal
+  const subtotal = hasActiveTax && isInclusive
+    ? round2(menuTotal / (1 + totalRatePercent / 100))
+    : menuTotal;
+
+  // 2. Apply all discounts to Subtotal BEFORE VAT
+  const manualPct = Math.max(0, Number(input.manualDiscountPercent) || 0);
+  const manualFlat = Math.max(0, Number(input.manualFlatDiscount ?? input.flatDiscountAmount) || 0);
+  const promoPct = Math.max(0, Number(input.promoDiscountPercent) || 0);
+
+  const manualPercentPart = manualPct > 0 ? (subtotal * manualPct) / 100 : 0;
+  const manualDiscountAmount = Math.min(subtotal, round2(manualPercentPart + manualFlat));
+  const promoDiscountAmount = promoPct > 0 ? Math.min(subtotal, round2((subtotal * promoPct) / 100)) : 0;
+  const totalDiscountAmount = Math.min(subtotal, round2(manualDiscountAmount + promoDiscountAmount));
+  const taxableSubtotal = Math.max(0, round2(subtotal - totalDiscountAmount));
+
+  // 3. Calculate Taxes (VAT / Service Charge) on post-discount taxableSubtotal
   let taxesList: SaleTaxBreakdown[] = [];
   let totalTax = 0;
   let serviceChargeAmount = 0;
   let grossTotal = menuTotal;
 
-  const totalRatePercent = activeRates.reduce((sum, r) => sum + (Number(r.rate_percent) || 0), 0);
+  if (hasActiveTax) {
+    taxesList = activeRates.map((rate) => {
+      const rateVal = Number(rate.rate_percent) || 0;
+      const amt = round2((taxableSubtotal * rateVal) / 100);
+      return {
+        id: rate.id,
+        name: rate.name,
+        rate_percent: rateVal,
+        amount: amt,
+        is_inclusive: isInclusive,
+      };
+    });
 
-  if (isTaxEnabled && activeRates.length > 0 && totalRatePercent > 0 && menuTotal > 0) {
-    if (isInclusive) {
-      grossTotal = menuTotal;
-      subtotal = round2(grossTotal / (1 + totalRatePercent / 100));
-      const exactTotalTax = round2(grossTotal - subtotal);
-
-      taxesList = activeRates.map((rate) => {
-        const rateVal = Number(rate.rate_percent) || 0;
-        const amt = round2((subtotal * rateVal) / 100);
-        return {
-          id: rate.id,
-          name: rate.name,
-          rate_percent: rateVal,
-          amount: amt,
-          is_inclusive: true,
-        };
-      });
-
+    // Reconcile 1-paisa rounding residual when there is no discount in Inclusive mode so subtotal + totalTax === menuTotal
+    if (isInclusive && totalDiscountAmount === 0) {
+      const exactPreTax = round2(menuTotal - subtotal);
       const sumTaxes = round2(taxesList.reduce((acc, t) => acc + t.amount, 0));
-      const residual = round2(exactTotalTax - sumTaxes);
+      const residual = round2(exactPreTax - sumTaxes);
       if (Math.abs(residual) > 0 && taxesList.length > 0) {
-        taxesList[0].amount = round2(taxesList[0].amount + residual);
+        taxesList[0].amount = round2(Math.max(0, taxesList[0].amount + residual));
       }
-
-      totalTax = exactTotalTax;
-      serviceChargeAmount = round2(
-        taxesList
-          .filter((t) => t.name.toLowerCase().includes('service'))
-          .reduce((acc, t) => acc + t.amount, 0)
-      );
+      totalTax = exactPreTax;
+      grossTotal = menuTotal;
     } else {
-      subtotal = menuTotal;
-      taxesList = activeRates.map((rate) => {
-        const rateVal = Number(rate.rate_percent) || 0;
-        const amt = round2((subtotal * rateVal) / 100);
-        return {
-          id: rate.id,
-          name: rate.name,
-          rate_percent: rateVal,
-          amount: amt,
-          is_inclusive: false,
-        };
-      });
-
       totalTax = round2(taxesList.reduce((acc, t) => acc + t.amount, 0));
-      serviceChargeAmount = round2(
-        taxesList
-          .filter((t) => t.name.toLowerCase().includes('service'))
-          .reduce((acc, t) => acc + t.amount, 0)
-      );
-      grossTotal = round2(subtotal + totalTax);
+      if (!isInclusive) {
+        const preDiscountTaxes = activeRates.reduce((s, r) => s + round2((subtotal * r.rate_percent) / 100), 0);
+        grossTotal = round2(subtotal + preDiscountTaxes);
+      }
     }
+
+    serviceChargeAmount = round2(
+      taxesList
+        .filter((t) => t.name.toLowerCase().includes('service'))
+        .reduce((acc, t) => acc + t.amount, 0)
+    );
   }
 
-  // Discounts: Never combined with VAT; deducted from grossTotal (pre-discount Grand Total) in both modes
-  const manualPct = Math.max(0, Number(input.manualDiscountPercent) || 0);
-  const manualFlat = Math.max(0, Number(input.manualFlatDiscount ?? input.flatDiscountAmount) || 0);
-  const promoPct = Math.max(0, Number(input.promoDiscountPercent) || 0);
-
-  const manualPercentPart = manualPct > 0 ? (grossTotal * manualPct) / 100 : 0;
-  const manualDiscountAmount = Math.min(grossTotal, round2(manualPercentPart + manualFlat));
-  const promoDiscountAmount = promoPct > 0 ? Math.min(grossTotal, round2((grossTotal * promoPct) / 100)) : 0;
-  const totalDiscountAmount = Math.min(grossTotal, round2(manualDiscountAmount + promoDiscountAmount));
-  const grandTotal = Math.max(0, round2(grossTotal - totalDiscountAmount));
+  const grandTotal = Math.max(0, round2(taxableSubtotal + totalTax));
 
   return {
     isInclusive,
     subtotal,
+    taxableSubtotal,
     taxesList,
     totalTax,
     serviceChargeAmount,
@@ -219,5 +200,141 @@ export function calculateBillTotals(input: BillCalculationInput): BillCalculatio
     promoDiscountAmount,
     totalDiscountAmount,
     grandTotal,
+  };
+}
+
+export interface OrderBillableAmounts {
+  itemsMenuTotal: number;
+  packagingQty: number;
+  compPackagingQty: number;
+  packagingTotal: number;
+  grossPackagingTotal: number;
+  compItemsValue: number;
+  compPackagingValue: number;
+  isAllComp: boolean;
+}
+
+/**
+ * Single source of truth for calculating billable item totals, packaging quantities,
+ * and complimentary vs. billable packaging charges across frontend and backend.
+ */
+export function computeOrderBillableAmounts(
+  items: any[],
+  options?: {
+    packagingFeeRate?: number;
+    isPackagingComp?: boolean;
+    explicitPackagingCharge?: number | null;
+    explicitPackagingQty?: number | null;
+  }
+): OrderBillableAmounts {
+  const rate = Math.max(0, Number(options?.packagingFeeRate ?? 10));
+  const activeItems = (Array.isArray(items) ? items : []).filter(
+    (it) => it && it.status !== 'CANCELLED'
+  );
+
+  let itemsMenuTotal = 0;
+  let packagingQty = 0;
+  let compPackagingQty = 0;
+  let packagingTotal = 0;
+  let grossPackagingTotal = 0;
+  let compItemsValue = 0;
+
+  for (const it of activeItems) {
+    const qty = Number(it.quantity) || 1;
+    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
+    const isItemFullyComp = Boolean(it.is_comp || compQty >= qty);
+    const billedQty = isItemFullyComp ? 0 : Math.max(0, qty - compQty);
+    const unitPrice = Number(it.unit_price ?? it.price) || 0;
+
+    itemsMenuTotal += billedQty * unitPrice;
+    compItemsValue += (isItemFullyComp ? qty : compQty) * unitPrice;
+
+    const isPkg = it.is_packageable !== false;
+    const rawPack =
+      it.pack_qty !== undefined && it.pack_qty !== null && it.pack_qty !== ''
+        ? Number(it.pack_qty)
+        : it.is_packaged
+          ? qty
+          : 0;
+    const packQty = isPkg ? Math.max(0, Math.min(qty, rawPack || 0)) : 0;
+
+    if (packQty > 0) {
+      packagingQty += packQty;
+      grossPackagingTotal += packQty * rate;
+
+      const forceItemPkgComp = Boolean(options?.isPackagingComp || it.is_packaging_comp);
+      const defaultCompPack =
+        it.comp_pack_qty !== undefined && it.comp_pack_qty !== null && it.comp_pack_qty !== ''
+          ? Math.min(packQty, Math.max(0, Number(it.comp_pack_qty) || 0))
+          : Math.min(packQty, isItemFullyComp ? qty : compQty);
+      const itemCompPack = forceItemPkgComp ? packQty : defaultCompPack;
+      const billedPackQty = Math.max(0, packQty - itemCompPack);
+
+      compPackagingQty += itemCompPack;
+      if (forceItemPkgComp) {
+        packagingTotal += 0;
+      } else if (
+        it.packaging_charge !== undefined &&
+        it.packaging_charge !== null &&
+        (itemCompPack === 0 || it.comp_pack_qty !== undefined)
+      ) {
+        packagingTotal += Math.max(0, Number(it.packaging_charge) || 0);
+      } else {
+        packagingTotal += billedPackQty * rate;
+      }
+    }
+  }
+
+  if (
+    options?.explicitPackagingQty !== undefined &&
+    options?.explicitPackagingQty !== null &&
+    packagingQty === 0
+  ) {
+    packagingQty = Math.max(0, Number(options.explicitPackagingQty) || 0);
+    grossPackagingTotal = packagingQty * rate;
+  }
+
+  if (options?.isPackagingComp) {
+    compPackagingQty = packagingQty;
+    packagingTotal = 0;
+  } else if (
+    options?.explicitPackagingCharge !== undefined &&
+    options?.explicitPackagingCharge !== null
+  ) {
+    packagingTotal = Math.max(0, Number(options.explicitPackagingCharge) || 0);
+    if (packagingQty > 0 && packagingTotal === 0) {
+      compPackagingQty = packagingQty;
+    }
+  }
+
+  const roundedPkgTotal = round2(packagingTotal);
+  const roundedGrossPkg = round2(grossPackagingTotal);
+  if (
+    !options?.isPackagingComp &&
+    options?.explicitPackagingCharge !== undefined &&
+    options?.explicitPackagingCharge !== null &&
+    roundedGrossPkg > 0 &&
+    roundedPkgTotal >= roundedGrossPkg
+  ) {
+    compPackagingQty = 0;
+  }
+  const compPackagingValue = round2(Math.max(0, roundedGrossPkg - roundedPkgTotal));
+  const isAllComp =
+    activeItems.length > 0 &&
+    activeItems.every((it) => {
+      const qty = Number(it.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
+      return Boolean(it.is_comp || compQty >= qty);
+    });
+
+  return {
+    itemsMenuTotal: round2(itemsMenuTotal),
+    packagingQty,
+    compPackagingQty,
+    packagingTotal: roundedPkgTotal,
+    grossPackagingTotal: roundedGrossPkg,
+    compItemsValue: round2(compItemsValue),
+    compPackagingValue,
+    isAllComp,
   };
 }

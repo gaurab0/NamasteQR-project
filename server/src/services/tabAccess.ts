@@ -42,11 +42,24 @@ export interface AccessSubject {
 // Owner bypass
 // ---------------------------------------------------------------------------
 
-const BUSINESS_OWNER_ROLES = new Set(['OWNER', 'ADMIN', 'RESTAURANT_OWNER', 'HOTEL_OWNER']);
-const MANAGER_ROLES = new Set(['MANAGER', 'RESTAURANT_MANAGER', 'HOTEL_MANAGER']);
+const BUSINESS_OWNER_ROLES = new Set(['OWNER', 'ADMIN', 'RESTAURANT_OWNER']);
+const MANAGER_ROLES = new Set(['MANAGER', 'RESTAURANT_MANAGER']);
 
-const normalizeRoleName = (role: unknown): string =>
-  typeof role === 'string' ? role.trim().toUpperCase() : '';
+export function normalizeLegacyRole(role: unknown): string {
+  if (typeof role !== 'string') return '';
+  const upper = role.trim().toUpperCase();
+  if (upper === 'HOTEL_OWNER') return 'RESTAURANT_OWNER';
+  if (upper === 'HOTEL_MANAGER') return 'RESTAURANT_MANAGER';
+  return upper;
+}
+
+export function normalizeLegacyBusinessType(businessType: unknown): 'RESTAURANT' | 'CAFE' | 'BAR' | 'OTHER' {
+  const upper = typeof businessType === 'string' ? businessType.trim().toUpperCase() : '';
+  if (upper === 'CAFE' || upper === 'BAR' || upper === 'OTHER' || upper === 'RESTAURANT') return upper;
+  return 'RESTAURANT';
+}
+
+const normalizeRoleName = (role: unknown): string => normalizeLegacyRole(role);
 
 /** Exact-match owner check. Managers are deliberately NOT owners. */
 export function isBusinessOwnerRole(role: unknown): boolean {

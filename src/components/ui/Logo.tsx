@@ -55,7 +55,7 @@ export const Logo: React.FC<LogoProps> = ({
               dark ? 'text-zinc-400' : 'text-zinc-500'
             }`}
           >
-            Restaurant & Hotel Management
+            Restaurant & Dining Management
           </span>
         )}
       </div>

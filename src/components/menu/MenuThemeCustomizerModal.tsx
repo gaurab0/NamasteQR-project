@@ -145,7 +145,7 @@ const BACKDROP_PRESETS = [
 
 const SAMPLE_LOGOS = [
   {
-    label: 'Resort Crest',
+    label: 'Bistro Crest',
     url: 'https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?w=300&auto=format&fit=crop&q=80',
   },
   {

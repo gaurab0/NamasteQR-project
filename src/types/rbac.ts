@@ -3,9 +3,7 @@ export type AppRole =
   | 'MANAGER'
   | 'ADMIN'
   | 'RESTAURANT_OWNER'
-  | 'HOTEL_OWNER'
   | 'RESTAURANT_MANAGER'
-  | 'HOTEL_MANAGER'
   | 'FRONT_DESK'
   | 'KITCHEN_STAFF'
   | 'HOUSEKEEPING'
@@ -250,6 +248,8 @@ export interface TableOrderItem {
   is_packageable?: boolean;
   is_packaged?: boolean;
   pack_qty?: number;
+  comp_pack_qty?: number;
+  is_packaging_comp?: boolean;
   packaging_charge?: number;
   ready_at?: string | Date | null;
   served_at?: string | Date | null;
@@ -301,6 +301,7 @@ export interface TableOrder {
   taxes?: SaleTaxBreakdown[];
   packaging_charge?: number;
   packaging_qty?: number;
+  is_packaging_comp?: boolean;
   ready_at?: string | Date | null;
   served_at?: string | Date | null;
   source?: 'QR' | 'POS_MANUAL' | string;
@@ -374,11 +375,13 @@ export interface SaleItem {
   is_packageable?: boolean;
   is_packaged?: boolean;
   pack_qty?: number;
+  comp_pack_qty?: number;
+  is_packaging_comp?: boolean;
   packaging_charge?: number;
 }
 
-export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'ROOM_SERVICE' | 'QUICK_POS';
-export type SalePaymentMethod = 'CASH' | 'UPI_QR' | 'CARD' | 'ONLINE' | 'ROOM_BILL' | 'SPLIT' | 'QR_CODE' | 'CREDIT' | 'DEDUCT_FROM_DEPOSIT';
+export type SaleType = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | 'QUICK_POS';
+export type SalePaymentMethod = 'CASH' | 'UPI_QR' | 'CARD' | 'ONLINE' | 'SPLIT' | 'QR_CODE' | 'CREDIT' | 'DEDUCT_FROM_DEPOSIT';
 export type SalePaymentStatus = 'PAID' | 'REFUNDED' | 'CANCELLED';
 
 export interface SaleRecord {
@@ -402,6 +405,7 @@ export interface SaleRecord {
   taxes: SaleTaxBreakdown[];
   packaging_charge?: number;
   packaging_qty?: number;
+  is_packaging_comp?: boolean;
   total_tax: number;
   service_charge?: number;
   total_amount: number;

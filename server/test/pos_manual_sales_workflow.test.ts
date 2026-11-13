@@ -16,7 +16,7 @@ async function runTests() {
   await new Promise<void>((resolve) => server.listen(0, resolve));
 
   const defaultBiz = await db.getDefaultBusiness();
-  const businessId = defaultBiz?.id || 'maya-forest-resort';
+  const businessId = defaultBiz?.id || 'namaste-bistro';
 
   // Ensure test table exists
   const testTableId = `test-tbl-pos-${Date.now()}`;

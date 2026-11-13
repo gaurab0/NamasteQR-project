@@ -23,6 +23,9 @@ import {
   BookOpen
 } from 'lucide-react';
 import { rbacService } from '../../services/rbac.service';
+import { socketService } from '../../services/socket.service';
+import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
+import { applySaleDeletion, isSaleInRevenueWindow } from '../../utils/revenueWindow';
 import { Business } from '../../types/auth';
 import { SaleRecord, StaffAccountSession } from '../../types/rbac';
 
@@ -51,58 +54,85 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
   const [loadingSales, setLoadingSales] = useState(true);
 
   const currency = business?.currency || 'Rs';
+  const { revenueWindow } = useSyncedOperationsState(
+    business?.id,
+    business?.operations_config,
+    business?.current_operational_day
+  );
 
-  useEffect(() => {
-    let isMounted = true;
+  const fetchOverviewSales = useCallback(() => {
+    if (!business?.id) return Promise.resolve();
     setLoadingSales(true);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    let startIso: string;
+    let endIso: string;
 
-    let startDate: Date;
-    const endDate = new Date();
-    
     if (timeFilter === 'today') {
-      startDate = new Date(today);
+      startIso = revenueWindow.startIso;
+      endIso = revenueWindow.endIso;
     } else if (timeFilter === 'week') {
-      startDate = new Date(today);
-      startDate.setDate(startDate.getDate() - 7);
+      const s = new Date(revenueWindow.startMs);
+      s.setDate(s.getDate() - 7);
+      startIso = s.toISOString();
+      endIso = new Date(Date.now() + 60_000).toISOString();
     } else {
-      startDate = new Date(today);
-      startDate.setMonth(startDate.getMonth() - 1);
+      const s = new Date(revenueWindow.startMs);
+      s.setMonth(s.getMonth() - 1);
+      startIso = s.toISOString();
+      endIso = new Date(Date.now() + 60_000).toISOString();
     }
 
-    rbacService.getSalesApi({
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
-    }, business.id)
+    return rbacService
+      .getSalesApi({ startDate: startIso, endDate: endIso }, business.id)
       .then((data) => {
-        if (isMounted) {
-          setSales(data || []);
-        }
+        setSales(data || []);
       })
       .catch((err) => {
         console.warn('Could not load overview sales:', err);
       })
       .finally(() => {
-        if (isMounted) setLoadingSales(false);
+        setLoadingSales(false);
       });
+  }, [business.id, timeFilter, revenueWindow.startIso, revenueWindow.endIso, revenueWindow.startMs]);
+
+  useEffect(() => {
+    fetchOverviewSales();
+  }, [fetchOverviewSales]);
+
+  // Real-time revenue updates when bills settle, get deleted, or socket reconnects
+  useEffect(() => {
+    if (!business?.id) return;
+    socketService.joinBusiness(business.id);
+
+    const unsubSale = socketService.subscribeToSales((newSale: SaleRecord) => {
+      if (!newSale?.id || (newSale.business_id && newSale.business_id !== business.id)) return;
+      setSales((prev) => (prev.some((s) => s.id === newSale.id) ? prev : [newSale, ...prev]));
+    });
+    const unsubSaleDel = socketService.subscribeToSalesDeleted((payload) => {
+      setSales((prev) => applySaleDeletion(prev, payload));
+    });
+    const unsubReconnect = socketService.onReconnect(() => {
+      fetchOverviewSales();
+    });
 
     return () => {
-      isMounted = false;
+      unsubSale();
+      unsubSaleDel();
+      unsubReconnect();
     };
-  }, [business.id, timeFilter]);
+  }, [business.id, fetchOverviewSales]);
 
-  // Aggregate metrics
+  // Aggregate metrics (strictly scoped to active revenueWindow when timeFilter === 'today')
   const filteredSales = useMemo(() => {
-    return sales.filter(s => {
+    return sales.filter((s) => {
+      if (timeFilter === 'today' && !isSaleInRevenueWindow(s, revenueWindow)) return false;
       if (daybookFilter === 'all') return true;
       if (daybookFilter === 'dine_in') return s.sale_type === 'DINE_IN' || !s.sale_type;
       if (daybookFilter === 'delivery') return s.sale_type === 'DELIVERY';
       if (daybookFilter === 'takeaway') return s.sale_type === 'TAKEAWAY' || s.sale_type === 'QUICK_POS';
       return true;
     });
-  }, [sales, daybookFilter]);
+  }, [sales, timeFilter, revenueWindow, daybookFilter]);
 
   const stats = useMemo(() => {
     const totalSalesAmount = filteredSales.reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
@@ -147,7 +177,7 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
       creditSales,
       customerCount: Object.keys(customerMap).length || 0,
     };
-  }, [sales]);
+  }, [filteredSales]);
 
   // Hover & Touch Tracing state
   const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; date: string; revenue: number; orders: number } | null>(null);
@@ -167,8 +197,8 @@ export const OperationsOverviewDashboard: React.FC<OperationsOverviewDashboardPr
   // Aggregate Time-Series Data for Spline
   const chartPointsData = useMemo(() => {
     const now = new Date();
-    let minTime = new Date(now).setHours(0, 0, 0, 0);
-    let maxTime = new Date(now).setHours(23, 59, 59, 999);
+    let minTime = revenueWindow.startMs;
+    let maxTime = revenueWindow.endMs;
     let bucketCount = 10;
 
     if (timeFilter === 'week') {

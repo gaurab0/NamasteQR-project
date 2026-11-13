@@ -58,8 +58,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const formatRoleLabel = (role?: string) => {
     if (!role) return 'Staff Member';
     switch (role) {
-      case 'HOTEL_OWNER':
-        return 'Hotel Owner';
       case 'RESTAURANT_OWNER':
         return 'Restaurant Owner';
       case 'OWNER':

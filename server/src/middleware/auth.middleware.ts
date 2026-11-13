@@ -10,6 +10,8 @@ import {
   isBusinessOwnerRole,
   isOwnerSubject,
   isManagerRole,
+  normalizeLegacyRole,
+  normalizeLegacyBusinessType,
   type AccessKind,
 } from '../services/tabAccess';
 
@@ -21,7 +23,7 @@ export function buildSessionBusiness(business: any, fallbackBizId: string) {
   return {
     id: business?.id || fallbackBizId,
     name: business?.name || 'Business',
-    type: business?.business_type || 'RESTAURANT',
+    type: normalizeLegacyBusinessType(business?.business_type),
     status: business?.status || 'ACTIVE',
     tagline: business?.tagline || '',
     location: business?.location || '',
@@ -127,7 +129,7 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
         // If the token was signed with our secret, it is authentic.
         // If the database was recently remixed or user record was cleared, restore/ensure it!
         if (!user) {
-          const targetBizId = decoded.businessId || 'maya-forest-resort';
+          const targetBizId = decoded.businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
           const targetBizName = decoded.businessName;
           const targetBizType = decoded.businessType;
           const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
@@ -136,7 +138,7 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
             id: decoded.userId,
             business_id: business.id,
             email: decoded.email || `owner@${business.id}.app`,
-            role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
+            role: (normalizeLegacyRole(decoded.role) || 'RESTAURANT_OWNER') as UserRole,
           });
         }
 
@@ -163,7 +165,7 @@ export async function authenticate(req: AuthenticatedRequest, res: Response, nex
             email: user.email,
             name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
             created_at: user.created_at,
-            role: user.role,
+            role: (normalizeLegacyRole(user.role) || 'RESTAURANT_OWNER') as UserRole,
             status: user.status,
             allowed_tabs: await db.ensureAllowedTabsPersisted(user),
             acting_as: await resolveActingAs(req, user),
@@ -226,7 +228,7 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
         }
 
         if (!user) {
-          const targetBizId = decoded.businessId || 'maya-forest-resort';
+          const targetBizId = decoded.businessId || (await db.getDefaultBusiness())?.id || 'namaste-bistro';
           const targetBizName = decoded.businessName;
           const targetBizType = decoded.businessType;
           const business = await db.ensureBusiness(targetBizId, targetBizName, targetBizType);
@@ -235,7 +237,7 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
             id: decoded.userId,
             business_id: business.id,
             email: decoded.email || `owner@${business.id}.app`,
-            role: decoded.role || (business.business_type === 'HOTEL' ? 'HOTEL_OWNER' : 'RESTAURANT_OWNER'),
+            role: (normalizeLegacyRole(decoded.role) || 'RESTAURANT_OWNER') as UserRole,
           });
         }
 
@@ -251,7 +253,7 @@ export async function optionalAuthenticate(req: AuthenticatedRequest, res: Respo
             email: user.email,
             name: user.name || (user.email ? user.email.split('@')[0] : 'User'),
             created_at: user.created_at,
-            role: user.role,
+            role: (normalizeLegacyRole(user.role) || 'RESTAURANT_OWNER') as UserRole,
             status: user.status,
             allowed_tabs: await db.ensureAllowedTabsPersisted(user),
             acting_as: await resolveActingAs(req, user),

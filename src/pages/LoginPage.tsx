@@ -81,7 +81,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
   return (
     <AuthLayout
       title="Sign in to your portal"
-      subtitle="Access your restaurant and hotel operations portal."
+      subtitle="Access your restaurant, café, and dining operations portal."
       onNavigate={onNavigate}
     >
 

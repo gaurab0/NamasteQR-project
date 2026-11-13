@@ -24,6 +24,8 @@ import {
 import { SaleRecord, SalesTimeFilter, GLAccountLink, BusinessTaxConfig, CompRecord } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import { rbacService } from '../../services/rbac.service';
+import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
+import { formatVenueDateStr, isSaleInRevenueWindow } from '../../utils/revenueWindow';
 import { renderFormattedDate } from '../../utils/dateFormatter';
 import { exportSalesToExcel, buildSalesWorkbookData, ExcelSheetData } from '../../utils/excelExport';
 import { ExcelSheetPreviewModal } from '../billing/ExcelSheetPreviewModal';
@@ -83,38 +85,42 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
   const currencySymbol = taxConfig?.currency_symbol || taxConfig?.currency || 'Rs.';
   const currentBillingFormat = business?.date_format_billing || user?.business?.date_format_billing || 'ENGLISH';
 
+  const { revenueWindow, opsConfig } = useSyncedOperationsState(
+    business?.id,
+    business?.operations_config,
+    business?.current_operational_day
+  );
+
   // Date ranges
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const todayStr = revenueWindow.businessDate;
   const weekRange = useMemo(() => {
     const now = new Date();
     const day = now.getDay();
     const diffToMonday = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diffToMonday));
-    const sunday = new Date(now.setDate(diffToMonday + 6));
+    const monday = new Date(now.getFullYear(), now.getMonth(), diffToMonday);
+    const sunday = new Date(now.getFullYear(), now.getMonth(), diffToMonday + 6);
     return {
-      start: monday.toISOString().split('T')[0],
-      end: sunday.toISOString().split('T')[0],
+      start: formatVenueDateStr(monday, opsConfig),
+      end: formatVenueDateStr(sunday, opsConfig),
     };
-  }, []);
+  }, [todayStr, opsConfig]);
 
   const monthRange = useMemo(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth();
-    const start = new Date(y, m, 1).toISOString().split('T')[0];
-    const end = new Date(y, m + 1, 0).toISOString().split('T')[0];
+    const [y, m] = todayStr.split('-').map(Number);
+    const start = formatVenueDateStr(new Date(y, m - 1, 1), opsConfig);
+    const end = formatVenueDateStr(new Date(y, m, 0), opsConfig);
     return { start, end };
-  }, []);
+  }, [todayStr, opsConfig]);
 
   // Filtered sales
   const filteredSales = useMemo(() => {
     return sales.filter((sale) => {
       const saleDate =
         sale.date_string ||
-        (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : '');
+        (sale.created_at ? formatVenueDateStr(new Date(sale.created_at), opsConfig) : '');
 
       if (timeFilter === 'DAY') {
-        if (saleDate !== todayStr) return false;
+        if (!isSaleInRevenueWindow(sale, revenueWindow)) return false;
       } else if (timeFilter === 'WEEK') {
         if (saleDate < weekRange.start || saleDate > weekRange.end) return false;
       } else if (timeFilter === 'MONTH') {
@@ -156,7 +162,6 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
       CARD: { count: 0, total: 0 },
       QR_CODE: { count: 0, total: 0 },
       ONLINE: { count: 0, total: 0 },
-      ROOM_CHARGE: { count: 0, total: 0 },
       CREDIT: { count: 0, total: 0 },
     };
 
@@ -791,14 +796,11 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
                               ? 'bg-amber-100 text-amber-800'
                               : sale.sale_type === 'TAKEAWAY'
                               ? 'bg-blue-100 text-blue-800'
-                              : sale.sale_type === 'ROOM_SERVICE'
-                              ? 'bg-purple-100 text-purple-800'
                               : 'bg-emerald-100 text-emerald-800'
                           }`}
                         >
                           {sale.sale_type === 'DINE_IN' && '🍽️ '}
                           {sale.sale_type === 'TAKEAWAY' && '🛍️ '}
-                          {sale.sale_type === 'ROOM_SERVICE' && '🛎️ '}
                           {sale.sale_type.replace('_', ' ')}
                         </span>
                         {sale.table_number && (
