@@ -36,6 +36,7 @@ export interface BusinessOperatingHours {
   closeTime: string;
   autoDateAdvance: boolean;
   dailyResetTime?: string;
+  timezone?: string;
   timezoneOffsetMinutes?: number;
   default_language?: string;
 }
@@ -79,8 +80,8 @@ export interface Business {
   tax_rate?: number;
   show_menu_images?: boolean;
   menu_theme_config?: MenuThemeConfig;
-  date_format_nav?: "BOTH" | "ENGLISH" | "NEPALI";
-  date_format_billing?: "BOTH" | "ENGLISH" | "NEPALI";
+  date_format_nav?: "BOTH" | "ENGLISH" | "LOCAL" | "NEPALI";
+  date_format_billing?: "BOTH" | "ENGLISH" | "LOCAL" | "NEPALI";
   operations_config?: BusinessOperatingHours;
   current_operational_day?: OperationalDayRecord;
   kds_print_mode?: KdsPrintMode;

@@ -641,7 +641,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       CASH: { count: 0, total: 0 },
       CARD: { count: 0, total: 0 },
       QR_CODE: { count: 0, total: 0 },
-      ONLINE: { count: 0, total: 0 },
+      DEDUCT_FROM_DEPOSIT: { count: 0, total: 0 },
       CREDIT: { count: 0, total: 0 },
     };
 
@@ -652,7 +652,10 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       totalTaxCollected += Number(s.total_tax) || 0;
       totalServiceCharge += Number(s.service_charge) || 0;
 
-      const method = s.payment_method || 'CASH';
+      const rawMethod = s.payment_method || 'CASH';
+      const method = (rawMethod === 'UPI_QR' || rawMethod === 'QR_CODE' || (rawMethod as string) === 'ONLINE')
+        ? 'QR_CODE'
+        : rawMethod;
       if (!paymentCounts[method]) {
         paymentCounts[method] = { count: 0, total: 0 };
       }
@@ -1031,7 +1034,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         </div>
       )}
 
-      {/* Finance & POS Sub-Tab Switcher */}
+      {/* Billing & POS Sub-Tab Switcher */}
       <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-zinc-100 border border-zinc-200/90 shadow-2xs">
         <button
           id="btn-pos-subtab-register"
@@ -1700,7 +1703,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                     <p className="text-base sm:text-lg font-black text-zinc-800 mt-0.5">
                       {currencySymbol} {cashierNonCashCollected.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </p>
-                    <span className="text-[10px] text-zinc-400">Bank / QR / Online settlements</span>
+                    <span className="text-[10px] text-zinc-400">Bank & QR settlements</span>
                   </div>
                 </div>
 
@@ -4414,7 +4417,7 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Date:</span>
-              <span>{renderFormattedDate(order.created_at || new Date(), business?.date_format_billing || 'ENGLISH')}</span>
+              <span>{renderFormattedDate(order.created_at || new Date(), business?.date_format_billing || 'ENGLISH', ' | ', business?.operations_config?.timezone)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Status:</span>

@@ -7,10 +7,10 @@ export const TAB_LABELS: Record<TabPermissionId, string> = {
   waiter: 'Waiter Station',
   checkins: 'Table & Space',
   menus: 'Menu',
-  billing: 'Finance & POS',
+  billing: 'Billing & POS',
   team: 'Staff',
   configurations: 'Settings',
-  account: 'Business Details',
+  account: 'Business Profile',
   franchise: 'Franchise / Branch Switcher',
 };
 

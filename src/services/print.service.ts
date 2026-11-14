@@ -276,22 +276,50 @@ class PrintService {
     }
     const serverName = data.waiter_name || 'System';
     let billingFormat: any = 'ENGLISH';
+    let venueTimezone: string | undefined = undefined;
+    let orderLabel = 'Order No:';
+    let invoiceLabel = 'Invoice:';
 
     try {
+      const taxCfg = data?.tax_config || data?.business?.tax_config;
+      if (taxCfg?.order_label) {
+        orderLabel = taxCfg.order_label.trim();
+      }
+      if (taxCfg?.invoice_label) {
+        invoiceLabel = taxCfg.invoice_label.trim();
+      } else if (taxCfg?.invoice_prefix) {
+        invoiceLabel = `${taxCfg.invoice_prefix} Invoice:`;
+      }
       if (data?.date_format_billing) {
         billingFormat = data.date_format_billing;
+      }
+      if (data?.operations_config?.timezone) {
+        venueTimezone = data.operations_config.timezone;
       } else {
         const cached = localStorage.getItem('serveflow_cached_user');
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed?.business?.date_format_billing) {
+          if (parsed?.business?.date_format_billing && !data?.date_format_billing) {
             billingFormat = parsed.business.date_format_billing;
+          }
+          if (parsed?.business?.operations_config?.timezone) {
+            venueTimezone = parsed.business.operations_config.timezone;
+          }
+          if (parsed?.business?.tax_config) {
+            if (!taxCfg?.order_label && parsed.business.tax_config.order_label) {
+              orderLabel = parsed.business.tax_config.order_label.trim();
+            }
+            if (!taxCfg?.invoice_label && parsed.business.tax_config.invoice_label) {
+              invoiceLabel = parsed.business.tax_config.invoice_label.trim();
+            } else if (!taxCfg?.invoice_label && parsed.business.tax_config.invoice_prefix) {
+              invoiceLabel = `${parsed.business.tax_config.invoice_prefix} Invoice:`;
+            }
           }
         }
       }
     } catch {}
 
-    const time = renderFormattedDate(data.created_at || new Date(), billingFormat);
+    const time = renderFormattedDate(data.created_at || new Date(), billingFormat, ' | ', venueTimezone);
 
     let html = `
       <!DOCTYPE html>
@@ -339,7 +367,7 @@ class PrintService {
           <div class="header">
             <h2>${ticketTitle}</h2>
             ${isOrderMore ? '<div style="font-weight: bold; font-size: 13px; color: #6b21a8; margin: 2px 0;">[ORDER MORE / FOLLOW-UP]</div>' : ''}
-            <h1>Order #${escapeHtml(orderNumber)}</h1>
+            <h1>${escapeHtml(orderLabel)} ${escapeHtml(orderNumber)}</h1>
             <div>Table: ${escapeHtml(tableNo)}</div>
             <div>Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
           </div>
@@ -378,8 +406,8 @@ class PrintService {
       html += `
           <div class="header">
             <h2>TAX INVOICE / RECEIPT</h2>
-            <h1>Order #${escapeHtml(orderNumber)}</h1>
-            ${data.invoice_number ? `<div>Invoice: ${escapeHtml(data.invoice_number)}</div>` : ''}
+            <h1>${escapeHtml(orderLabel)} ${escapeHtml(orderNumber)}</h1>
+            ${data.invoice_number ? `<div>${escapeHtml(invoiceLabel)} ${escapeHtml(data.invoice_number)}</div>` : ''}
             <div>Table: ${escapeHtml(tableNo)}</div>
             <div>Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
           </div>

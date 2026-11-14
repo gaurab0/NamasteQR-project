@@ -89,7 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'account' as DashboardTab,
-      label: 'Business Details',
+      label: 'Business Profile',
       icon: Store,
       badge: null,
       visible: canAccessTab(subject, 'account'),
@@ -132,7 +132,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'billing' as DashboardTab,
-      label: 'Finance & POS',
+      label: 'Billing & POS',
       icon: Receipt,
       badge: null,
       visible: canAccessTab(subject, 'billing'),

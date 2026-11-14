@@ -361,7 +361,7 @@ export const CompConfirmationPage: React.FC<CompConfirmationPageProps> = ({
                     </button>
                   </div>
                   <p className="text-[11px] text-zinc-500 mt-1">
-                    Code configured in Business Details tab by the owner.
+                    Code configured in Business Profile tab by the owner.
                   </p>
                 </div>
 

@@ -47,7 +47,6 @@ export function buildSalesWorkbookData(
   let totalCash = 0;
   let totalCard = 0;
   let totalQR = 0;
-  let totalOnline = 0;
   let totalDeposit = 0;
   let totalDiscounts = 0;
   let totalTax = 0;
@@ -71,8 +70,7 @@ export function buildSalesWorkbookData(
     const pm = (s.payment_method || '').toUpperCase();
     if (pm === 'CASH') totalCash += tot;
     else if (pm === 'CARD') totalCard += tot;
-    else if (pm === 'UPI_QR' || pm === 'QR_CODE') totalQR += tot;
-    else if (pm === 'ONLINE') totalOnline += tot;
+    else if (pm === 'UPI_QR' || pm === 'QR_CODE' || pm === 'ONLINE') totalQR += tot;
     else if (pm === 'DEDUCT_FROM_DEPOSIT') totalDeposit += tot;
     else totalCash += tot; // fallback
 
@@ -243,15 +241,10 @@ export function buildSalesWorkbookData(
       glAccNumber = match?.account_number || '1020';
       glAccName = match?.account_name || 'Credit & Debit Card Clearing';
       glAccCategory = match?.category || 'ASSET';
-    } else if (normalizedPayment === 'QR_CODE' || normalizedPayment === 'UPI_QR') {
+    } else if (normalizedPayment === 'QR_CODE' || normalizedPayment === 'UPI_QR' || normalizedPayment === 'ONLINE') {
       const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'QR_SETTLEMENT' || a.account_number === '1030');
       glAccNumber = match?.account_number || '1030';
       glAccName = match?.account_name || 'QR Digital Payment Clearing';
-      glAccCategory = match?.category || 'ASSET';
-    } else if (normalizedPayment === 'ONLINE') {
-      const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'ONLINE_SETTLEMENT' || a.account_number === '1040');
-      glAccNumber = match?.account_number || '1040';
-      glAccName = match?.account_name || 'Online Payment Gateway Clearing';
       glAccCategory = match?.category || 'ASSET';
     } else if (normalizedPayment === 'DEDUCT_FROM_DEPOSIT') {
       const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'DEPOSIT_CLEARING' || a.account_number === '2130');
@@ -573,7 +566,6 @@ export function buildSalesWorkbookData(
     else if (key === 'CASH_SETTLEMENT') mappedTotal = totalCash;
     else if (key === 'CARD_SETTLEMENT') mappedTotal = totalCard;
     else if (key === 'QR_SETTLEMENT') mappedTotal = totalQR;
-    else if (key === 'ONLINE_SETTLEMENT') mappedTotal = totalOnline;
     else if (key === 'DEPOSIT_CLEARING') mappedTotal = totalDeposit;
     else if (key === 'CREDIT_SETTLEMENT') {
       mappedTotal = creditAccountsMap[acc.id]?.total || 0;
@@ -599,7 +591,6 @@ export function buildSalesWorkbookData(
   if (totalCash > 0) journalRows.push(['1010', 'POS Till Cash on Hand', 'ASSET', Number(totalCash.toFixed(2)), 0, 'Physical cash collections in POS till']);
   if (totalCard > 0) journalRows.push(['1020', 'Credit & Debit Card Clearing', 'ASSET', Number(totalCard.toFixed(2)), 0, 'POS card swipe settlements']);
   if (totalQR > 0) journalRows.push(['1030', 'QR Digital Payment Clearing', 'ASSET', Number(totalQR.toFixed(2)), 0, 'QR digital payments settled']);
-  if (totalOnline > 0) journalRows.push(['1040', 'Online Payment Gateway Clearing', 'ASSET', Number(totalOnline.toFixed(2)), 0, 'Direct online checkout settlement']);
   if (totalDeposit > 0) journalRows.push(['2130', 'Customer Advance & Deposit Clearing', 'LIABILITY', Number(totalDeposit.toFixed(2)), 0, 'Sales settled against pre-paid customer deposits']);
   if (totalDiscounts > 0) journalRows.push(['4090', 'Sales Discounts & Rebates', 'EXPENSE', Number(totalDiscounts.toFixed(2)), 0, 'Customer discounts allowed on billing']);
 
@@ -618,7 +609,7 @@ export function buildSalesWorkbookData(
   if (totalTax > 0) journalRows.push(['2110', 'Sales Tax / VAT Payable (13%)', 'TAX_LIABILITY', 0, Number(totalTax.toFixed(2)), 'Collected government tax liability']);
   if (totalServiceCharge > 0) journalRows.push(['2120', 'Hospitality Service Charge Payable', 'LIABILITY', 0, Number(totalServiceCharge.toFixed(2)), '10% Service charge pool for staff']);
 
-  const totalDebits = totalCash + totalCard + totalQR + totalOnline + totalDeposit + journalCreditDebits + totalDiscounts;
+  const totalDebits = totalCash + totalCard + totalQR + totalDeposit + journalCreditDebits + totalDiscounts;
   const totalCredits = totalFoodSales + totalBeverageSales + totalTax + totalServiceCharge;
   const variance = Math.abs(totalDebits - totalCredits);
 

@@ -1396,7 +1396,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                     </span>
                   </h4>
                   <p className="text-xs opacity-85">
-                    Deliver the bill folio to the table and click "Folio Delivered". The cashier settles the bill in Finance & POS.
+                    Deliver the bill folio to the table and click "Folio Delivered". The cashier settles the bill in Billing & POS.
                   </p>
                 </div>
               </div>

@@ -36,6 +36,9 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
   const [currencySymbol, setCurrencySymbol] = useState<string>(taxConfig.currency_symbol || 'Rs.');
   const [packagingFee, setPackagingFee] = useState<number>(Number(taxConfig.packaging_fee) || 10);
   const [invoicePrefix, setInvoicePrefix] = useState<string>(taxConfig.invoice_prefix || 'INV-');
+  const [orderPrefix, setOrderPrefix] = useState<string>(taxConfig.order_prefix || 'ORD-');
+  const [orderLabel, setOrderLabel] = useState<string>(taxConfig.order_label || 'Order No:');
+  const [invoiceLabel, setInvoiceLabel] = useState<string>(taxConfig.invoice_label || 'Invoice No:');
   const [orderResetInterval, setOrderResetInterval] = useState<'MANUAL' | 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'>(taxConfig.order_reset_interval || 'MANUAL');
   const [panVatNumber, setPanVatNumber] = useState<string>(taxConfig.pan_vat_number || '');
   const [panVatPrefix, setPanVatPrefix] = useState<string>(taxConfig.pan_vat_prefix || '');
@@ -68,6 +71,9 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
     setCurrencySymbol(taxConfig.currency_symbol || 'Rs.');
     setPackagingFee(Number(taxConfig.packaging_fee) || 10);
     setInvoicePrefix(taxConfig.invoice_prefix || 'INV-');
+    setOrderPrefix(taxConfig.order_prefix || 'ORD-');
+    setOrderLabel(taxConfig.order_label || 'Order No:');
+    setInvoiceLabel(taxConfig.invoice_label || 'Invoice No:');
     setOrderResetInterval(taxConfig.order_reset_interval || 'MANUAL');
     setPanVatNumber(taxConfig.pan_vat_number || '');
     setPanVatPrefix(taxConfig.pan_vat_prefix || '');
@@ -160,6 +166,9 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
         currency_symbol: currencySymbol,
         packaging_fee: Number(packagingFee) || 10,
         invoice_prefix: invoicePrefix,
+        invoice_label: invoiceLabel,
+        order_prefix: orderPrefix,
+        order_label: orderLabel,
         order_reset_interval: orderResetInterval,
         pan_vat_number: panVatNumber,
         pan_vat_prefix: panVatPrefix,
@@ -366,10 +375,66 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          {/* Order Prefix & Order Label */}
+          <div>
+            <label className="text-[11px] font-bold text-zinc-700 block mb-1">
+              Order Number Prefix
+            </label>
+            <input
+              id="input-order-prefix"
+              type="text"
+              value={orderPrefix}
+              onChange={(e) => setOrderPrefix(e.target.value)}
+              placeholder="e.g. ORD- or KT-"
+              className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+            <span className="text-[10px] text-zinc-500 mt-0.5 block">
+              Prefix for sequential kitchen/table order slips (e.g. {orderPrefix || 'ORD-'}131)
+            </span>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-bold text-zinc-700 block mb-1">
+              Order Number Label
+            </label>
+            <input
+              id="input-order-label"
+              type="text"
+              value={orderLabel}
+              onChange={(e) => setOrderLabel(e.target.value)}
+              placeholder="e.g. Order No: or Order:"
+              className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+            <span className="text-[10px] text-zinc-500 mt-0.5 block">
+              Label heading preceding order number (e.g. {orderLabel || 'Order No:'})
+            </span>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-bold text-zinc-700 block mb-1">
+              Order Counter Reset Interval
+            </label>
+            <select
+              id="select-order-reset-interval"
+              value={orderResetInterval}
+              onChange={(e) => setOrderResetInterval(e.target.value as any)}
+              className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500 cursor-pointer"
+            >
+              <option value="MANUAL">Continuous Sequence (Never auto-resets)</option>
+              <option value="DAILY">Daily Reset (Resets to 01 each business day)</option>
+              <option value="WEEKLY">Weekly Reset (Resets every Monday)</option>
+              <option value="MONTHLY">Monthly Reset (Resets on the 1st of each month)</option>
+              <option value="YEARLY">Yearly Reset (Resets Jan 1st)</option>
+            </select>
+            <span className="text-[10px] text-zinc-500 mt-0.5 block">
+              Controls when order slip numbers automatically roll back to 01
+            </span>
+          </div>
+
           {/* Document Title & Invoice Prefix */}
           <div>
             <label className="text-[11px] font-bold text-zinc-700 block mb-1">
-              Document Title (e.g. TAX INVOICE)
+              Document Title (e.g. TAX INVOICE or ESTIMATED BILL)
             </label>
             <input
               id="input-invoice-document-title"
@@ -380,7 +445,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
               className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500"
             />
             <span className="text-[10px] text-zinc-500 mt-0.5 block">
-              Title displayed center-bold on receipt (separate from Invoice Prefix)
+              Title displayed center-bold on receipt (e.g. ESTIMATED BILL, TAX INVOICE)
             </span>
           </div>
 
@@ -398,6 +463,23 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
             />
             <span className="text-[10px] text-zinc-500 mt-0.5 block">
               Prefix for sequential invoice numbers only (e.g. {invoicePrefix || 'INV-'}01)
+            </span>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-bold text-zinc-700 block mb-1">
+              Invoice / Bill Label
+            </label>
+            <input
+              id="input-invoice-label"
+              type="text"
+              value={invoiceLabel}
+              onChange={(e) => setInvoiceLabel(e.target.value)}
+              placeholder="e.g. Invoice No: or Bill# Invoice:"
+              className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500"
+            />
+            <span className="text-[10px] text-zinc-500 mt-0.5 block">
+              Label heading preceding invoice number (e.g. {invoiceLabel || 'Invoice No:'})
             </span>
           </div>
 
@@ -502,7 +584,7 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
         </div>
 
         {/* Live Header Preview Box */}
-        {(invoiceDisplayName || invoiceSubtitle || invoiceAddress || panVatNumber || panVatPrefix || invoiceDocumentTitle || invoicePrefix) && (
+        {(invoiceDisplayName || invoiceSubtitle || invoiceAddress || panVatNumber || panVatPrefix || invoiceDocumentTitle || invoicePrefix || orderPrefix || orderLabel || invoiceLabel) && (
           <div className="mt-2 p-3 rounded-lg bg-white border border-zinc-200 text-center space-y-0.5">
             <span className="text-[10px] font-bold text-amber-600 block uppercase tracking-wider mb-1">
               Header Preview on Receipt
@@ -527,7 +609,10 @@ export const TaxConfigurationPanel: React.FC<TaxConfigurationPanelProps> = ({
             )}
             <div className="pt-1 border-t border-dashed border-zinc-200 mt-1 font-mono text-[10px] text-zinc-800 font-bold">
               {invoiceDocumentTitle || 'TAX INVOICE'}
-              {invoicePrefix ? ` (${invoicePrefix})` : ''}
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-600 pt-1 border-t border-zinc-100 px-2">
+              <span>{orderLabel || 'Order No:'} <strong className="text-zinc-900">{orderPrefix || 'ORD-'}131</strong></span>
+              <span>{invoiceLabel || 'Invoice No:'} <strong className="text-zinc-900">{invoicePrefix || 'INV-'}132</strong></span>
             </div>
           </div>
         )}

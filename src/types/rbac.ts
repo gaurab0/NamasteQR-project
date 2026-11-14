@@ -332,6 +332,9 @@ export interface BusinessTaxConfig {
   packaging_fee?: number;
   rates: TaxRateItem[];
   invoice_prefix?: string;
+  order_prefix?: string;
+  order_label?: string;
+  invoice_label?: string;
   receipt_footer_note?: string;
   pan_vat_number?: string;
   pan_vat_prefix?: string;

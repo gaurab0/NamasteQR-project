@@ -15,6 +15,7 @@ import {
   QrCode, 
   ChevronRight,
   Layers,
+  Wallet,
   Sparkles
 } from 'lucide-react';
 import { rbacService } from '../../services/rbac.service';
@@ -244,13 +245,14 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
     const map: Record<string, { count: number; total: number; label: string; icon: any; color: string }> = {
       CASH: { count: 0, total: 0, label: 'Cash Payments', icon: DollarSign, color: 'bg-emerald-500' },
       CARD: { count: 0, total: 0, label: 'Card POS', icon: CreditCard, color: 'bg-blue-500' },
-      QR_CODE: { count: 0, total: 0, label: 'Digital QR / Fonepay', icon: QrCode, color: 'bg-amber-500' },
+      QR_CODE: { count: 0, total: 0, label: 'Digital QR', icon: QrCode, color: 'bg-amber-500' },
+      DEDUCT_FROM_DEPOSIT: { count: 0, total: 0, label: 'Deposit Clearing', icon: Wallet, color: 'bg-teal-500' },
       CREDIT: { count: 0, total: 0, label: 'Credit Ledger', icon: Layers, color: 'bg-purple-500' },
     };
 
     filteredSales.forEach((s) => {
       const m = s.payment_method || 'CASH';
-      const key = m === 'UPI_QR' ? 'QR_CODE' : m in map ? m : 'CASH';
+      const key = (m === 'UPI_QR' || (m as string) === 'ONLINE') ? 'QR_CODE' : m in map ? m : 'CASH';
       map[key].count += 1;
       map[key].total += Number(s.total_amount || (s as any).grand_total) || 0;
     });

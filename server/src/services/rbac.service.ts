@@ -2506,7 +2506,8 @@ export class RBACService {
       totalAmount,
     } = this.calculateOrderTaxBreakdown(itemsMenuTotal + packagingTotal, taxConfig);
 
-    const orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
+    const orderPrefix = taxConfig?.order_prefix || 'ORD-0';
+    const orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, orderPrefix, taxConfig);
     const isCompTable = Boolean(tableDocData?.comp_enabled);
     const hasCompItems = newItems.some((item) => Boolean(item.is_comp || (Number(item.comp_qty) || 0) > 0));
     const requiresPayFirst = Boolean(tableDocData?.pay_first_enabled || tableDocData?.credit_only) && !isAllComp && !isCompTable && !hasCompItems;
@@ -3351,6 +3352,9 @@ export class RBACService {
             },
           ],
           invoice_prefix: cfg.invoice_prefix || 'INV-',
+          order_prefix: (cfg as any).order_prefix || 'ORD-',
+          order_label: (cfg as any).order_label || 'Order No:',
+          invoice_label: (cfg as any).invoice_label || 'Invoice No:',
           receipt_footer_note: cfg.receipt_footer_note || 'Thank you for your visit! Please dine with us again.',
           pan_vat_number: cfg.pan_vat_number || '',
           pan_vat_prefix: cfg.pan_vat_prefix || undefined,
@@ -3400,6 +3404,9 @@ export class RBACService {
         },
       ],
       invoice_prefix: 'INV-',
+      order_prefix: 'ORD-',
+      order_label: 'Order No:',
+      invoice_label: 'Invoice No:',
       receipt_footer_note: 'Thank you for your visit! Please dine with us again.',
       pan_vat_number: '',
       order_reset_interval: 'MANUAL',
@@ -3488,6 +3495,28 @@ export class RBACService {
           last_order_reset_date: updated.last_order_reset_date || null,
         },
       });
+
+      if (updated.order_prefix !== undefined) {
+        await prisma.$executeRawUnsafe(
+          'UPDATE tax_configs SET order_prefix = $1 WHERE business_id = $2',
+          updated.order_prefix || 'ORD-',
+          businessId
+        ).catch(() => {});
+      }
+      if (updated.order_label !== undefined) {
+        await prisma.$executeRawUnsafe(
+          'UPDATE tax_configs SET order_label = $1 WHERE business_id = $2',
+          updated.order_label || 'Order No:',
+          businessId
+        ).catch(() => {});
+      }
+      if (updated.invoice_label !== undefined) {
+        await prisma.$executeRawUnsafe(
+          'UPDATE tax_configs SET invoice_label = $1 WHERE business_id = $2',
+          updated.invoice_label || 'Invoice No:',
+          businessId
+        ).catch(() => {});
+      }
     } catch (e: any) {
       console.warn('Prisma updateTaxConfig error:', e.message);
     }
@@ -3671,13 +3700,13 @@ export class RBACService {
         updated_at: now,
       },
       {
-        id: 'gl-1040',
+        id: 'gl-2130',
         business_id: businessId,
-        account_number: '1040',
-        account_name: 'Online Payment Gateway Clearing',
-        category: 'ASSET',
-        mapping_key: 'ONLINE_SETTLEMENT',
-        description: 'Online direct web orders and payment gateway disbursements',
+        account_number: '2130',
+        account_name: 'Customer Advance & Deposit Clearing',
+        category: 'LIABILITY',
+        mapping_key: 'DEPOSIT_CLEARING',
+        description: 'Sales settled against pre-paid customer advances or room deposits',
         is_active: true,
         created_at: now,
         updated_at: now,
@@ -4203,14 +4232,26 @@ export class RBACService {
       if (providedVal) {
         nextVal = providedVal;
       } else {
-        if (currentVal && !shouldReset) {
-          nextVal = incrementSequence(currentVal);
-        } else {
-          if (type === 'order') {
-            const pref = (defaultPrefix && defaultPrefix !== 'A') ? defaultPrefix : 'ORD-0';
-            nextVal = pref === 'ORD-0' ? 'ORD-01' : (pref.endsWith('-') ? `${pref}01` : (pref.endsWith('0') ? `${pref}1` : `${pref}-01`));
+        if (type === 'order') {
+          const pref = (taxConfig && taxConfig.order_prefix && taxConfig.order_prefix.trim())
+            ? taxConfig.order_prefix.trim()
+            : ((defaultPrefix && defaultPrefix !== 'A') ? defaultPrefix : 'ORD-0');
+          const prefixRoot = pref.endsWith('-') ? pref : (pref.endsWith('0') ? pref.slice(0, -1) : pref);
+          const initialOrderVal = pref === 'ORD-0' ? 'ORD-01' : (pref.endsWith('-') ? `${pref}01` : (pref.endsWith('0') ? `${pref}1` : `${pref}-01`));
+
+          if (currentVal && !shouldReset && currentVal.startsWith(prefixRoot)) {
+            nextVal = incrementSequence(currentVal);
           } else {
-            nextVal = defaultPrefix + '1';
+            nextVal = initialOrderVal;
+          }
+        } else {
+          const pref = (taxConfig && taxConfig.invoice_prefix && taxConfig.invoice_prefix.trim())
+            ? taxConfig.invoice_prefix.trim()
+            : (defaultPrefix || 'INV-');
+          if (currentVal && !shouldReset && currentVal.startsWith(pref)) {
+            nextVal = incrementSequence(currentVal);
+          } else {
+            nextVal = pref + '1';
           }
         }
       }
@@ -4389,10 +4430,12 @@ export class RBACService {
 
       }
       if (!orderNumber) {
-        orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, 'ORD-0', taxConfig);
+        const orderPrefix = taxConfig?.order_prefix || 'ORD-0';
+        orderNumber = await this.getNextSequenceNumber(businessId, 'order', undefined, orderPrefix, taxConfig);
       }
     } else {
-      orderNumber = await this.getNextSequenceNumber(businessId, 'order', saleData.order_number, 'ORD-0', taxConfig);
+      const orderPrefix = taxConfig?.order_prefix || 'ORD-0';
+      orderNumber = await this.getNextSequenceNumber(businessId, 'order', saleData.order_number, orderPrefix, taxConfig);
     }
 
     const isManualPosSale = !options?.skipOrderCompletion && !saleData.order_id;

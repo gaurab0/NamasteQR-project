@@ -57,8 +57,8 @@ export interface Business {
   tax_rate?: number;
   show_menu_images?: boolean;
   menu_theme_config?: MenuThemeConfig;
-  date_format_nav?: "BOTH" | "ENGLISH" | "NEPALI";
-  date_format_billing?: "BOTH" | "ENGLISH" | "NEPALI";
+  date_format_nav?: "BOTH" | "ENGLISH" | "LOCAL" | "NEPALI";
+  date_format_billing?: "BOTH" | "ENGLISH" | "LOCAL" | "NEPALI";
   kds_print_mode?: string;
   default_language?: string;
   comp_password?: string | null;
@@ -165,7 +165,7 @@ export interface AuthSessionUser {
     phone?: string;
     menu_theme_config?: MenuThemeConfig;
     date_format_nav?: 'BOTH' | 'ENGLISH' | 'NEPALI';
-    date_format_billing?: 'BOTH' | 'ENGLISH' | 'NEPALI';
+    date_format_billing?: 'BOTH' | 'ENGLISH' | 'LOCAL' | 'NEPALI';
   };
   phone: {
     countryCode: string;

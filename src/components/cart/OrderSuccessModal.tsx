@@ -1161,7 +1161,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                           QR Code 
                           {(liveOrder?.payment_method === 'QR_CODE' || liveOrder?.payment_method === 'UPI_QR') && <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0 ml-1" />}
                        </div>
-                       <div className="text-[10px] sm:text-xs text-zinc-500 mt-1">Fonepay / UPI</div>
+                       <div className="text-[10px] sm:text-xs text-zinc-500 mt-1">Digital QR / UPI</div>
                     </button>
                     
                     <button 

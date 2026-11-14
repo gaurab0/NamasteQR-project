@@ -640,7 +640,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </button>
 
             <div className="flex items-center shrink-0">
-              <DateTimeDisplay mode={user?.business?.date_format_nav || 'ENGLISH'} />
+              <DateTimeDisplay 
+                mode={user?.business?.date_format_nav || 'ENGLISH'} 
+                timezone={user?.business?.operations_config?.timezone}
+              />
             </div>
           </div>
 

@@ -1,5 +1,5 @@
 import { DateTimeDisplay } from '../common/DateTimeDisplay';
-import { renderFormattedDate, DateFormatMode } from '../../utils/dateFormatter';
+import { renderFormattedDate, DateFormatMode, detectBrowserTimezone, COMMON_TIMEZONES } from '../../utils/dateFormatter';
 import { Globe, Receipt, Calendar } from 'lucide-react';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -109,8 +109,8 @@ interface ConfigurationNavOption {
 const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   {
     id: 'business_profile',
-    label: 'Business Details',
-    shortLabel: 'Business Details',
+    label: 'Business Profile',
+    shortLabel: 'Business Profile',
     description: 'Registered trade name, tagline, dining area, and kitchen hours.',
     icon: <Building2 className="w-4 h-4" />,
     badge: 'Core Details',
@@ -154,11 +154,11 @@ const CONFIG_NAV_OPTIONS: ConfigurationNavOption[] = [
   },
   {
     id: 'taxes',
-    label: 'Finance & POS',
-    shortLabel: 'Finance & POS',
-    description: 'Configure VAT %, Service Charge, PAN, currency, promo vouchers.',
+    label: 'Bill & Receipt Customization',
+    shortLabel: 'Bill Details',
+    description: 'Customize order & invoice prefixes, receipt header, PAN/VAT, address, and tax rules.',
     icon: <Sliders className="w-4 h-4" />,
-    badge: 'Financial',
+    badge: 'Receipts & Bill',
     badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   },
   {
@@ -264,6 +264,9 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   const [defaultLanguage, setDefaultLanguage] = useState<string>(() => {
     return businessProfile?.default_language || (businessProfile as any)?.operations_config?.default_language || business?.default_language || (business as any)?.operations_config?.default_language || 'en';
   });
+  const [venueTimezone, setVenueTimezone] = useState<string>(() => {
+    return (businessProfile as any)?.operations_config?.timezone || (business as any)?.operations_config?.timezone || detectBrowserTimezone();
+  });
   const [dateSaving, setDateSaving] = useState(false);
   const [dateSaveSuccess, setDateSaveSuccess] = useState<string | null>(null);
 
@@ -281,6 +284,9 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
       if (biz.date_format_billing) {
         setBillingDateFormat(biz.date_format_billing as DateFormatMode);
       }
+      if ((biz as any)?.operations_config?.timezone) {
+        setVenueTimezone((biz as any).operations_config.timezone);
+      }
       if (biz.default_language) {
         setDefaultLanguage(biz.default_language);
       } else if ((biz as any)?.operations_config?.default_language) {
@@ -289,16 +295,25 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
     }
   }, [business, user?.business]);
 
-  const handleSaveDateLocalization = async (newNavFormat?: DateFormatMode, newBillingFormat?: DateFormatMode, newLang?: string) => {
+  const handleSaveDateLocalization = async (newNavFormat?: DateFormatMode, newBillingFormat?: DateFormatMode, newLang?: string, newTz?: string) => {
     const navVal = newNavFormat || navDateFormat;
     const billingVal = newBillingFormat || billingDateFormat;
     const langVal = newLang || defaultLanguage;
+    const tzVal = newTz || venueTimezone;
     try {
       setDateSaving(true);
+      const currentOps = (businessProfile as any)?.operations_config || {};
+      const updatedOps = {
+        ...currentOps,
+        timezone: tzVal,
+        default_language: langVal,
+      };
+
       await rbacService.updateBusinessProfileApi({
         date_format_nav: navVal,
         date_format_billing: billingVal,
         default_language: langVal,
+        operations_config: updatedOps,
       }, businessId);
 
       const freshBiz = {
@@ -306,10 +321,11 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
         date_format_nav: navVal,
         date_format_billing: billingVal,
         default_language: langVal,
+        operations_config: updatedOps,
       };
       setBusinessProfile(freshBiz);
       updateBusiness(freshBiz);
-      setDateSaveSuccess('Operations & localization settings saved successfully!');
+      setDateSaveSuccess('Operations, timezone & localization settings saved successfully!');
       setTimeout(() => setDateSaveSuccess(null), 3500);
     } catch (err: any) {
       alert(`Failed to save localization settings: ${err.message}`);
@@ -320,17 +336,27 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
 
   const handleNavFormatChange = (val: DateFormatMode) => {
     setNavDateFormat(val);
-    handleSaveDateLocalization(val, billingDateFormat, defaultLanguage);
+    handleSaveDateLocalization(val, billingDateFormat, defaultLanguage, venueTimezone);
   };
 
   const handleBillingFormatChange = (val: DateFormatMode) => {
     setBillingDateFormat(val);
-    handleSaveDateLocalization(navDateFormat, val, defaultLanguage);
+    handleSaveDateLocalization(navDateFormat, val, defaultLanguage, venueTimezone);
+  };
+
+  const handleTimezoneChange = (val: string) => {
+    setVenueTimezone(val);
+    handleSaveDateLocalization(navDateFormat, billingDateFormat, defaultLanguage, val);
+  };
+
+  const handleAutoDetectTimezone = () => {
+    const detected = detectBrowserTimezone();
+    handleTimezoneChange(detected);
   };
 
   const handleDefaultLanguageChange = (val: string) => {
     setDefaultLanguage(val);
-    handleSaveDateLocalization(navDateFormat, billingDateFormat, val);
+    handleSaveDateLocalization(navDateFormat, billingDateFormat, val, venueTimezone);
   };
 
   // ==========================================
@@ -1785,8 +1811,69 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                   </Button>
                 </div>
 
-                {/* Grid with 2 distinct configuration cards */}
+                {/* Grid with distinct configuration cards */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Card 0: Venue Local Timezone Resolution */}
+                  <div className="rounded-2xl border border-zinc-200/90 bg-zinc-50/50 p-5 sm:p-6 space-y-4 flex flex-col justify-between lg:col-span-2">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-amber-600" />
+                          <h4 className="text-sm font-bold text-zinc-900">Venue Local Timezone</h4>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                          Intl Timezone API
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 leading-relaxed">
+                        Sets the geographical timezone for your restaurant terminals, live navigation clock, shift resets, and bill timestamps.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                        <div className="sm:col-span-2 space-y-1.5">
+                          <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider">
+                            Configured Timezone
+                          </label>
+                          <select
+                            value={venueTimezone}
+                            onChange={(e) => handleTimezoneChange(e.target.value)}
+                            className="w-full px-3.5 py-2.5 bg-white border border-zinc-300 rounded-xl text-xs sm:text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs"
+                          >
+                            {COMMON_TIMEZONES.map((tz) => (
+                              <option key={tz.value} value={tz.value}>
+                                {tz.label}
+                              </option>
+                            ))}
+                            {!COMMON_TIMEZONES.some((tz) => tz.value === venueTimezone) && (
+                              <option value={venueTimezone}>
+                                {venueTimezone} (Custom / Detected)
+                              </option>
+                            )}
+                          </select>
+                        </div>
+
+                        <div className="flex flex-col justify-end">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={handleAutoDetectTimezone}
+                            className="w-full text-xs font-bold py-2.5 rounded-xl border border-zinc-300 bg-white hover:bg-zinc-100 text-zinc-800 flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                          >
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            Auto-Detect Local Time
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl p-3 border border-zinc-200/80 flex items-center justify-between text-xs mt-2">
+                      <span className="text-zinc-500">Active Venue Time Preview:</span>
+                      <strong className="font-mono text-zinc-900">
+                        {renderFormattedDate(new Date(), 'LOCAL', ' | ', venueTimezone)}
+                      </strong>
+                    </div>
+                  </div>
+
                   {/* Card 1: Navigation Bar */}
                   <div className="rounded-2xl border border-zinc-200/90 bg-zinc-50/50 p-5 sm:p-6 space-y-4 flex flex-col justify-between">
                     <div className="space-y-3">
@@ -1813,8 +1900,8 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                           className="w-full px-3.5 py-2.5 bg-white border border-zinc-300 rounded-xl text-xs sm:text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs"
                         >
                           <option value="ENGLISH">1. Only English Date (AD)</option>
-                          <option value="NEPALI">2. Only Nepali Date (BS)</option>
-                          <option value="BOTH">3. Both Nepali & English Date (AD & BS)</option>
+                          <option value="LOCAL">2. Local Timezone (AD)</option>
+                          <option value="BOTH">3. Both English & Local Timezone (AD)</option>
                         </select>
                       </div>
                     </div>
@@ -1824,7 +1911,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                       <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
                         Live Navigation Widget Preview
                       </span>
-                      <DateTimeDisplay mode={navDateFormat} />
+                      <DateTimeDisplay mode={navDateFormat} timezone={venueTimezone} />
                     </div>
                   </div>
 
@@ -1854,8 +1941,8 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                           className="w-full px-3.5 py-2.5 bg-white border border-zinc-300 rounded-xl text-xs sm:text-sm font-semibold text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer shadow-2xs"
                         >
                           <option value="ENGLISH">1. Only English Date (AD)</option>
-                          <option value="NEPALI">2. Only Nepali Date (BS)</option>
-                          <option value="BOTH">3. Both Nepali & English Date (AD & BS)</option>
+                          <option value="LOCAL">2. Local Timezone (AD)</option>
+                          <option value="BOTH">3. Both English & Local Timezone (AD)</option>
                         </select>
                       </div>
                     </div>
@@ -1866,7 +1953,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                         Live Receipt / KOT Timestamp Preview
                       </span>
                       <div className="font-mono text-xs text-zinc-800 bg-zinc-50 px-3 py-2 rounded-lg border border-zinc-200">
-                        {renderFormattedDate(new Date(), billingDateFormat)}
+                        {renderFormattedDate(new Date(), billingDateFormat, ' | ', venueTimezone)}
                       </div>
                     </div>
                   </div>

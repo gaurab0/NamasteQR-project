@@ -19,6 +19,7 @@ import {
   Tag,
   AlertCircle,
   CheckCircle2,
+  Wallet,
   X
 } from 'lucide-react';
 import { SaleRecord, SalesTimeFilter, GLAccountLink, BusinessTaxConfig, CompRecord } from '../../types/rbac';
@@ -130,7 +131,12 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
       }
 
       if (paymentFilter !== 'ALL') {
-        if (sale.payment_method !== paymentFilter) return false;
+        const rawMethod = sale.payment_method || 'CASH';
+        if (paymentFilter === 'QR_CODE') {
+          if (rawMethod !== 'QR_CODE' && rawMethod !== 'UPI_QR') return false;
+        } else if (rawMethod !== paymentFilter) {
+          return false;
+        }
       }
 
       if (searchQuery.trim()) {
@@ -161,7 +167,7 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
       CASH: { count: 0, total: 0 },
       CARD: { count: 0, total: 0 },
       QR_CODE: { count: 0, total: 0 },
-      ONLINE: { count: 0, total: 0 },
+      DEDUCT_FROM_DEPOSIT: { count: 0, total: 0 },
       CREDIT: { count: 0, total: 0 },
     };
 
@@ -172,7 +178,10 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
       totalTaxCollected += Number(s.total_tax) || 0;
       totalServiceCharge += Number(s.service_charge) || 0;
 
-      const method = s.payment_method || 'CASH';
+      const rawMethod = s.payment_method || 'CASH';
+      const method = (rawMethod === 'UPI_QR' || rawMethod === 'QR_CODE' || (rawMethod as string) === 'ONLINE')
+        ? 'QR_CODE'
+        : rawMethod;
       if (!paymentCounts[method]) {
         paymentCounts[method] = { count: 0, total: 0 };
       }
@@ -625,7 +634,7 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
           </span>
           <span className="text-[11px] text-zinc-400">Calculated over current filter</span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 text-center">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
           <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-200/60">
             <span className="text-[10px] font-bold text-zinc-500 uppercase">Cash</span>
             <p className="text-sm font-black text-zinc-800 mt-0.5">
@@ -647,7 +656,7 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
           </div>
 
           <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-200/60">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">Fonepay / QR</span>
+            <span className="text-[10px] font-bold text-zinc-500 uppercase">QR</span>
             <p className="text-sm font-black text-zinc-800 mt-0.5">
               {currencySymbol} {(metrics.paymentCounts['QR_CODE']?.total || 0).toLocaleString()}
             </p>
@@ -656,13 +665,13 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
             </span>
           </div>
 
-          <div className="p-3 rounded-xl bg-zinc-50 border border-zinc-200/60">
-            <span className="text-[10px] font-bold text-zinc-500 uppercase">Online Pay</span>
+          <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/60">
+            <span className="text-[10px] font-bold text-emerald-700 uppercase">Deduct from Deposit</span>
             <p className="text-sm font-black text-zinc-800 mt-0.5">
-              {currencySymbol} {(metrics.paymentCounts['ONLINE']?.total || 0).toLocaleString()}
+              {currencySymbol} {(metrics.paymentCounts['DEDUCT_FROM_DEPOSIT']?.total || 0).toLocaleString()}
             </p>
             <span className="text-[10px] text-zinc-400">
-              {metrics.paymentCounts['ONLINE']?.count || 0} bills
+              {metrics.paymentCounts['DEDUCT_FROM_DEPOSIT']?.count || 0} bills
             </span>
           </div>
 
@@ -705,8 +714,8 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
               <option value="ALL">All Payment Types</option>
               <option value="CASH">Cash Only</option>
               <option value="CARD">Card / Machine</option>
-              <option value="QR_CODE">QR Code (Fonepay)</option>
-              <option value="ONLINE">Online Portal</option>
+              <option value="QR_CODE">QR Code</option>
+              <option value="DEDUCT_FROM_DEPOSIT">Deduct from Deposit</option>
               <option value="CREDIT">Credit</option>
             </select>
             <span className="text-xs font-bold text-zinc-400 px-1">
@@ -844,9 +853,16 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-100 text-zinc-800 border border-zinc-200">
                           {sale.payment_method === 'CASH' && <DollarSign className="w-3 h-3 text-emerald-600" />}
                           {sale.payment_method === 'CARD' && <CreditCard className="w-3 h-3 text-blue-600" />}
-                          {sale.payment_method === 'QR_CODE' && <QrCode className="w-3 h-3 text-purple-600" />}
+                          {(sale.payment_method === 'QR_CODE' || sale.payment_method === 'UPI_QR') && <QrCode className="w-3 h-3 text-purple-600" />}
+                          {sale.payment_method === 'DEDUCT_FROM_DEPOSIT' && <Wallet className="w-3 h-3 text-emerald-600" />}
                           {sale.payment_method === 'CREDIT' && <BookOpen className="w-3 h-3 text-rose-600" />}
-                          {sale.payment_method === 'CREDIT' && sale.credit_gl_account_name ? `Credit — ${sale.credit_gl_account_name}` : sale.payment_method}
+                          {sale.payment_method === 'CREDIT' && sale.credit_gl_account_name
+                            ? `Credit — ${sale.credit_gl_account_name}`
+                            : sale.payment_method === 'DEDUCT_FROM_DEPOSIT'
+                            ? 'Deduct from Deposit'
+                            : (sale.payment_method === 'UPI_QR' || sale.payment_method === 'QR_CODE')
+                            ? 'QR'
+                            : sale.payment_method}
                         </span>
                       </td>
 

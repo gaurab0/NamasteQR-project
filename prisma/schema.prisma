@@ -347,6 +347,9 @@ model TaxConfig {
   packaging_fee            Decimal  @default(10.00) @db.Decimal(12, 2)
   rates                    Json // Array of TaxRateItem: { id, name, rate_percent, enabled, is_inclusive }
   invoice_prefix           String   @default("INV-")
+  order_prefix             String?  @default("ORD-")
+  order_label              String?  @default("Order No:")
+  invoice_label            String?  @default("Invoice No:")
   receipt_footer_note      String?
   pan_vat_number           String?
   pan_vat_prefix           String?

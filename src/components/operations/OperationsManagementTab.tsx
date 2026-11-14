@@ -736,7 +736,7 @@ export const OperationsManagementTab: React.FC<OperationsManagementTabProps> = (
 
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
                       <p className="text-[11px] text-slate-500">
-                        Cashier drawer floats are now managed individually by each cashier directly in the <strong className="text-slate-700">Finance & POS</strong> tab.
+                        Cashier drawer floats are now managed individually by each cashier directly in the <strong className="text-slate-700">Billing & POS</strong> tab.
                       </p>
                       <button
                         type="button"
