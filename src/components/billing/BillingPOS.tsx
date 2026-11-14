@@ -4417,7 +4417,7 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Date:</span>
-              <span>{renderFormattedDate(order.created_at || new Date(), business?.date_format_billing || 'ENGLISH', ' | ', business?.operations_config?.timezone)}</span>
+              <span>{renderFormattedDate(order.created_at || new Date(), business?.date_format_billing || 'ENGLISH')}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Status:</span>

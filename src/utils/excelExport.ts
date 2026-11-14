@@ -175,6 +175,73 @@ export function buildSalesWorkbookData(
     creditAccountsMap[accId].sales.push(s);
   }
 
+  // Calculate totals and group deposit sales by customer / GL account
+  let totalDepositGrand = 0;
+  const depositAccountsMap: {
+    [key: string]: { id: string; number: string; name: string; total: number; count: number; sales: any[] };
+  } = {};
+
+  const depositMatch = (glAccounts || []).find(
+    (a) => (a.mapping_key || '').toUpperCase() === 'DEPOSIT_CLEARING' || a.account_number === '2130'
+  );
+  const defaultDepositId = depositMatch?.id || '2130';
+  const defaultDepositNumber = depositMatch?.account_number || '2130';
+  const defaultDepositName = depositMatch?.account_name || 'Customer Advance & Deposit Clearing';
+
+  depositAccountsMap[defaultDepositId] = {
+    id: defaultDepositId,
+    number: defaultDepositNumber,
+    name: defaultDepositName,
+    total: 0,
+    count: 0,
+    sales: [],
+  };
+
+  for (const s of depositSales) {
+    const tot = Number(s.total_amount) || 0;
+    totalDepositGrand = Number((totalDepositGrand + tot).toFixed(2));
+
+    const accId = s.credit_gl_account_id;
+    const accNumber = s.credit_gl_account_number;
+    const accName = s.credit_gl_account_name;
+
+    if (accId) {
+      if (!depositAccountsMap[accId]) {
+        const found = (glAccounts || []).find((a) => a.id === accId);
+        depositAccountsMap[accId] = {
+          id: accId,
+          number: found?.account_number || accNumber || accId,
+          name: found?.account_name || accName || `Account ${accNumber || accId}`,
+          total: 0,
+          count: 0,
+          sales: [],
+        };
+      }
+      depositAccountsMap[accId].total = Number((depositAccountsMap[accId].total + tot).toFixed(2));
+      depositAccountsMap[accId].count += 1;
+      depositAccountsMap[accId].sales.push(s);
+    } else if (accNumber && accNumber !== defaultDepositNumber) {
+      if (!depositAccountsMap[accNumber]) {
+        const found = (glAccounts || []).find((a) => a.account_number === accNumber);
+        depositAccountsMap[accNumber] = {
+          id: found?.id || accNumber,
+          number: accNumber,
+          name: found?.account_name || accName || `Account ${accNumber}`,
+          total: 0,
+          count: 0,
+          sales: [],
+        };
+      }
+      depositAccountsMap[accNumber].total = Number((depositAccountsMap[accNumber].total + tot).toFixed(2));
+      depositAccountsMap[accNumber].count += 1;
+      depositAccountsMap[accNumber].sales.push(s);
+    } else {
+      depositAccountsMap[defaultDepositId].total = Number((depositAccountsMap[defaultDepositId].total + tot).toFixed(2));
+      depositAccountsMap[defaultDepositId].count += 1;
+      depositAccountsMap[defaultDepositId].sales.push(s);
+    }
+  }
+
   // -------------------------------------------------------------
   // 1. SHEET 1: Sales Register (NO CREDIT SALES)
   // -------------------------------------------------------------
@@ -695,89 +762,106 @@ export function buildSalesWorkbookData(
   const creditColWidths = [10, 18, 14, 22, 22, 28, 24, 28, 16, 14, 24, 20, 16, 45, 14, 14, 14, 15, 18, 14, 20, 25];
 
   // -------------------------------------------------------------
-  // 6. SHEET 6: Deduct from Deposit Sales (Tracked Separately)
+  // 6. SHEET 6: Deduct from Deposit Sales (Grouped by Account Holder)
   // -------------------------------------------------------------
   const depositHeaders = [
-    'S.N.', 'Invoice Number', 'Order Number', 'Date & Time', 'Date (YYYY-MM-DD)',
-    'GL Account No.', 'GL Account Name', 'Table # / Room', 'Customer Name', 'Customer Phone',
-    'Customer PAN', 'Items Summary', 'Total Items', 'Currency',
-    'Subtotal', 'Total Tax', 'Service Charge', 'Discount Amount', 'Grand Total (Deducted)',
+    'S.N.', 'Invoice Number', 'Order Number', 'Date & Time', 'Customer GL Account No.', 'Customer GL Account Name',
+    'Customer Name', 'Customer Address', 'Customer Phone', 'Extension No.', 'Office Name', 'Designation',
+    'Table #', 'Items Ordered', 'Subtotal', 'Total Tax', 'Service Charge', 'Discount Amount', 'Grand Total (Deducted)',
     'Payment Status', 'Cashier / Billed By', 'Notes'
   ];
+  const depositCols = depositHeaders.length;
+  const padDepositRow = (first: string): (string | number)[] => [first, ...Array(depositCols - 1).fill('')];
 
-  let totalDepositGrand = 0;
-  const depositRows: (string | number)[][] = depositSales.map((sale, idx) => {
-    let formattedDate = sale.date_string || '';
-    if (sale.created_at) {
-      try {
-        formattedDate = new Date(sale.created_at).toLocaleString('en-US', {
-          year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: true,
-        });
-      } catch { formattedDate = String(sale.created_at); }
+  const depositRows: (string | number)[][] = [];
+
+  for (const acc of Object.values(depositAccountsMap)) {
+    if (acc.sales.length > 0) {
+      // Summary block for customer / account holder
+      depositRows.push(padDepositRow(`Customer GL Account: ${acc.number} - ${acc.name}`));
+      depositRows.push(padDepositRow(`Total Deducted: ${currency} ${acc.total.toFixed(2)} (${acc.count} Deductions)`));
+      const accMeta = (glAccounts || []).find((g) => g.id === acc.id || g.account_number === acc.number) || ({} as any);
+
+      let accountSubtotal = 0;
+      let sn = 1;
+
+      acc.sales.forEach((sale) => {
+        let formattedDate = sale.date_string || '';
+        if (sale.created_at) {
+          try {
+            formattedDate = new Date(sale.created_at).toLocaleString('en-US', {
+              year: 'numeric',
+              month: 'short',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            });
+          } catch {
+            formattedDate = String(sale.created_at);
+          }
+        }
+
+        const itemsSummary = Array.isArray(sale.items)
+          ? sale.items
+              .map((i: any) => {
+                const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
+                const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
+                if (billedQty <= 0) return null;
+                return `${i.name || i.item_name || 'Item'} (x${billedQty})`;
+              })
+              .filter(Boolean)
+              .join('; ')
+          : '';
+
+        accountSubtotal += Number(sale.total_amount) || 0;
+
+        depositRows.push([
+          sn++,
+          sale.invoice_number || sale.id,
+          sale.order_number || '-',
+          formattedDate,
+          acc.number,
+          acc.name,
+          sale.customer_name || accMeta.customer_name || 'Registered Customer',
+          accMeta.customer_address || '',
+          sale.customer_phone || accMeta.customer_phone || '-',
+          accMeta.customer_extension || '',
+          accMeta.customer_office_name || '',
+          accMeta.customer_designation || '',
+          sale.table_number || 'Counter / N/A',
+          itemsSummary,
+          Number((sale.subtotal || 0).toFixed(2)),
+          Number((sale.total_tax || 0).toFixed(2)),
+          Number((sale.service_charge || 0).toFixed(2)),
+          Number((sale.discount_amount || 0).toFixed(2)),
+          Number((sale.total_amount || 0).toFixed(2)),
+          sale.payment_status || 'PAID',
+          sale.cashier_name || 'Staff',
+          sale.notes || '',
+        ]);
+      });
+
+      {
+        const r = padDepositRow('');
+        r[depositCols - 9] = 'ACCOUNT SUBTOTAL';
+        r[depositCols - 4] = Number(accountSubtotal.toFixed(2));
+        depositRows.push(r);
+      }
+      depositRows.push(padDepositRow('')); // blank spacer row
     }
-
-    const itemsSummary = Array.isArray(sale.items)
-      ? sale.items
-          .map((i: any) => {
-            const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
-            const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
-            if (billedQty <= 0) return null;
-            return `${i.name || i.item_name || 'Item'} (x${billedQty})`;
-          })
-          .filter(Boolean)
-          .join('; ')
-      : '';
-    const totalItemsCount = Array.isArray(sale.items)
-      ? sale.items.reduce((sum: number, i: any) => {
-          const compQty = Math.max(0, Math.min(Number(i.quantity) || 1, Number(i.comp_qty) || 0));
-          const billedQty = i.is_comp ? 0 : Math.max(0, (Number(i.quantity) || 1) - compQty);
-          return sum + billedQty;
-        }, 0)
-      : 0;
-
-    const tot = Number(sale.total_amount) || 0;
-    totalDepositGrand += tot;
-
-    const match = (glAccounts || []).find((a) => (a.mapping_key || '').toUpperCase() === 'DEPOSIT_CLEARING' || a.account_number === '2130');
-    const glAccNumber = sale.credit_gl_account_number || match?.account_number || '2130';
-    const glAccName = sale.credit_gl_account_name || match?.account_name || 'Customer Advance & Deposit Clearing';
-
-    return [
-      idx + 1,
-      sale.invoice_number || sale.id,
-      sale.order_number || '-',
-      formattedDate,
-      sale.date_string || (sale.created_at ? new Date(sale.created_at).toISOString().split('T')[0] : ''),
-      glAccNumber,
-      glAccName,
-      sale.table_number || 'Counter / N/A',
-      sale.customer_name || 'Registered Customer',
-      sale.customer_phone || '-',
-      sale.customer_pan || '-',
-      itemsSummary,
-      totalItemsCount,
-      sale.currency || currency,
-      Number((sale.subtotal || 0).toFixed(2)),
-      Number((sale.total_tax || 0).toFixed(2)),
-      Number((sale.service_charge || 0).toFixed(2)),
-      Number((sale.discount_amount || 0).toFixed(2)),
-      Number(tot.toFixed(2)),
-      sale.payment_status || 'PAID',
-      sale.cashier_name || 'Staff',
-      sale.notes || '',
-    ];
-  });
-
-  if (depositRows.length === 0) {
-    depositRows.push(['No deduct-from-deposit transactions recorded in this period', ...Array(depositHeaders.length - 1).fill('')]);
-  } else {
-    const summaryRow = Array(depositHeaders.length).fill('');
-    summaryRow[depositHeaders.length - 4] = 'TOTAL DEPOSITS DEDUCTED';
-    summaryRow[depositHeaders.length - 3] = Number(totalDepositGrand.toFixed(2));
-    depositRows.push(summaryRow);
   }
 
-  const depositColWidths = [6, 18, 14, 22, 16, 16, 32, 16, 22, 16, 16, 45, 12, 10, 14, 12, 14, 15, 18, 14, 20, 25];
+  if (depositRows.length === 0) {
+    depositRows.push(padDepositRow('No deduct-from-deposit transactions recorded in this period'));
+  } else {
+    const g = padDepositRow('');
+    g[depositCols - 9] = 'GRAND TOTAL DEDUCTED';
+    g[depositCols - 4] = Number(totalDepositGrand.toFixed(2));
+    depositRows.push(g);
+  }
+
+  const depositColWidths = [10, 18, 14, 22, 22, 28, 24, 28, 16, 14, 24, 20, 16, 45, 14, 14, 14, 15, 18, 14, 20, 25];
 
   const sheets: ExcelSheetData[] = [
     { sheetName: 'Sales Register', headers: salesHeaders, rows: salesRows, colWidths: salesColWidths },

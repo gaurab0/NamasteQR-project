@@ -302,7 +302,7 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
       )}
 
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl border border-zinc-200 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 bg-white p-3.5 sm:p-6 rounded-xl sm:rounded-2xl border border-zinc-200 shadow-xs">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <h1 id="page-main-heading" className="text-xl sm:text-2xl font-extrabold text-zinc-900 tracking-tight">
@@ -334,16 +334,16 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5">
           <button
             id="btn-refresh-menu"
             type="button"
             onClick={() => loadData(true)}
             disabled={refreshing}
-            className="p-2.5 bg-zinc-50 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 rounded-xl transition cursor-pointer"
+            className="p-2 sm:p-2.5 bg-zinc-50 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 rounded-lg sm:rounded-xl transition cursor-pointer shrink-0"
             title="Refresh menu items"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
 
           {/* Customer Preview button */}
@@ -351,19 +351,22 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
             id="btn-preview-customer-menu"
             type="button"
             onClick={() => window.open('/menu', '_blank')}
-            className="px-4 py-2.5 bg-white text-zinc-900 border border-zinc-300 hover:bg-zinc-50 rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer"
+            className="px-2.5 py-1.5 sm:px-4 sm:py-2.5 bg-white text-zinc-900 border border-zinc-300 hover:bg-zinc-50 rounded-lg sm:rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 sm:gap-2 cursor-pointer"
           >
-            <Eye className="w-4 h-4 text-indigo-600" />
-            <span>Preview Menu</span>
+            <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-600" />
+            <span>
+              <span className="hidden sm:inline">Preview Menu</span>
+              <span className="sm:hidden">Preview</span>
+            </span>
           </button>
 
           {canEditTheme && (
             <button
               type="button"
               onClick={() => setIsThemeCustomizerOpen(true)}
-              className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              className="px-2.5 py-1.5 sm:px-4 sm:py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg sm:rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 sm:gap-2 cursor-pointer"
             >
-              <Paintbrush className="w-4 h-4" />
+              <Paintbrush className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span>Theme</span>
             </button>
           )}
@@ -373,11 +376,14 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
               id="btn-bulk-import-excel"
               type="button"
               onClick={() => setIsBulkImportOpen(true)}
-              className="px-4 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold transition shadow-2xs flex items-center gap-2 cursor-pointer"
+              className="px-2.5 py-1.5 sm:px-4 sm:py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg sm:rounded-xl text-xs font-bold transition shadow-2xs flex items-center gap-1.5 sm:gap-2 cursor-pointer"
               title="Bulk import dishes from Excel or CSV"
             >
-              <FileSpreadsheet className="w-4 h-4 text-purple-600" />
-              <span>Import Excel / CSV</span>
+              <FileSpreadsheet className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600" />
+              <span>
+                <span className="hidden sm:inline">Import Excel / CSV</span>
+                <span className="sm:hidden">Import</span>
+              </span>
             </button>
           )}
 
@@ -386,10 +392,13 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
               id="btn-add-menu-item-primary"
               type="button"
               onClick={handleOpenAdd}
-              className="px-4 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-2 cursor-pointer"
+              className="px-2.5 py-1.5 sm:px-4 sm:py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg sm:rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5 sm:gap-2 cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              <span>+ Add Menu Item</span>
+              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              <span>
+                <span className="hidden sm:inline">+ Add Menu Item</span>
+                <span className="sm:hidden">+ Add</span>
+              </span>
             </button>
           )}
 
@@ -398,9 +407,12 @@ export const MenuManagementPage: React.FC<MenuManagementPageProps> = ({
               id="btn-header-sign-in-role"
               type="button"
               onClick={onRequestRoleSignIn}
-              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-2 cursor-pointer"
+              className="px-2.5 py-1.5 sm:px-4 sm:py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg sm:rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 sm:gap-2 cursor-pointer"
             >
-              <span>Staff Sign-In</span>
+              <span>
+                <span className="hidden sm:inline">Staff Sign-In</span>
+                <span className="sm:hidden">Sign In</span>
+              </span>
             </button>
           )}
         </div>

@@ -156,7 +156,7 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Date:</span>
-              <span>{renderFormattedDate(sale.created_at, business?.date_format_billing || 'ENGLISH', ' | ', business?.operations_config?.timezone)}</span>
+              <span>{renderFormattedDate(sale.created_at, business?.date_format_billing || 'ENGLISH')}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Customer:</span>

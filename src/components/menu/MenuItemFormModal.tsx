@@ -407,21 +407,21 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   return (
     <div
       id="menu-item-form-modal-overlay"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-1 sm:p-4 overflow-y-auto"
       onClick={onClose}
     >
       <div
         id="menu-item-form-modal-container"
-        className="relative bg-white rounded-2xl shadow-2xl border border-zinc-200 w-full max-w-5xl overflow-hidden my-auto max-h-[92vh] flex flex-col"
+        className="relative bg-white rounded-xl sm:rounded-2xl shadow-2xl border border-zinc-200 w-full max-w-5xl overflow-hidden my-auto max-h-[96vh] sm:max-h-[92vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-zinc-200 flex items-center justify-between bg-zinc-50/70">
+        <div className="px-3.5 py-3 sm:px-6 sm:py-4 border-b border-zinc-200 flex items-center justify-between bg-zinc-50/70">
           <div>
-            <h2 id="modal-title" className="text-lg font-bold text-zinc-900">
+            <h2 id="modal-title" className="text-base sm:text-lg font-bold text-zinc-900">
               {itemToEdit ? 'Edit Menu Item' : 'Add New Menu Item'}
             </h2>
-            <p className="text-xs text-zinc-500">
+            <p className="text-[11px] sm:text-xs text-zinc-500">
               {itemToEdit
                 ? 'Update dish details, pricing, status, and culinary image'
                 : 'Create a new dish for your restaurant menu with live preview'}
@@ -431,7 +431,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
             id="btn-close-modal"
             type="button"
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 rounded-xl transition cursor-pointer"
+            className="p-1.5 sm:p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 rounded-xl transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -440,7 +440,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
         {/* Modal Body: 2 Columns (Form + Live Customer Preview) */}
         <div className="flex-1 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-zinc-200">
           {/* Left Column: Form Controls (7 cols) */}
-          <div className="lg:col-span-7 p-6 space-y-5">
+          <div className="lg:col-span-7 p-2.5 sm:p-6 space-y-3.5 sm:space-y-5">
             {formError && (
               <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-start gap-2">
                 <span>⚠️</span>
@@ -500,7 +500,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
               </div>
 
               {/* Subcategories & Multi-Tier Pricing Section */}
-              <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-3.5 space-y-3">
+              <div className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-2 sm:p-3.5 space-y-2.5 sm:space-y-3 w-full">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <input
@@ -527,24 +527,24 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                 </div>
 
                 {hasVariants && (
-                  <div className="space-y-3 pt-2 border-t border-amber-200/60">
+                  <div className="space-y-2.5 sm:space-y-3 pt-2 border-t border-amber-200/60">
                     {/* Group Title Section */}
-                    <div className="bg-white/80 p-2.5 rounded-xl border border-amber-200/90 space-y-2">
+                    <div className="bg-white/80 p-2 sm:p-2.5 rounded-lg sm:rounded-xl border border-amber-200/90 space-y-1.5 sm:space-y-2">
                       <div className="flex items-center justify-between">
                         <label className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
                           Subcategory / Option Group Title
                         </label>
-                        <span className="text-[10px] text-zinc-500">Customer sees this as selector heading</span>
+                        <span className="text-[10px] text-zinc-500 hidden sm:inline">Customer sees this as selector heading</span>
                       </div>
                       <input
                         type="text"
                         value={variantGroupName}
                         onChange={(e) => setVariantGroupName(e.target.value)}
                         placeholder="e.g. Portion / Size, Bar Measure, Preparation Style..."
-                        className="w-full text-xs px-3 py-1.5 border border-zinc-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-semibold"
+                        className="w-full text-xs px-2.5 sm:px-3 py-1.5 border border-zinc-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 font-semibold"
                       />
                       {/* Quick group title suggestions */}
-                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap pt-0.5">
                         <span className="text-[10px] text-zinc-400 font-medium">Suggestions:</span>
                         {[
                           'Portion / Size',
@@ -555,7 +555,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                             key={title}
                             type="button"
                             onClick={() => setVariantGroupName(title)}
-                            className={`text-[10px] px-2 py-0.5 rounded-md font-medium border transition cursor-pointer ${
+                            className={`text-[10px] px-1.5 sm:px-2 py-0.5 rounded-md font-medium border transition cursor-pointer ${
                               variantGroupName === title
                                 ? 'bg-amber-500 text-zinc-950 border-amber-500 font-bold'
                                 : 'bg-white text-zinc-600 border-zinc-200 hover:border-amber-300'
@@ -568,32 +568,32 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                     </div>
 
                     {/* Quick Presets: Only Sizes, Bar Measures, and Preparation Styles */}
-                    <div className="space-y-1.5">
+                    <div className="space-y-1 sm:space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] text-zinc-600 font-bold">1-Click Option Presets:</span>
-                        <span className="text-[10px] text-zinc-400">Quick template presets</span>
+                        <span className="text-[10px] text-zinc-400 hidden sm:inline">Quick template presets</span>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                         <button
                           type="button"
                           onClick={() => applyVariantPreset('sizes')}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-950 hover:bg-amber-100 text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                          className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-white border border-amber-300 text-amber-950 hover:bg-amber-100 text-[11px] sm:text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1 sm:gap-1.5"
                         >
-                          📏 <span>Sizes (Small / Med / Large)</span>
+                          📏 <span><span className="sm:hidden">Sizes (S/M/L)</span><span className="hidden sm:inline">Sizes (Small / Med / Large)</span></span>
                         </button>
                         <button
                           type="button"
                           onClick={() => applyVariantPreset('bar')}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-950 hover:bg-amber-100 text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                          className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-white border border-amber-300 text-amber-950 hover:bg-amber-100 text-[11px] sm:text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1 sm:gap-1.5"
                         >
-                          🍸 <span>Bar Measures (30ml / 60ml / Bottle)</span>
+                          🍸 <span><span className="sm:hidden">Bar (30/60ml/Btl)</span><span className="hidden sm:inline">Bar Measures (30ml / 60ml / Bottle)</span></span>
                         </button>
                         <button
                           type="button"
                           onClick={() => applyVariantPreset('styles')}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-950 hover:bg-amber-100 text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                          className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg bg-white border border-amber-300 text-amber-950 hover:bg-amber-100 text-[11px] sm:text-xs font-semibold transition cursor-pointer shadow-2xs flex items-center gap-1 sm:gap-1.5"
                         >
-                          🔥 <span>Preparation Styles (Steamed / Fried / Kothey)</span>
+                          🔥 <span><span className="sm:hidden">Styles (Steam/Fry)</span><span className="hidden sm:inline">Preparation Styles (Steamed / Fried / Kothey)</span></span>
                         </button>
                       </div>
                     </div>
@@ -601,103 +601,110 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                     {/* Variant Rows */}
                     <div className="space-y-2">
                       {variants.map((v, idx) => (
-                        <div key={v.id || idx} className="flex flex-col gap-2 bg-white p-2 rounded-xl border border-zinc-200 shadow-2xs">
-                          <div className="flex items-center gap-2">
-                            {/* Photo Thumbnail */}
-                            <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0 bg-zinc-50 border border-zinc-200 flex items-center justify-center group">
-                              {v.image_url ? (
-                                <>
-                                  <img src={v.image_url} alt="Variant" className="w-full h-full object-cover" />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateVariant(idx, 'image_url', '')}
-                                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition cursor-pointer"
-                                    title="Remove image"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                                  </button>
-                                </>
-                              ) : (
-                                <label className="w-full h-full flex items-center justify-center cursor-pointer text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition">
-                                  <Upload className="w-3.5 h-3.5" />
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={(e) => handleVariantImageUpload(idx, e)}
-                                    className="hidden"
-                                  />
-                                </label>
-                              )}
-                            </div>
-                            
-                            <div className="flex-1 flex gap-2">
+                        <div key={v.id || idx} className="flex flex-col gap-1.5 sm:gap-2 bg-white p-2 rounded-xl border border-zinc-200 shadow-2xs">
+                          {/* Top Controls: Line 1 (Image + Name on mobile) & Line 2 (Dietary + Price + Actions) */}
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                            {/* Line 1 on mobile: Photo Thumbnail + Option Name Input */}
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              {/* Photo Thumbnail */}
+                              <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg overflow-hidden shrink-0 bg-zinc-50 border border-zinc-200 flex items-center justify-center group">
+                                {v.image_url ? (
+                                  <>
+                                    <img src={v.image_url} alt="Variant" className="w-full h-full object-cover" />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateVariant(idx, 'image_url', '')}
+                                      className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition cursor-pointer"
+                                      title="Remove image"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <label className="w-full h-full flex items-center justify-center cursor-pointer text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition">
+                                    <Upload className="w-3.5 h-3.5" />
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      onChange={(e) => handleVariantImageUpload(idx, e)}
+                                      className="hidden"
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                              
+                              {/* Option Name */}
                               <input
                                 type="text"
                                 value={v.name}
                                 onChange={(e) => handleUpdateVariant(idx, 'name', e.target.value)}
-                                placeholder="Option name (e.g. Cheese Pizza)..."
-                                className="w-full text-xs px-2.5 py-1.5 border border-zinc-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+                                placeholder="Option name (e.g. Regular, Large)..."
+                                className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
                               />
+                            </div>
+                            
+                            {/* Line 2 on mobile (inline on desktop): Dietary + Price + Actions */}
+                            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                               <select
                                 value={v.food_type || foodType}
                                 onChange={(e) => handleUpdateVariant(idx, 'food_type', e.target.value)}
-                                className="text-xs px-2 border border-zinc-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                                className="text-xs px-2 py-1.5 border border-zinc-300 rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer shrink-0"
                               >
                                 <option value="veg">🟢 Veg</option>
                                 <option value="non-veg">🔴 Non-Veg</option>
                                 <option value="egg">🥚 Egg</option>
                                 <option value="none">⚪ None</option>
                               </select>
+                              
+                              <div className="flex-1 sm:w-24 relative min-w-[80px]">
+                                <span className="absolute left-2.5 top-1.5 text-xs text-zinc-400 font-bold font-mono">
+                                  {currency}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={v.price}
+                                  onFocus={(e) => {
+                                    const t = e.currentTarget;
+                                    setTimeout(() => t.select(), 0);
+                                  }}
+                                  onChange={(e) => {
+                                    const clean = e.target.value.replace(/^0+(?=\d)/, '');
+                                    handleUpdateVariant(idx, 'price', clean);
+                                  }}
+                                  placeholder="Price"
+                                  className="w-full text-xs pl-7 pr-2 py-1.5 border border-zinc-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono font-bold"
+                                />
+                              </div>
+                              
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicateVariant(idx)}
+                                className="p-1.5 text-zinc-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition cursor-pointer shrink-0"
+                                title="Duplicate option"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveVariant(idx)}
+                                className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer shrink-0"
+                                title="Remove option"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
-                            
-                            <div className="w-24 relative">
-                              <span className="absolute left-2.5 top-1.5 text-xs text-zinc-400 font-bold font-mono">
-                                {currency}
-                              </span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={v.price}
-                                onFocus={(e) => {
-                                  const t = e.currentTarget;
-                                  setTimeout(() => t.select(), 0);
-                                }}
-                                onChange={(e) => {
-                                  const clean = e.target.value.replace(/^0+(?=\d)/, '');
-                                  handleUpdateVariant(idx, 'price', clean);
-                                }}
-                                placeholder="Price"
-                                className="w-full text-xs pl-7 pr-2 py-1.5 border border-zinc-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono font-bold"
-                              />
-                            </div>
-                            
-                            <button
-                              type="button"
-                              onClick={() => handleDuplicateVariant(idx)}
-                              className="p-1.5 text-zinc-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition cursor-pointer"
-                              title="Duplicate option"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveVariant(idx)}
-                              className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                              title="Remove option"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
                           </div>
                           
                           {/* Row 2: SKU / Item Code & Station Route */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-zinc-100">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 pt-1 border-t border-zinc-100">
                             <div>
                               <input
                                 type="text"
                                 value={v.erp_item_code || ''}
                                 onChange={(e) => handleUpdateVariant(idx, 'erp_item_code', e.target.value)}
-                                placeholder="Item Code / SKU (e.g. AB-12)"
+                                placeholder="SKU / Code"
                                 className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 rounded-lg bg-zinc-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono font-medium"
                               />
                             </div>
@@ -707,7 +714,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                                 onChange={(e) => handleUpdateVariant(idx, 'station', (e.target.value || undefined) as any)}
                                 className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 rounded-lg bg-zinc-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium cursor-pointer"
                               >
-                                <option value="">Route: Inherit Dish ({station})</option>
+                                <option value="">Route: Inherit ({station})</option>
                                 <option value="KITCHEN">👨‍🍳 Kitchen</option>
                                 <option value="BAR">🍸 Bar</option>
                                 <option value="BOTH">🔄 Both (Kitchen & Bar)</option>
@@ -721,7 +728,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                               type="text"
                               value={v.description || ''}
                               onChange={(e) => handleUpdateVariant(idx, 'description', e.target.value)}
-                              placeholder="Option description (e.g. Creamy mozzarella, cheddar blend, and herbs)..."
+                              placeholder="Option description (e.g. mozzarella, herbs)..."
                               className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 rounded-lg bg-zinc-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                             />
                             
@@ -1515,13 +1522,13 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-4 border-t border-zinc-200 bg-zinc-50 flex items-center justify-end gap-3">
+        <div className="px-3.5 py-2.5 sm:px-6 sm:py-4 border-t border-zinc-200 bg-zinc-50 flex items-center justify-end gap-2 sm:gap-3">
           <button
             id="btn-cancel-modal"
             type="button"
             onClick={onClose}
             disabled={loading}
-            className="px-4 py-2 text-xs font-semibold text-zinc-700 bg-white border border-zinc-300 rounded-xl hover:bg-zinc-100 transition cursor-pointer"
+            className="px-3.5 py-2 sm:px-4 sm:py-2 text-xs font-semibold text-zinc-700 bg-white border border-zinc-300 rounded-xl hover:bg-zinc-100 transition cursor-pointer"
           >
             Cancel
           </button>
@@ -1530,7 +1537,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
             type="button"
             onClick={handleSubmit}
             disabled={loading || !name.trim()}
-            className="px-5 py-2 text-xs font-bold text-white bg-zinc-900 rounded-xl hover:bg-zinc-800 shadow-sm transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            className="px-4 py-2 sm:px-5 sm:py-2 text-xs font-bold text-white bg-zinc-900 rounded-xl hover:bg-zinc-800 shadow-sm transition flex items-center gap-1.5 sm:gap-2 cursor-pointer disabled:opacity-50"
           >
             {loading ? (
               <>

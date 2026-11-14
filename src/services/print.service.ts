@@ -276,7 +276,6 @@ class PrintService {
     }
     const serverName = data.waiter_name || 'System';
     let billingFormat: any = 'ENGLISH';
-    let venueTimezone: string | undefined = undefined;
     let orderLabel = 'Order No:';
     let invoiceLabel = 'Invoice:';
 
@@ -293,33 +292,26 @@ class PrintService {
       if (data?.date_format_billing) {
         billingFormat = data.date_format_billing;
       }
-      if (data?.operations_config?.timezone) {
-        venueTimezone = data.operations_config.timezone;
-      } else {
-        const cached = localStorage.getItem('serveflow_cached_user');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed?.business?.date_format_billing && !data?.date_format_billing) {
-            billingFormat = parsed.business.date_format_billing;
+      const cached = localStorage.getItem('serveflow_cached_user');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.business?.date_format_billing && !data?.date_format_billing) {
+          billingFormat = parsed.business.date_format_billing;
+        }
+        if (parsed?.business?.tax_config) {
+          if (!taxCfg?.order_label && parsed.business.tax_config.order_label) {
+            orderLabel = parsed.business.tax_config.order_label.trim();
           }
-          if (parsed?.business?.operations_config?.timezone) {
-            venueTimezone = parsed.business.operations_config.timezone;
-          }
-          if (parsed?.business?.tax_config) {
-            if (!taxCfg?.order_label && parsed.business.tax_config.order_label) {
-              orderLabel = parsed.business.tax_config.order_label.trim();
-            }
-            if (!taxCfg?.invoice_label && parsed.business.tax_config.invoice_label) {
-              invoiceLabel = parsed.business.tax_config.invoice_label.trim();
-            } else if (!taxCfg?.invoice_label && parsed.business.tax_config.invoice_prefix) {
-              invoiceLabel = `${parsed.business.tax_config.invoice_prefix} Invoice:`;
-            }
+          if (!taxCfg?.invoice_label && parsed.business.tax_config.invoice_label) {
+            invoiceLabel = parsed.business.tax_config.invoice_label.trim();
+          } else if (!taxCfg?.invoice_label && parsed.business.tax_config.invoice_prefix) {
+            invoiceLabel = `${parsed.business.tax_config.invoice_prefix} Invoice:`;
           }
         }
       }
     } catch {}
 
-    const time = renderFormattedDate(data.created_at || new Date(), billingFormat, ' | ', venueTimezone);
+    const time = renderFormattedDate(data.created_at || new Date(), billingFormat, ' | ');
 
     let html = `
       <!DOCTYPE html>
