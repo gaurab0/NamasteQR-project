@@ -187,10 +187,25 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const handleSuggestVariantPhotos = async (index: number) => {
     const vName = (variants[index].name || '').trim();
     const parentName = name.trim();
-    // If variant already contains main keywords from parentName, don't duplicate (e.g. "Chicken Spagetti" under "Spaghetti")
-    const parentTokens = parentName.toLowerCase().split(/\s+/).filter(t => t.length > 2);
-    const hasOverlap = parentTokens.some(t => vName.toLowerCase().includes(t.slice(0, 4)));
-    const combinedQuery = hasOverlap || !parentName ? vName : `${parentName} ${vName}`.trim();
+    if (!vName && !parentName) return;
+
+    // Detect if parentName is a generic category or section (e.g. "Cold Drinks", "Beverages", "Starters")
+    const isGenericParent = /^(cold\s*drinks?|soft\s*drinks?|drinks?|beverages?|special\s*menu|chef\s*special|starters?|entrees?|extras?|desserts?|snacks?|main\s*course|bar|liquor|food)$/i.test(parentName);
+
+    // Detect if variant name is simply a size, portion, or metric (e.g. "Double", "Half", "30ml")
+    const isSizeOrPortion = /^(small|medium|large|regular|half|full|single|double|triple|peg|30ml|60ml|90ml|120ml|180ml|330ml|500ml|650ml|750ml|1000ml|1l|glass|cup|mug|shot|pint|can|bottle|piece|pc|pcs|\d+\s*(ml|l|pc|pcs|oz))$/i.test(vName);
+
+    let combinedQuery = '';
+    if (isSizeOrPortion && parentName) {
+      combinedQuery = parentName;
+    } else if (isGenericParent || !parentName) {
+      combinedQuery = vName;
+    } else {
+      // If variant already contains main keywords from parentName, don't duplicate (e.g. "Chicken Spaghetti" under "Spaghetti")
+      const parentTokens = parentName.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+      const hasOverlap = parentTokens.some(t => vName.toLowerCase().includes(t.slice(0, 4)));
+      combinedQuery = hasOverlap ? vName : `${parentName} ${vName}`.trim();
+    }
     if (!combinedQuery) return;
     
     setIsSearchingVariantImages(prev => ({ ...prev, [index]: true }));
@@ -762,7 +777,15 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                                         className="relative rounded-lg border border-amber-300 overflow-hidden group cursor-pointer"
                                       >
                                         <div className="aspect-video w-full bg-zinc-100">
-                                          <img src={sugg.url} alt={sugg.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                          <img
+                                            src={sugg.url}
+                                            alt={sugg.title}
+                                            className="w-full h-full object-cover"
+                                            referrerPolicy="no-referrer"
+                                            onError={(e) => {
+                                              (e.currentTarget.closest('button') as HTMLElement)?.style.setProperty('display', 'none');
+                                            }}
+                                          />
                                         </div>
                                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[9px] font-bold transition">
                                           Select
@@ -906,6 +929,9 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
                                   referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                                   loading="lazy"
+                                  onError={(e) => {
+                                    (e.currentTarget.closest('button') as HTMLElement)?.style.setProperty('display', 'none');
+                                  }}
                                 />
                                 {isCurrent && (
                                   <div className="absolute inset-0 bg-amber-950/40 flex items-center justify-center backdrop-blur-2xs">
