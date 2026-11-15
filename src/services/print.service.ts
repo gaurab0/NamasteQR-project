@@ -261,7 +261,8 @@ class PrintService {
     const isBar = taskType === 'BAR';
     const isBill = taskType === 'BILL';
 
-    const orderNumber = data.order_number || (data.id ? String(data.id).slice(0, 8).toUpperCase() : 'ORD');
+    const rawOrderNumber = data.order_number || (data.id ? String(data.id).slice(0, 8).toUpperCase() : 'ORD');
+    const orderNumber = isBill ? rawOrderNumber.replace(/\s*\(Round\s*\d+\)/gi, '').trim() : rawOrderNumber;
     let tableNo = data.table_number;
     if (!tableNo) {
       if (data.sale_type === 'TAKEAWAY') {

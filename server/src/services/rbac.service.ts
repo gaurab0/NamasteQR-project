@@ -4418,13 +4418,13 @@ export class RBACService {
     const prefix = taxConfig.invoice_prefix || 'INV-';
     const invoiceNumber = await this.getNextSequenceNumber(businessId, 'invoice', saleData.invoice_number, prefix);
 
-    let orderNumber = saleData.order_number;
+    let orderNumber = saleData.order_number ? saleData.order_number.replace(/\s*\(Round\s*\d+\)/gi, '').trim() : undefined;
     if (!orderNumber) {
       if (saleData.order_id) {
         try {
           const pOrder = await prisma.tableOrder.findUnique({ where: { id: saleData.order_id } });
           if (pOrder && pOrder.order_number) {
-            orderNumber = pOrder.order_number;
+            orderNumber = pOrder.order_number.replace(/\s*\(Round\s*\d+\)/gi, '').trim();
           }
         } catch (e) {}
 
@@ -4435,7 +4435,10 @@ export class RBACService {
       }
     } else {
       const orderPrefix = taxConfig?.order_prefix || 'ORD-0';
-      orderNumber = await this.getNextSequenceNumber(businessId, 'order', saleData.order_number, orderPrefix, taxConfig);
+      orderNumber = await this.getNextSequenceNumber(businessId, 'order', orderNumber, orderPrefix, taxConfig);
+    }
+    if (orderNumber) {
+      orderNumber = orderNumber.replace(/\s*\(Round\s*\d+\)/gi, '').trim();
     }
 
     const isManualPosSale = !options?.skipOrderCompletion && !saleData.order_id;

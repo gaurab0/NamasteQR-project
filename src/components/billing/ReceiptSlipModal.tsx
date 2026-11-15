@@ -147,7 +147,7 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
             <div className="flex justify-between">
               <span className="text-zinc-500">{taxConfig?.order_label || 'Order No:'}</span>
               <span className="font-bold text-zinc-900">
-                {sale.order_number || (sale.order_id ? (sale.order_id.replace(/^order-(pos-)?/, '').slice(0, 8).toUpperCase()) : (sale.id ? String(sale.id).slice(0, 8).toUpperCase() : 'ORD'))}
+                {String(sale.order_number || (sale.order_id ? (sale.order_id.replace(/^order-(pos-)?/, '').slice(0, 8).toUpperCase()) : (sale.id ? String(sale.id).slice(0, 8).toUpperCase() : 'ORD'))).replace(/\s*\(Round\s*\d+\)/gi, '').trim()}
               </span>
             </div>
             <div className="flex justify-between">

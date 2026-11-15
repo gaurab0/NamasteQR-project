@@ -552,6 +552,130 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       .slice(0, 3);
   }, [allWaiterOrders]);
 
+  // Group pending orders by table for unified table folios & distinct active table counts
+  const groupedTableOrders = useMemo(() => {
+    const map = new Map<string, TableOrder[]>();
+    for (const ord of pendingOrders) {
+      const key = ord.table_id || (ord.table_number ? `tbl_${String(ord.table_number).trim().toLowerCase()}` : ord.id);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(ord);
+    }
+
+    return Array.from(map.values()).map((orders) => {
+      const sorted = [...orders].sort((a, b) => {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        return timeA - timeB;
+      });
+
+      const primaryOrder = sorted[0];
+      const latestOrder = sorted[sorted.length - 1];
+      const table = tables.find((t) => t.id === primaryOrder.table_id);
+      const tableName = table ? `Table ${table.table_number}` : (primaryOrder.table_number ? (String(primaryOrder.table_number).toLowerCase().startsWith('table') ? primaryOrder.table_number : `Table ${primaryOrder.table_number}`) : 'Table');
+
+      let maxRound = 1;
+      for (const ord of sorted) {
+        const m = (ord.order_number || '').match(/\(Round\s*(\d+)\)/i);
+        if (m) {
+          const r = parseInt(m[1], 10);
+          if (r > maxRound) maxRound = r;
+        }
+        for (const it of ord.items || []) {
+          if ((it as any).round_number && Number((it as any).round_number) > maxRound) {
+            maxRound = Number((it as any).round_number);
+          }
+        }
+      }
+      if (sorted.length > 1 && maxRound === 1) {
+        maxRound = sorted.length;
+      }
+
+      const cleanRootOrderNumber = (primaryOrder.order_number || (primaryOrder.id ? primaryOrder.id.slice(0, 8).toUpperCase() : 'ORD'))
+        .replace(/\s*\(Round\s*\d+\)/gi, '')
+        .trim();
+
+      const allActiveItems = sorted.flatMap((ord) => {
+        const ordRoundMatch = (ord.order_number || '').match(/\(Round\s*(\d+)\)/i);
+        const ordRoundNum = ordRoundMatch ? parseInt(ordRoundMatch[1], 10) : 1;
+        return (ord.items || []).map((item, origIdx) => ({
+          ...item,
+          _orderId: ord.id,
+          _origIdx: origIdx,
+          round_number: (item as any).round_number || ordRoundNum,
+        }));
+      });
+
+      const activeUncancelled = allActiveItems.filter((i) => i.status !== 'CANCELLED');
+
+      const packagedOrders = sorted.filter((o) => Number(o.packaging_qty || 0) > 0);
+      const ordListPkgComp =
+        packagedOrders.length > 0 &&
+        packagedOrders.every(
+          (o) =>
+            Boolean((o as any).is_packaging_comp) ||
+            (o.packaging_charge !== undefined &&
+              o.packaging_charge !== null &&
+              Number(o.packaging_charge) === 0)
+        );
+
+      const ordBillable = computeOrderBillableAmounts(activeUncancelled, {
+        packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
+        isPackagingComp: ordListPkgComp,
+      });
+
+      const totalPromoDiscount = sorted.reduce((sum, o) => sum + (Number(o.promo_discount) || 0), 0);
+
+      const tableTotals = calculateBillTotals({
+        itemsMenuTotal: ordBillable.itemsMenuTotal,
+        packagingTotal: ordBillable.packagingTotal,
+        taxConfig,
+        flatDiscountAmount: totalPromoDiscount,
+      });
+
+      const isFolioDelivered = sorted.some((o) => o.folio_delivered || (o as any).bill_acknowledged);
+      const isBillRequested = sorted.some((o) => o.bill_requested);
+
+      const customerName = sorted.find((o) => o.customer_name?.trim())?.customer_name || 'Guest';
+
+      let overallStatus = 'SERVED';
+      if (sorted.some((o) => o.status === 'RECEIVED' || o.status === 'PENDING')) {
+        overallStatus = 'RECEIVED';
+      } else if (sorted.some((o) => o.status === 'PREPARING')) {
+        overallStatus = 'PREPARING';
+      } else if (sorted.some((o) => o.status === 'READY')) {
+        overallStatus = 'READY';
+      }
+
+      return {
+        tableGroupKey: primaryOrder.table_id || primaryOrder.table_number || primaryOrder.id,
+        primaryOrder,
+        latestOrder,
+        orders: sorted,
+        table,
+        tableName,
+        cleanRootOrderNumber,
+        maxRound,
+        allActiveItems,
+        activeUncancelled,
+        totalPayable: tableTotals.grandTotal,
+        itemsMenuTotal: ordBillable.itemsMenuTotal,
+        packagingTotal: ordBillable.packagingTotal,
+        isFolioDelivered,
+        isBillRequested,
+        customerName,
+        overallStatus,
+      };
+    }).sort((a, b) => {
+      if (a.isFolioDelivered && !b.isFolioDelivered) return -1;
+      if (!a.isFolioDelivered && b.isFolioDelivered) return 1;
+      if (a.isBillRequested && !b.isBillRequested) return -1;
+      if (!a.isBillRequested && b.isBillRequested) return 1;
+      const timeA = new Date(a.latestOrder.created_at || 0).getTime();
+      const timeB = new Date(b.latestOrder.created_at || 0).getTime();
+      return timeB - timeA;
+    });
+  }, [pendingOrders, tables, taxConfig]);
+
   const formatTimeElapsed = (date: string | Date | null | undefined) => {
     if (!date) return 'Active now';
     const diffSec = Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
@@ -981,15 +1105,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
         <div className="flex flex-wrap items-center gap-2.5">
           {/* Settle Active Table Bill button */}
-          {pendingOrders.length > 0 && (
+          {groupedTableOrders.length > 0 && (
             <button
               id="btn-settle-table-orders"
               type="button"
-              onClick={() => openSaleModal('SETTLE_TABLE', pendingOrders[0]?.id)}
+              onClick={() => openSaleModal('SETTLE_TABLE', groupedTableOrders[0]?.primaryOrder.id)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 text-xs font-bold hover:bg-amber-100 transition-colors shadow-2xs"
             >
               <Utensils className="w-4 h-4 text-amber-600" />
-              Settle Table Bill ({pendingOrders.length})
+              Settle Table Bill ({groupedTableOrders.length})
             </button>
           )}
 
@@ -1351,14 +1475,14 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length > 0 && (
+                {groupedTableOrders.filter((tg) => tg.isFolioDelivered).length > 0 && (
                   <span className="text-xs font-black px-2.5 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 flex items-center gap-1.5 animate-pulse">
                     <Check className="w-3.5 h-3.5 text-emerald-700" />
-                    {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length} Folio Delivered (Ready to Settle)
+                    {groupedTableOrders.filter((tg) => tg.isFolioDelivered).length} Folio Delivered (Ready to Settle)
                   </span>
                 )}
                 <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800">
-                  {pendingOrders.length} Active Table{pendingOrders.length === 1 ? '' : 's'}
+                  {groupedTableOrders.length} Active Table{groupedTableOrders.length === 1 ? '' : 's'}
                 </span>
                 <button
                   type="button"
@@ -1372,7 +1496,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               </div>
             </div>
 
-            {pendingOrders.length === 0 ? (
+            {groupedTableOrders.length === 0 ? (
               <div className="p-8 text-center bg-zinc-50 rounded-xl border border-dashed border-zinc-200">
                 <p className="text-xs font-semibold text-zinc-600">
                   No pending table bills right now.
@@ -1383,32 +1507,12 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {pendingOrders.map((order) => {
-                  const table = tables.find((t) => t.id === order.table_id);
-                  const tableName = table ? `Table ${table.table_number}` : (order.table_number ? `Table ${order.table_number}` : 'Table');
-                  const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
-                  const ordPkgComp =
-                    Boolean((order as any).is_packaging_comp) ||
-                    (Number(order.packaging_qty || 0) > 0 &&
-                      order.packaging_charge !== undefined &&
-                      order.packaging_charge !== null &&
-                      Number(order.packaging_charge) === 0);
-                  const ordBillable = computeOrderBillableAmounts(activeItems, {
-                    packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
-                    isPackagingComp: ordPkgComp,
-                  });
-                  const orderSubtotal = calculateBillTotals({
-                    itemsMenuTotal: ordBillable.itemsMenuTotal,
-                    packagingTotal: ordBillable.packagingTotal,
-                    taxConfig,
-                    flatDiscountAmount: Number(order.promo_discount) || 0,
-                  }).grandTotal;
-                  const isFolioDelivered = Boolean(order.folio_delivered || (order as any).bill_acknowledged);
+                {groupedTableOrders.map((tableGroup) => {
                   return (
                     <div
-                      key={order.id}
+                      key={tableGroup.tableGroupKey}
                       className={`p-4 rounded-xl border transition flex flex-col justify-between gap-3 shadow-2xs ${
-                        isFolioDelivered
+                        tableGroup.isFolioDelivered
                           ? 'border-emerald-400 bg-emerald-50/50 hover:bg-emerald-50/80 ring-1 ring-emerald-300'
                           : 'border-amber-200 bg-amber-50/40 hover:bg-amber-50/80'
                       }`}
@@ -1416,48 +1520,53 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-sm font-black text-zinc-900">{tableName}</span>
-                            {isFolioDelivered ? (
+                            <span className="text-sm font-black text-zinc-900">{tableGroup.tableName}</span>
+                            {tableGroup.maxRound > 1 && (
+                              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950 border border-amber-600/30">
+                                Round {tableGroup.maxRound}
+                              </span>
+                            )}
+                            {tableGroup.isFolioDelivered ? (
                               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
                                 <Check className="w-2.5 h-2.5" />
                                 FOLIO DELIVERED
                               </span>
-                            ) : order.bill_requested ? (
+                            ) : tableGroup.isBillRequested ? (
                               <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
                                 BILL REQUESTED
                               </span>
                             ) : null}
                           </div>
                           <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                            isFolioDelivered
+                            tableGroup.isFolioDelivered
                               ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
                               : 'bg-amber-100 text-amber-900 border-amber-200'
                           }`}>
-                            {isFolioDelivered ? 'READY TO SETTLE' : (order.status || 'UNSETTLED')}
+                            {tableGroup.isFolioDelivered ? 'READY TO SETTLE' : tableGroup.overallStatus}
                           </span>
                         </div>
                         <div className="flex items-center justify-between mt-1">
                           <p className="text-xs text-zinc-600 font-semibold">
-                            Guest: {order.customer_name || 'Dine-In Customer'}
+                            Guest: {tableGroup.customerName}
                           </p>
                           <span className="text-[10px] text-zinc-400 font-mono">
-                            Ref: {order.order_number || order.id.slice(0, 8)}
+                            Ref: {tableGroup.cleanRootOrderNumber}
                           </span>
                         </div>
-                        {table?.floor && (
+                        {tableGroup.table?.floor && (
                           <p className="text-[11px] text-zinc-400">
-                            {table.floor} {table.building ? `• ${table.building}` : ''}
+                            {tableGroup.table.floor} {tableGroup.table.building ? `• ${tableGroup.table.building}` : ''}
                           </p>
                         )}
                         <div className="mt-2 text-xs text-zinc-600 space-y-1 border-t border-amber-200/60 pt-2">
                           <div className="flex items-center justify-between text-[11px] font-bold text-zinc-500">
-                            <span>Items ({activeItems.length}):</span>
+                            <span>Items ({tableGroup.activeUncancelled.length}):</span>
                             <span className="text-[10px] text-zinc-400 font-normal">Click × to cancel</span>
                           </div>
                           <div className="text-[11px] text-zinc-700 max-h-36 overflow-y-auto space-y-1 pr-1 divide-y divide-amber-200/40">
-                            {(order.items || []).map((i, idx) => {
+                            {tableGroup.allActiveItems.map((i, idx) => {
                               const isCancelled = i.status === 'CANCELLED';
-                              const isCancelling = cancellingItemKey === `${order.id}-${idx}`;
+                              const isCancelling = cancellingItemKey === `${i._orderId}-${i._origIdx}`;
                               const qty = Number(i.quantity) || 1;
                               const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
                               const isComp = Boolean(i.is_comp || compQty >= qty);
@@ -1465,10 +1574,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                               const linePrice = isComp ? 0 : billedQty * (Number(i.price) || 0);
 
                               return (
-                                <div key={idx} className={`pt-1 flex items-start justify-between gap-1.5 ${isCancelled ? 'opacity-40 line-through' : ''}`}>
+                                <div key={`${i._orderId}-${i._origIdx}-${idx}`} className={`pt-1 flex items-start justify-between gap-1.5 ${isCancelled ? 'opacity-40 line-through' : ''}`}>
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="font-semibold text-zinc-900">{i.quantity}x {i.name}</span>
+                                      {i.round_number > 1 && (
+                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                          Round {i.round_number}
+                                        </span>
+                                      )}
                                       {isComp && (
                                         <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-200 text-amber-900">
                                           🎁 Comp
@@ -1511,11 +1625,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                                     <span className="font-mono text-zinc-600 font-semibold text-[11px]">
                                       {currencySymbol} {linePrice.toFixed(2)}
                                     </span>
-                                    {!isCancelled && order.status !== 'COMPLETED' && (
+                                    {!isCancelled && (
                                       <button
                                         type="button"
                                         disabled={isCancelling}
-                                        onClick={() => handleCancelOrderItem(order.id, idx, i.name)}
+                                        onClick={() => handleCancelOrderItem(i._orderId, i._origIdx, i.name)}
                                         className="p-1 rounded text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                                         title={`Cancel ${i.name}`}
                                       >
@@ -1534,13 +1648,23 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                         <div>
                           <span className="text-[10px] text-zinc-500 block">Total Payable:</span>
                           <span className="font-black text-sm text-zinc-900">
-                            {currencySymbol} {orderSubtotal.toFixed(2)}
+                            {currencySymbol} {tableGroup.totalPayable.toFixed(2)}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => setPrintingOrder(order)}
+                            onClick={() => {
+                              const printableOrder: TableOrder = {
+                                ...tableGroup.primaryOrder,
+                                order_number: tableGroup.cleanRootOrderNumber,
+                                items: tableGroup.activeUncancelled,
+                                total_amount: tableGroup.totalPayable as any,
+                                subtotal: tableGroup.itemsMenuTotal as any,
+                                packaging_charge: tableGroup.packagingTotal as any,
+                              };
+                              setPrintingOrder(printableOrder);
+                            }}
                             className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-zinc-100 text-zinc-700 text-xs font-bold transition border border-zinc-200 shadow-2xs cursor-pointer flex items-center gap-1"
                             title="Print Table Bill / Check"
                           >
@@ -1548,13 +1672,13 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                             <span>Print Bill</span>
                           </button>
                           <button
-                            id={`btn-settle-order-${order.id}`}
+                            id={`btn-settle-order-${tableGroup.primaryOrder.id}`}
                             type="button"
                             onClick={() => {
-                                if (!canSettleBill) return onRequestRoleSignIn?.();
-                                setSelectedOrderToSettle(order.id);
-                                setShowNewSaleModal(true);
-                              }}
+                              if (!canSettleBill) return onRequestRoleSignIn?.();
+                              setSelectedOrderToSettle(tableGroup.primaryOrder.id);
+                              setShowNewSaleModal(true);
+                            }}
                             className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                           >
                             <Receipt className="w-3.5 h-3.5" />
@@ -2038,14 +2162,14 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                 </div>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length > 0 && (
+                {groupedTableOrders.filter((tg) => tg.isFolioDelivered).length > 0 && (
                   <span className="text-xs font-black px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5 animate-pulse">
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    {pendingOrders.filter((o) => o.folio_delivered || (o as any).bill_acknowledged).length} Folio Delivered (Ready)
+                    {groupedTableOrders.filter((tg) => tg.isFolioDelivered).length} Folio Delivered (Ready)
                   </span>
                 )}
                 <span className="text-xs font-bold px-3 py-1 rounded-full bg-amber-500 text-zinc-950">
-                  {pendingOrders.length} Active Table{pendingOrders.length === 1 ? '' : 's'}
+                  {groupedTableOrders.length} Active Table{groupedTableOrders.length === 1 ? '' : 's'}
                 </span>
                 <button
                   type="button"
@@ -2059,39 +2183,19 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
             </div>
 
             <div className="p-6 flex-1 overflow-y-auto bg-zinc-100/60">
-              {pendingOrders.length === 0 ? (
+              {groupedTableOrders.length === 0 ? (
                 <div className="h-full min-h-[300px] flex flex-col items-center justify-center p-8 text-center bg-white rounded-2xl border border-dashed border-zinc-200">
                   <p className="text-sm font-semibold text-zinc-600">No active table bills right now.</p>
                   <p className="text-xs text-zinc-400 mt-1">All dine-in tables are settled or clear.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {pendingOrders.map((order) => {
-                    const table = tables.find((t) => t.id === order.table_id);
-                    const tableName = table ? `Table ${table.table_number}` : (order.table_number ? `Table ${order.table_number}` : 'Table');
-                    const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
-                    const ordPkgComp =
-                      Boolean((order as any).is_packaging_comp) ||
-                      (Number(order.packaging_qty || 0) > 0 &&
-                        order.packaging_charge !== undefined &&
-                        order.packaging_charge !== null &&
-                        Number(order.packaging_charge) === 0);
-                    const ordBillable = computeOrderBillableAmounts(activeItems, {
-                      packagingFeeRate: Math.max(0, Number(taxConfig?.packaging_fee ?? 10) || 0),
-                      isPackagingComp: ordPkgComp,
-                    });
-                    const orderSubtotal = calculateBillTotals({
-                      itemsMenuTotal: ordBillable.itemsMenuTotal,
-                      packagingTotal: ordBillable.packagingTotal,
-                      taxConfig,
-                      flatDiscountAmount: Number(order.promo_discount) || 0,
-                    }).grandTotal;
-                    const isFolioDelivered = Boolean(order.folio_delivered || (order as any).bill_acknowledged);
+                  {groupedTableOrders.map((tableGroup) => {
                     return (
                       <div
-                        key={order.id}
+                        key={tableGroup.tableGroupKey}
                         className={`p-4 rounded-xl border transition flex flex-col justify-between gap-3 shadow-sm ${
-                          isFolioDelivered
+                          tableGroup.isFolioDelivered
                             ? 'border-emerald-400 bg-emerald-50/40 hover:border-emerald-500 ring-1 ring-emerald-300'
                             : 'border-amber-200 bg-white hover:border-amber-400'
                         }`}
@@ -2099,48 +2203,53 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                         <div>
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-sm font-black text-zinc-900">{tableName}</span>
-                              {isFolioDelivered ? (
+                              <span className="text-sm font-black text-zinc-900">{tableGroup.tableName}</span>
+                              {tableGroup.maxRound > 1 && (
+                                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500 text-zinc-950 border border-amber-600/30">
+                                  Round {tableGroup.maxRound}
+                                </span>
+                              )}
+                              {tableGroup.isFolioDelivered ? (
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
                                   <Check className="w-2.5 h-2.5" />
                                   FOLIO DELIVERED
                                 </span>
-                              ) : order.bill_requested ? (
+                              ) : tableGroup.isBillRequested ? (
                                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500 text-white animate-pulse">
                                   BILL REQUESTED
                                 </span>
                               ) : null}
                             </div>
                             <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                              isFolioDelivered
+                              tableGroup.isFolioDelivered
                                 ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
                                 : 'bg-amber-100 text-amber-900 border-amber-200'
                             }`}>
-                              {isFolioDelivered ? 'READY TO SETTLE' : (order.status || 'UNSETTLED')}
+                              {tableGroup.isFolioDelivered ? 'READY TO SETTLE' : tableGroup.overallStatus}
                             </span>
                           </div>
                           <div className="flex items-center justify-between mt-1">
                             <p className="text-xs text-zinc-600 font-semibold">
-                              Guest: {order.customer_name || 'Dine-In Customer'}
+                              Guest: {tableGroup.customerName}
                             </p>
                             <span className="text-[10px] text-zinc-400 font-mono">
-                              Ref: {order.order_number || order.id.slice(0, 8)}
+                              Ref: {tableGroup.cleanRootOrderNumber}
                             </span>
                           </div>
-                          {table?.floor && (
+                          {tableGroup.table?.floor && (
                             <p className="text-[11px] text-zinc-400">
-                              {table.floor} {table.building ? `• ${table.building}` : ''}
+                              {tableGroup.table.floor} {tableGroup.table.building ? `• ${tableGroup.table.building}` : ''}
                             </p>
                           )}
                           <div className="mt-2 text-xs text-zinc-600 space-y-1 border-t border-zinc-100 pt-2">
                             <div className="flex items-center justify-between text-[11px] font-bold text-zinc-500">
-                              <span>Items ({activeItems.length}):</span>
+                              <span>Items ({tableGroup.activeUncancelled.length}):</span>
                               <span className="text-[10px] text-zinc-400 font-normal">Click × to cancel</span>
                             </div>
                             <div className="text-[11px] text-zinc-700 max-h-48 overflow-y-auto space-y-1 pr-1 divide-y divide-zinc-100">
-                              {(order.items || []).map((i, idx) => {
+                              {tableGroup.allActiveItems.map((i, idx) => {
                                 const isCancelled = i.status === 'CANCELLED';
-                                const isCancelling = cancellingItemKey === `${order.id}-${idx}`;
+                                const isCancelling = cancellingItemKey === `${i._orderId}-${i._origIdx}`;
                                 const qty = Number(i.quantity) || 1;
                                 const compQty = Math.max(0, Math.min(qty, Number(i.comp_qty) || (i.is_comp ? qty : 0)));
                                 const isComp = Boolean(i.is_comp || compQty >= qty);
@@ -2148,10 +2257,15 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                                 const linePrice = isComp ? 0 : billedQty * (Number(i.price) || 0);
 
                                 return (
-                                  <div key={idx} className={`pt-1 flex items-start justify-between gap-1.5 ${isCancelled ? 'opacity-40 line-through' : ''}`}>
+                                  <div key={`${i._orderId}-${i._origIdx}-${idx}`} className={`pt-1 flex items-start justify-between gap-1.5 ${isCancelled ? 'opacity-40 line-through' : ''}`}>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className="font-semibold text-zinc-900">{i.quantity}x {i.name}</span>
+                                        {i.round_number > 1 && (
+                                          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                            Round {i.round_number}
+                                          </span>
+                                        )}
                                         {isComp && (
                                           <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-200 text-amber-900">
                                             🎁 Comp
@@ -2163,16 +2277,16 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                                           </span>
                                         )}
                                         {(Boolean(i.is_packaged) || (Number(i.pack_qty) || 0) > 0) && (
-                                        <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-800 border border-amber-500/30 flex items-center gap-0.5">
-                                          <Package className="w-2.5 h-2.5 text-amber-600 shrink-0" />
-                                          {(Number(i.pack_qty) || 0) > 1 && (Number(i.pack_qty) || 0) < (Number(i.quantity) || 1)
-                                            ? `${i.pack_qty} of ${i.quantity} Pack`
-                                            : (Number(i.pack_qty) || 0) > 1
-                                            ? `${i.pack_qty}x Pack`
-                                            : 'Pack'}
-                                        </span>
-                                      )}
-                                      {i.station && (
+                                          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-amber-500/20 text-amber-800 border border-amber-500/30 flex items-center gap-0.5">
+                                            <Package className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                            {(Number(i.pack_qty) || 0) > 1 && (Number(i.pack_qty) || 0) < (Number(i.quantity) || 1)
+                                              ? `${i.pack_qty} of ${i.quantity} Pack`
+                                              : (Number(i.pack_qty) || 0) > 1
+                                              ? `${i.pack_qty}x Pack`
+                                              : 'Pack'}
+                                          </span>
+                                        )}
+                                        {i.station && (
                                           <span className="text-[9px] px-1.5 py-0.2 rounded font-medium bg-zinc-200 text-zinc-700">
                                             {i.station}
                                           </span>
@@ -2194,11 +2308,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                                       <span className="font-mono text-zinc-600 font-semibold text-[11px]">
                                         {currencySymbol} {linePrice.toFixed(2)}
                                       </span>
-                                      {!isCancelled && order.status !== 'COMPLETED' && (
+                                      {!isCancelled && (
                                         <button
                                           type="button"
                                           disabled={isCancelling}
-                                          onClick={() => handleCancelOrderItem(order.id, idx, i.name)}
+                                          onClick={() => handleCancelOrderItem(i._orderId, i._origIdx, i.name)}
                                           className="p-1 rounded text-zinc-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
                                           title={`Cancel ${i.name}`}
                                         >
@@ -2217,13 +2331,23 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                           <div>
                             <span className="text-[10px] text-zinc-500 block">Total Payable:</span>
                             <span className="font-black text-sm text-zinc-900">
-                              {currencySymbol} {orderSubtotal.toFixed(2)}
+                              {currencySymbol} {tableGroup.totalPayable.toFixed(2)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setPrintingOrder(order)}
+                              onClick={() => {
+                                const printableOrder: TableOrder = {
+                                  ...tableGroup.primaryOrder,
+                                  order_number: tableGroup.cleanRootOrderNumber,
+                                  items: tableGroup.activeUncancelled,
+                                  total_amount: tableGroup.totalPayable as any,
+                                  subtotal: tableGroup.itemsMenuTotal as any,
+                                  packaging_charge: tableGroup.packagingTotal as any,
+                                };
+                                setPrintingOrder(printableOrder);
+                              }}
                               className="px-2.5 py-1.5 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold transition border border-zinc-300 cursor-pointer flex items-center gap-1"
                               title="Print Table Bill / Check"
                             >
@@ -2231,14 +2355,14 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
                               <span>Print Bill</span>
                             </button>
                             <button
-                              id={`btn-settle-order-fs-${order.id}`}
+                              id={`btn-settle-order-fs-${tableGroup.primaryOrder.id}`}
                               type="button"
                               onClick={() => {
-                                  if (!canSettleBill) return onRequestRoleSignIn?.();
-                                  setIsOrdersFullScreen(false);
-                                  setSelectedOrderToSettle(order.id);
-                                  setShowNewSaleModal(true);
-                                }}
+                                if (!canSettleBill) return onRequestRoleSignIn?.();
+                                setIsOrdersFullScreen(false);
+                                setSelectedOrderToSettle(tableGroup.primaryOrder.id);
+                                setShowNewSaleModal(true);
+                              }}
                               className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                             >
                               <Receipt className="w-3.5 h-3.5" />
@@ -2396,7 +2520,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       if (found.customer_name) setCustomerName(found.customer_name);
       if (found.customer_phone) setCustomerPhone(found.customer_phone);
       if ((found as any).customer_pan) setCustomerPan((found as any).customer_pan);
-      if (found.order_number) setCustomOrderNumber(found.order_number);
+      if (found.order_number) setCustomOrderNumber(found.order_number.replace(/\s*\(Round\s*\d+\)/gi, '').trim());
 
       // Consolidate all unsettled orders for this table so all rounds are billed together!
       const relatedOrders = pendingOrders.filter(
@@ -4405,7 +4529,7 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
           <div className="space-y-1 text-[11px]">
             <div className="flex justify-between">
               <span className="text-zinc-500">Order #:</span>
-                <span className="font-bold text-zinc-900">{order.order_number || (order.id ? order.id.slice(0, 8).toUpperCase() : 'ORD')}</span>
+                <span className="font-bold text-zinc-900">{String(order.order_number || (order.id ? order.id.slice(0, 8).toUpperCase() : 'ORD')).replace(/\s*\(Round\s*\d+\)/gi, '').trim()}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-zinc-500">Table:</span>
