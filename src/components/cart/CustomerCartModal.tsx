@@ -213,7 +213,7 @@ export const CustomerCartModal: React.FC<CustomerCartModalProps> = ({
           const itemCode = ci.selected_variant?.erp_item_code || ci.menuItem.erp_item_code;
           const finalPrice = ci.selected_variant ? Number(ci.selected_variant.price) : Number(ci.menuItem.price);
           const variantName = ci.selected_variant?.name;
-          const isPkg = ci.menuItem.is_packageable !== false;
+          const isPkg = ci.menuItem.packaging_type ? ci.menuItem.packaging_type === 'packageable' : ci.menuItem.is_packageable !== false;
           const pQty = isPkg ? Math.max(0, Math.min(ci.quantity, Number(ci.pack_qty) || (ci.is_packaged ? ci.quantity : 0))) : 0;
           return {
             item_id: ci.menuItem.id,

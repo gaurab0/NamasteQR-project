@@ -139,6 +139,7 @@ model MenuItem {
   status                String   @default("available") // available, unavailable, out_of_stock
   is_available          Boolean  @default(true)
   is_packageable        Boolean  @default(true)
+  packaging_type        String   @default("packageable") // packageable, dine_in_only, na
   has_variants          Boolean  @default(false)
   variants              Json? // Array of variant objects: { id, name, price, is_available, image_url, etc. }
   variant_group_name    String?

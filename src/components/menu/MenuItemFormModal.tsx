@@ -20,6 +20,7 @@ import {
   Wine,
   PackageCheck,
   PackageX,
+  PackageMinus,
 } from 'lucide-react';
 
 interface MenuItemFormModalProps {
@@ -55,7 +56,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
   const [prepTime, setPrepTime] = useState<number | string>(15);
   const [station, setStation] = useState<KitchenStation>('KITCHEN');
   const [erpItemCode, setErpItemCode] = useState('');
-  const [isPackageable, setIsPackageable] = useState<boolean>(true);
+  const [packagingType, setPackagingType] = useState<'packageable' | 'dine_in_only' | 'na'>('packageable');
 
   const [isCreatingInlineCat, setIsCreatingInlineCat] = useState(false);
   const [newCatInlineName, setNewCatInlineName] = useState('');
@@ -124,7 +125,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setErpItemCode(itemToEdit.erp_item_code || '');
       setStatus(itemToEdit.status || (itemToEdit.is_available ? 'available' : 'unavailable'));
       setPrepTime(itemToEdit.preparation_time_mins || 15);
-      setIsPackageable(itemToEdit.is_packageable !== false);
+      setPackagingType(itemToEdit.packaging_type || (itemToEdit.is_packageable === false ? 'dine_in_only' : 'packageable'));
     } else {
       setName('');
       setCategory(categories[0]?.name || 'Nepali');
@@ -141,7 +142,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setErpItemCode('');
       setStatus('available');
       setPrepTime(15);
-      setIsPackageable(true);
+      setPackagingType('packageable');
     }
     setCustomCatInput('');
     setFormError(null);
@@ -380,7 +381,8 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
         station,
         status,
         is_available: status === 'available',
-        is_packageable: isPackageable,
+        is_packageable: packagingType === 'packageable',
+        packaging_type: packagingType,
         has_variants: hasVariants && validVariants.length > 0,
         variants: validVariants,
         variant_group_name: hasVariants && variantGroupName.trim() ? variantGroupName.trim() : undefined,
@@ -1267,35 +1269,55 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-bold text-zinc-700">Takeaway Packaging</label>
-                  <span className="text-[10px] text-zinc-400 font-medium">Allow takeaway packing (+Rs. 10/pkg)</span>
+                  <span className="text-[10px] text-zinc-400 font-medium">
+                    {packagingType === 'packageable'
+                      ? 'Allow takeaway packing (+Rs. 10/pkg)'
+                      : packagingType === 'dine_in_only'
+                      ? 'Strictly dine-in; takeaway not allowed'
+                      : 'Exempt from packaging fees (e.g. bottled drinks, services)'}
+                  </span>
                 </div>
-                <div className="inline-flex p-0.5 bg-zinc-100/90 rounded-lg border border-zinc-200/80 w-full">
+                <div className="inline-flex p-0.5 bg-zinc-100/90 rounded-lg border border-zinc-200/80 w-full gap-0.5">
                   <button
                     id="packageable-option-yes"
                     type="button"
-                    onClick={() => setIsPackageable(true)}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                      isPackageable
+                    onClick={() => setPackagingType('packageable')}
+                    className={`flex-1 py-1.5 px-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer ${
+                      packagingType === 'packageable'
                         ? 'bg-white text-amber-700 shadow-xs border border-amber-200/80 font-bold'
                         : 'text-zinc-500 hover:text-zinc-800'
                     }`}
                   >
-                    <PackageCheck className="w-3.5 h-3.5 text-amber-600" />
+                    <PackageCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                     <span>Packageable</span>
                   </button>
 
                   <button
                     id="packageable-option-no"
                     type="button"
-                    onClick={() => setIsPackageable(false)}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                      !isPackageable
+                    onClick={() => setPackagingType('dine_in_only')}
+                    className={`flex-1 py-1.5 px-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer ${
+                      packagingType === 'dine_in_only'
                         ? 'bg-white text-zinc-800 shadow-xs border border-zinc-300 font-bold'
                         : 'text-zinc-500 hover:text-zinc-800'
                     }`}
                   >
-                    <PackageX className="w-3.5 h-3.5 text-zinc-500" />
+                    <PackageX className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                     <span>Dine-In Only</span>
+                  </button>
+
+                  <button
+                    id="packageable-option-na"
+                    type="button"
+                    onClick={() => setPackagingType('na')}
+                    className={`flex-1 py-1.5 px-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer ${
+                      packagingType === 'na'
+                        ? 'bg-white text-blue-700 shadow-xs border border-blue-200/80 font-bold'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    <PackageMinus className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>NA</span>
                   </button>
                 </div>
               </div>

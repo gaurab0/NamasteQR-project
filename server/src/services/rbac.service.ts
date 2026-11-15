@@ -418,7 +418,8 @@ export class RBACService {
           food_type: newItem.food_type || 'non-veg',
           status: newItem.status,
           is_available: newItem.is_available,
-          is_packageable: newItem.is_packageable !== false,
+          is_packageable: newItem.packaging_type ? newItem.packaging_type === 'packageable' : newItem.is_packageable !== false,
+          packaging_type: newItem.packaging_type || (newItem.is_packageable === false ? 'dine_in_only' : 'packageable'),
           has_variants: newItem.has_variants,
           variants: (newItem.variants as any) || [],
           variant_group_name: (itemData as any).variant_group_name || (itemData.name ? undefined : null),
@@ -491,7 +492,13 @@ export class RBACService {
       if (updates.promo_badge !== undefined) prismaData.promo_badge = updates.promo_badge;
       if (updates.station !== undefined) prismaData.station = updates.station;
       if (updates.order_index !== undefined) prismaData.order_index = updates.order_index;
-      if (updates.is_packageable !== undefined) prismaData.is_packageable = Boolean(updates.is_packageable);
+      if (updates.packaging_type !== undefined) {
+        prismaData.packaging_type = updates.packaging_type;
+        prismaData.is_packageable = updates.packaging_type === 'packageable';
+      } else if (updates.is_packageable !== undefined) {
+        prismaData.is_packageable = Boolean(updates.is_packageable);
+        prismaData.packaging_type = updates.is_packageable ? 'packageable' : 'dine_in_only';
+      }
       if (updates.preparation_time_mins !== undefined) prismaData.preparation_time_mins = updates.preparation_time_mins;
 
       await prisma.menuItem.update({

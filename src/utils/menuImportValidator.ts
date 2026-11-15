@@ -64,6 +64,7 @@ export interface ParsedItem {
   variant_group_name?: string;
   variants?: ParsedOption[];
   is_packageable?: boolean;
+  packaging_type?: 'packageable' | 'dine_in_only' | 'na';
   sourceRowNumbers?: number[];
 }
 
@@ -77,6 +78,7 @@ export interface RawValidatedRow {
   description: string;
   foodType: 'veg' | 'non-veg' | 'none';
   station: 'KITCHEN' | 'BAR' | 'BOTH';
+  packagingType?: 'packageable' | 'dine_in_only' | 'na';
 }
 
 export interface ValidationSummary {
@@ -112,7 +114,8 @@ type CanonicalColumnKey =
   | 'itemCode'
   | 'description'
   | 'vegNonVeg'
-  | 'orderRoute';
+  | 'orderRoute'
+  | 'packaging';
 
 const COLUMN_DEFS: Array<{
   key: CanonicalColumnKey;
@@ -171,6 +174,17 @@ const COLUMN_DEFS: Array<{
     label: 'Order Route',
     mandatoryCell: true,
     patterns: [/^(order\s*route|route|station|kot\s*\/?\s*bot)$/i],
+  },
+  {
+    key: 'packaging',
+    label: 'Takeaway Packaging',
+    mandatoryCell: false,
+    patterns: [
+      /^(takeaway\s*)?packaging(\s*type)?$/i,
+      /^packageable$/i,
+      /^packageable\s*\/?\s*dine[\s\-]*in(\s*only)?(\s*\/?\s*n\/?a)?$/i,
+      /^packing$/i,
+    ],
   },
 ];
 
@@ -431,7 +445,8 @@ export function groupValidatedRows(
         has_variants: true,
         variant_group_name: 'Options',
         variants: options,
-        is_packageable: true,
+        is_packageable: rowList[0].packagingType === 'packageable' || rowList[0].packagingType === undefined,
+        packaging_type: rowList[0].packagingType || 'packageable',
         sourceRowNumbers: rowList.map((r) => r.rowNumber),
       });
     } else {
@@ -449,7 +464,8 @@ export function groupValidatedRows(
         food_type: single.foodType,
         erp_item_code: single.itemCode || undefined,
         has_variants: false,
-        is_packageable: true,
+        is_packageable: single.packagingType === 'packageable' || single.packagingType === undefined,
+        packaging_type: single.packagingType || 'packageable',
         sourceRowNumbers: [single.rowNumber],
       });
     }
@@ -1033,6 +1049,21 @@ export function extractAndValidateMenuMatrix(
       }
     }
 
+    // Packaging Type parsing (optional column, defaults to 'packageable')
+    let parsedPackaging: 'packageable' | 'dine_in_only' | 'na' = 'packageable';
+    if (colMap.packaging >= 0 && !formulaErrorCols.has(colMap.packaging)) {
+      const rawPkg = normalizeImportText(rawValues.packaging).toLowerCase();
+      if (rawPkg) {
+        if (/^(dine[\s\-]*in(\s*only)?|no|false)$/i.test(rawPkg)) {
+          parsedPackaging = 'dine_in_only';
+        } else if (/^(n\/?a|none|exempt|not[\s\-_]*applicable)$/i.test(rawPkg)) {
+          parsedPackaging = 'na';
+        } else if (/^(packageable|pack|pkg|yes|true)$/i.test(rawPkg)) {
+          parsedPackaging = 'packageable';
+        }
+      }
+    }
+
     // 6. Duplicate Item Code (SKU)
     const cleanCode =
       colMap.itemCode >= 0 && !formulaErrorCols.has(colMap.itemCode)
@@ -1183,6 +1214,7 @@ export function extractAndValidateMenuMatrix(
             : '',
         foodType: parsedFood,
         station: parsedStation,
+        packagingType: parsedPackaging,
       });
     }
   }
@@ -1399,7 +1431,8 @@ export function validateGroupedPayload(
         has_variants: Boolean(raw?.has_variants),
         variant_group_name: raw?.variant_group_name,
         variants: Array.isArray(raw?.variants) ? raw.variants : undefined,
-        is_packageable: raw?.is_packageable !== false,
+        is_packageable: raw?.packaging_type ? raw.packaging_type === 'packageable' : raw?.is_packageable !== false,
+        packaging_type: raw?.packaging_type || (raw?.is_packageable === false ? 'dine_in_only' : 'packageable'),
         sourceRowNumbers: [rowNumber],
       });
     }

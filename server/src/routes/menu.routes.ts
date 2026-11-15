@@ -345,6 +345,7 @@ router.get('/', optionalAuthenticate, async (req: AuthenticatedRequest, res: Res
         status: itemStatus,
         is_available: itemStatus === 'available',
         is_packageable: (d as any).is_packageable !== false,
+        packaging_type: (d as any).packaging_type || ((d as any).is_packageable === false ? 'dine_in_only' : 'packageable'),
         has_variants: Boolean(d.has_variants),
         variants: (d.variants as any) || [],
         variant_group_name: d.variant_group_name || undefined,
@@ -502,6 +503,7 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
       station,
       erp_item_code,
       is_packageable,
+      packaging_type,
     } = req.body;
 
     if (!name || typeof name !== 'string' || !name.trim()) {
@@ -555,7 +557,8 @@ router.post('/', authenticate, requireResourceAccess('menus', 'write'), async (r
         food_type: validFoodType,
         status: itemStatus,
         is_available: itemStatus === 'available',
-        is_packageable: is_packageable !== false,
+        is_packageable: packaging_type ? packaging_type === 'packageable' : is_packageable !== false,
+        packaging_type: packaging_type || (is_packageable === false ? 'dine_in_only' : 'packageable'),
         has_variants: Boolean(has_variants && validVariants.length > 0),
         variants: validVariants as any,
         variant_group_name: variant_group_name ? String(variant_group_name).trim() : null,
@@ -630,6 +633,7 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
       station,
       erp_item_code,
       is_packageable,
+      packaging_type,
     } = req.body;
 
     const updates: any = {};
@@ -1041,7 +1045,8 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
             has_variants: raw.has_variants !== undefined ? Boolean(raw.has_variants) : existing.has_variants,
             variant_group_name: raw.variant_group_name || existing.variant_group_name || 'Options',
             variants: validVariants ? validVariants : existing.variants,
-            is_packageable: raw.is_packageable !== undefined ? Boolean(raw.is_packageable) : existing.is_packageable,
+            is_packageable: raw.packaging_type ? raw.packaging_type === 'packageable' : raw.is_packageable !== undefined ? Boolean(raw.is_packageable) : existing.is_packageable,
+            packaging_type: raw.packaging_type || (raw.is_packageable === false ? 'dine_in_only' : (existing as any).packaging_type || 'packageable'),
           },
         });
         updatedCount++;
@@ -1066,7 +1071,8 @@ router.post('/bulk-import', authenticate, requireResourceAccess('menus', 'write'
                 : (catKey.includes('veg') ? 'veg' : 'none'),
             status: 'available',
             is_available: true,
-            is_packageable: raw.is_packageable !== false,
+            is_packageable: raw.packaging_type ? raw.packaging_type === 'packageable' : raw.is_packageable !== false,
+            packaging_type: raw.packaging_type || (raw.is_packageable === false ? 'dine_in_only' : 'packageable'),
             has_variants: Boolean(raw.has_variants && validVariants && validVariants.length > 0),
             variant_group_name: raw.has_variants ? (raw.variant_group_name || 'Options') : null,
             variants: validVariants ? validVariants : undefined,

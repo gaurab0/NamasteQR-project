@@ -2789,7 +2789,8 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
         food_type: candidate.food_type,
         variant_id: candidate.variant_id,
         variant_name: candidate.variant_name,
-        is_packageable: (candidate as any).is_packageable !== false,
+        is_packageable: (candidate as any).packaging_type ? (candidate as any).packaging_type === 'packageable' : (candidate as any).is_packageable !== false,
+        packaging_type: (candidate as any).packaging_type || ((candidate as any).is_packageable === false ? 'dine_in_only' : 'packageable'),
         is_packaged: current.is_packaged,
         pack_qty: current.pack_qty,
       } as any;

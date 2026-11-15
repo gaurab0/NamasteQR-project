@@ -88,6 +88,7 @@ export interface MenuItem {
   status?: MenuStatus;
   is_available: boolean;
   is_packageable?: boolean;
+  packaging_type?: 'packageable' | 'dine_in_only' | 'na';
   has_variants?: boolean;
   variants?: MenuItemVariant[];
   variant_group_name?: string; // e.g. "Protein / Meat Option", "Portion / Size", "Preparation Style", "Drink Measure"
@@ -246,6 +247,7 @@ export interface TableOrderItem {
   comp_qty?: number;
   comp_value?: number;
   is_packageable?: boolean;
+  packaging_type?: 'packageable' | 'dine_in_only' | 'na';
   is_packaged?: boolean;
   pack_qty?: number;
   comp_pack_qty?: number;
@@ -376,6 +378,7 @@ export interface SaleItem {
   is_comp?: boolean;
   comp_value?: number;
   is_packageable?: boolean;
+  packaging_type?: 'packageable' | 'dine_in_only' | 'na';
   is_packaged?: boolean;
   pack_qty?: number;
   comp_pack_qty?: number;

@@ -381,6 +381,7 @@ export const MenuBulkImportModal: React.FC<MenuBulkImportModalProps> = ({
           variant_group_name: it.variant_group_name,
           variants: it.variants,
           is_packageable: it.is_packageable !== false,
+          packaging_type: it.packaging_type || (it.is_packageable === false ? 'dine_in_only' : 'packageable'),
         })),
         mode: importMode,
         pricingMode,
@@ -448,7 +449,7 @@ export const MenuBulkImportModal: React.FC<MenuBulkImportModalProps> = ({
             </span>
             <div>
               <h3 className="text-base font-bold text-zinc-900">Import Menu (Excel / CSV)</h3>
-              <p className="text-xs text-zinc-500">Standard 8-column format with strict irregularity checks &amp; multi-tier option grouping</p>
+              <p className="text-xs text-zinc-500">Standard 9-column format (incl. Takeaway Packaging) with strict irregularity checks &amp; multi-tier option grouping</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -511,7 +512,7 @@ export const MenuBulkImportModal: React.FC<MenuBulkImportModalProps> = ({
                   {fileName ? fileName : 'Click to select or drag & drop Excel / CSV spreadsheet'}
                 </p>
                 <p className="text-[11px] text-zinc-500 mt-0.5">
-                  Required headers: Item Name, Sales Price without vat price, Category, SubCategory, Item Code, Description, Veg/Non-Veg, Order Route
+                  Required headers: Item Name, Sales Price without vat price, Category, SubCategory, Item Code, Description, Veg/Non-Veg, Order Route, Takeaway Packaging
                 </p>
               </div>
             </label>
