@@ -109,7 +109,9 @@ const NON_FOOD_KEYWORDS = [
   'building', 'exterior', 'street', 'entrance', 'facade', 'storefront',
   'hospital', 'center', 'centre', 'mall', 'hotel', 'town', 'shop',
   'map', 'sign', 'board', 'interior', 'room', 'lobby', 'counter',
-  'door', 'road', 'parking', 'car', 'vehicle', 'person', 'people', 'staff'
+  'door', 'road', 'parking', 'car', 'vehicle', 'person', 'people', 'staff',
+  'bear', 'zoo', 'animal', 'wildlife', 'dog', 'cat', 'pet', 'cub', 'mammal',
+  'portrait', 'selfie', 'man', 'woman', 'girl', 'boy', 'baby', 'actor', 'movie', 'film'
 ];
 
 function isFoodCandidate(title: string, url: string): boolean {
@@ -136,6 +138,44 @@ function cleanDishQuery(raw: string): string {
 }
 
 /**
+ * Queries Wikimedia Commons & Wikipedia for authentic, verified food/dish photos
+ */
+async function searchWikipediaImages(query: string): Promise<ImageSearchResult[]> {
+  const results: ImageSearchResult[] = [];
+  try {
+    const cleanQ = cleanDishQuery(query);
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&piprop=thumbnail&pithumbsize=600&generator=search&gsrsearch=${encodeURIComponent(cleanQ + ' dish food')}&gsrlimit=3`;
+    const res = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'ServeFlowRestaurantApp/1.0 (contact: support@serveflow.com)',
+        'Accept': 'application/json',
+      },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.query && data.query.pages) {
+        const pages = Object.values(data.query.pages) as any[];
+        for (const p of pages) {
+          const thumb = p.thumbnail?.source;
+          if (thumb && !thumb.endsWith('.svg.png') && !thumb.endsWith('.svg') && isFoodCandidate(p.title, thumb)) {
+            results.push({
+              id: `wiki-${p.pageid}`,
+              title: p.title,
+              url: thumb,
+              source: 'Wikipedia',
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Wikipedia image search error:', err);
+  }
+  return results;
+}
+
+/**
  * Direct Bing Image Search as secondary high-definition search engine
  */
 async function searchBingImages(query: string, category?: string): Promise<ImageSearchResult[]> {
@@ -143,7 +183,7 @@ async function searchBingImages(query: string, category?: string): Promise<Image
   try {
     const cleanQ = cleanDishQuery(query);
     const catContext = (category && !/general|special menu|none|all/i.test(category)) ? ` ${category}` : '';
-    const searchQuery = `${cleanQ}${catContext} dish on plate delicious food photography -building -exterior -storefront -entrance -facade -street -hospital -mall -hotel`;
+    const searchQuery = `${cleanQ}${catContext} dish food photography on plate`;
 
     const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(searchQuery)}&qft=+filterui:photo-photo&form=HDRSC2&first=1`;
     const res = await fetch(searchUrl, {
@@ -187,7 +227,7 @@ async function searchBingImages(query: string, category?: string): Promise<Image
 
 /**
  * GET /api/images/search?q=juice
- * Returns top 3-4 authentic Google Image food results for any food name.
+ * Returns top 3-4 authentic food results for any food name.
  */
 router.get('/search', async (req: Request, res: Response) => {
   try {
@@ -205,18 +245,29 @@ router.get('/search', async (req: Request, res: Response) => {
 
     let results: ImageSearchResult[] = [];
 
-    // 1. Try Google Images directly
-    const googleResults = await searchGoogleImages(rawQuery);
-    if (googleResults.length > 0) {
-      results.push(...googleResults.filter(r => isFoodCandidate(r.title, r.url)));
+    // 1. Try Wikimedia Commons first (authentic culinary dishes)
+    const wikiResults = await searchWikipediaImages(rawQuery);
+    if (wikiResults.length > 0) {
+      results.push(...wikiResults);
     }
 
-    // 2. If Google returned fewer than 3, complement with Bing image results
+    // 2. Try Google Images
+    if (results.length < 3) {
+      const googleResults = await searchGoogleImages(rawQuery);
+      for (const item of googleResults) {
+        if (results.length >= 4) break;
+        if (!results.some((r) => r.url === item.url) && isFoodCandidate(item.title, item.url)) {
+          results.push(item);
+        }
+      }
+    }
+
+    // 3. If still fewer than 3, complement with clean Bing food photography
     if (results.length < 3) {
       const bingResults = await searchBingImages(rawQuery, rawCategory);
       for (const item of bingResults) {
         if (results.length >= 4) break;
-        if (!results.some(r => r.url === item.url)) {
+        if (!results.some((r) => r.url === item.url) && isFoodCandidate(item.title, item.url)) {
           results.push(item);
         }
       }
