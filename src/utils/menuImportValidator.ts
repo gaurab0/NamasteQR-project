@@ -300,7 +300,7 @@ function parseFoodType(rawText: string): 'veg' | 'non-veg' | 'none' | null {
   ) {
     return 'non-veg';
   }
-  if (norm === 'none' || norm === 'n/a') return 'none';
+  if (norm === 'none' || norm === 'n/a' || norm === 'na') return 'none';
   return null;
 }
 
@@ -761,6 +761,7 @@ export function extractAndValidateMenuMatrix(
     description: -1,
     vegNonVeg: -1,
     orderRoute: -1,
+    packaging: -1,
   };
   const labelByColIndex = new Map<number, string>();
 
@@ -806,7 +807,7 @@ export function extractAndValidateMenuMatrix(
   });
 
   for (const def of COLUMN_DEFS) {
-    if (colMap[def.key] === -1) {
+    if (def.mandatoryCell && colMap[def.key] === -1) {
       errors.push(
         makeIssue(
           'error',
@@ -821,7 +822,7 @@ export function extractAndValidateMenuMatrix(
     }
   }
 
-  const hasMissingRequiredHeader = COLUMN_DEFS.some((d) => colMap[d.key] === -1);
+  const hasMissingRequiredHeader = COLUMN_DEFS.some((d) => d.mandatoryCell && colMap[d.key] === -1);
 
   let totalDataRows = 0;
   const validRows: RawValidatedRow[] = [];
@@ -910,6 +911,7 @@ export function extractAndValidateMenuMatrix(
       description: colMap.description >= 0 ? row[colMap.description] : undefined,
       vegNonVeg: colMap.vegNonVeg >= 0 ? row[colMap.vegNonVeg] : undefined,
       orderRoute: colMap.orderRoute >= 0 ? row[colMap.orderRoute] : undefined,
+      packaging: colMap.packaging >= 0 ? row[colMap.packaging] : undefined,
     };
 
     for (const def of COLUMN_DEFS) {
