@@ -46,7 +46,22 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
   const [sales, setSales] = useState<SaleRecord[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; date: string; revenue: number; orders: number } | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    x: number;
+    y: number;
+    date: string;
+    revenue: number;
+    orders: number;
+    orderList: {
+      id: string;
+      invoice: string;
+      time: string;
+      table: string;
+      amount: number;
+      itemsSummary: string;
+    }[];
+  } | null>(null);
+  const [isPinned, setIsPinned] = useState<boolean>(false);
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const touchTimeoutRef = useRef<any>(null);
 
@@ -60,7 +75,18 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
 
   useEffect(() => {
     setHoveredPoint(null);
+    setIsPinned(false);
   }, [timeRange]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPinned(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const fetchAnalyticsData = useCallback(async () => {
     if (!businessId || businessId === 'default-business') return;
@@ -262,11 +288,56 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
 
   // Build Time Series Data for SVG Spline Curve
   const chartData = useMemo(() => {
-    const daysMap = new Map<string, { date: string; revenue: number; orders: number }>();
+    type SlotType = {
+      date: string;
+      revenue: number;
+      orders: number;
+      orderList: {
+        id: string;
+        invoice: string;
+        time: string;
+        table: string;
+        amount: number;
+        itemsSummary: string;
+      }[];
+    };
+    const daysMap = new Map<string, SlotType>();
+
+    const buildOrderSummary = (s: SaleRecord) => {
+      const d = new Date(s.created_at);
+      const timeStr = !isNaN(d.getTime())
+        ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })
+        : 'Recently';
+
+      const tableStr = s.table_number
+        ? (s.table_number.toLowerCase().includes('table') ? s.table_number : `Table ${s.table_number}`)
+        : (s.sale_type === 'TAKEAWAY' || !s.table_id ? 'Takeaway' : 'Dine In');
+
+      const invStr = s.invoice_number || s.order_number || (s.id ? `ORD-${s.id.slice(0, 6)}` : 'Order');
+      const amount = Number(s.total_amount || (s as any).grand_total) || 0;
+
+      let itemsSummary = '';
+      if (Array.isArray(s.items) && s.items.length > 0) {
+        itemsSummary = s.items
+          .map((item) => (item.quantity && item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name))
+          .join(', ');
+      } else {
+        itemsSummary = `${s.items?.length || 1} items`;
+      }
+
+      return {
+        id: s.id || `${invStr}-${Math.random()}`,
+        invoice: invStr,
+        time: timeStr,
+        table: tableStr,
+        amount,
+        itemsSummary,
+      };
+    };
 
     if (timeRange === 'today') {
       const hours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
-      hours.forEach((h) => daysMap.set(h, { date: h, revenue: 0, orders: 0 }));
+      hours.forEach((h) => daysMap.set(h, { date: h, revenue: 0, orders: 0, orderList: [] }));
 
       filteredSales.forEach((s) => {
         const d = new Date(s.created_at);
@@ -278,8 +349,10 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
           return Math.abs(currHr - hr) < Math.abs(prevHr - hr) ? curr : prev;
         });
         const slot = daysMap.get(closest)!;
-        slot.revenue += Number(s.total_amount || (s as any).grand_total) || 0;
+        const amt = Number(s.total_amount || (s as any).grand_total) || 0;
+        slot.revenue += amt;
         slot.orders += 1;
+        slot.orderList.push(buildOrderSummary(s));
       });
     } else {
       let spanDays = timeRange === '7d' ? 7 : 30;
@@ -297,19 +370,20 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
         const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
         const dayStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
         const label = day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        daysMap.set(dayStr, { date: label, revenue: 0, orders: 0 });
+        daysMap.set(dayStr, { date: label, revenue: 0, orders: 0, orderList: [] });
       }
 
       filteredSales.forEach((s) => {
         const sDay = getSaleDateStr(s);
-        if (daysMap.has(sDay)) {
-          const slot = daysMap.get(sDay)!;
-          slot.revenue += Number(s.total_amount || (s as any).grand_total) || 0;
+        let slot = daysMap.get(sDay);
+        if (!slot && s.date_string) {
+          slot = daysMap.get(s.date_string);
+        }
+        if (slot) {
+          const amt = Number(s.total_amount || (s as any).grand_total) || 0;
+          slot.revenue += amt;
           slot.orders += 1;
-        } else if (s.date_string && daysMap.has(s.date_string)) {
-          const slot = daysMap.get(s.date_string)!;
-          slot.revenue += Number(s.total_amount || (s as any).grand_total) || 0;
-          slot.orders += 1;
+          slot.orderList.push(buildOrderSummary(s));
         }
       });
     }
@@ -396,6 +470,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
 
   // Pointer & Touch Tracing Handler: Snaps to nearest point along the curve
   const handlePointerTrack = useCallback((clientX: number) => {
+    if (isPinned) return; // Freeze tracking when pinned
     if (!points.length || !chartContainerRef.current) return;
     if (touchTimeoutRef.current) {
       clearTimeout(touchTimeoutRef.current);
@@ -417,13 +492,26 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
       }
     }
     setHoveredPoint(closest);
-  }, [points, svgWidth]);
+  }, [points, svgWidth, isPinned]);
 
   const handlePointerLeave = () => {
+    if (isPinned) return; // Keep tooltip visible when pinned
     setHoveredPoint(null);
   };
 
+  const handleChartClick = (e: React.MouseEvent) => {
+    // If clicked inside the tooltip card itself, don't toggle pin
+    if ((e.target as HTMLElement).closest('.orders-tooltip-card')) return;
+
+    if (isPinned) {
+      setIsPinned(false);
+    } else if (hoveredPoint) {
+      setIsPinned(true);
+    }
+  };
+
   const handleTouchEnd = () => {
+    if (isPinned) return;
     if (touchTimeoutRef.current) clearTimeout(touchTimeoutRef.current);
     touchTimeoutRef.current = setTimeout(() => {
       setHoveredPoint(null);
@@ -596,11 +684,16 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
           <div className="flex items-center gap-3 text-xs font-semibold text-zinc-600">
             {hoveredPoint ? (
               <div className="flex items-center gap-2 bg-amber-50 border border-amber-300/80 px-3 py-1.5 rounded-xl shadow-2xs animate-in fade-in duration-150">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                <span className={`w-2.5 h-2.5 rounded-full bg-amber-500 ${isPinned ? 'ring-2 ring-amber-400' : 'animate-pulse'}`}></span>
                 <span className="text-xs font-bold text-amber-950">
                   <span className="text-zinc-600 font-semibold">{hoveredPoint.date}:</span> {currencySymbol} {hoveredPoint.revenue.toLocaleString()}
                   <span className="text-amber-700/80 font-normal ml-1.5">({hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'order' : 'orders'})</span>
                 </span>
+                {isPinned && (
+                  <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded ml-1">
+                    Pinned 📌
+                  </span>
+                )}
               </div>
             ) : (
               <div className="flex items-center gap-2">
@@ -608,7 +701,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
                   <span className="w-3 h-3 rounded-full bg-amber-500 shadow-2xs"></span>
                   <span>Revenue ({currencySymbol})</span>
                 </div>
-                <span className="text-[11px] text-zinc-400 hidden sm:inline">• Hover or drag to trace</span>
+                <span className="text-[11px] text-zinc-400 hidden sm:inline">• Hover or click to trace & pin</span>
               </div>
             )}
           </div>
@@ -618,6 +711,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
         <div
           ref={chartContainerRef}
           className="relative w-full h-64 sm:h-72 select-none pt-2 touch-pan-y cursor-crosshair"
+          onClick={handleChartClick}
           onMouseMove={(e) => handlePointerTrack(e.clientX)}
           onMouseLeave={handlePointerLeave}
           onTouchStart={(e) => {
@@ -688,26 +782,24 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
                 />
               )}
 
-              {/* Normal Data Points on the Spline */}
+              {/* Subtle 2px Micro-Dots along the Spline */}
               {points.map((pt, idx) => {
                 const isHovered = hoveredPoint && hoveredPoint.date === pt.date && hoveredPoint.revenue === pt.revenue;
-                const dotRadius = points.length > 20 ? 3 : 4;
+                if (isHovered) return null; // Focus ring highlights it on hover
                 return (
                   <circle
                     key={idx}
                     cx={pt.x}
                     cy={pt.y}
-                    r={isHovered ? 6 : dotRadius}
-                    fill="#ffffff"
-                    stroke="#d97706"
-                    strokeWidth={isHovered ? 2.5 : 2}
-                    className="cursor-pointer transition-all"
-                    onClick={() => setHoveredPoint(pt)}
+                    r={2.2}
+                    fill="#d97706"
+                    opacity={0.8}
+                    className="transition-all"
                   />
                 );
               })}
 
-              {/* Interactive Crosshair & Highlight for Tracing */}
+              {/* Interactive Crosshair & Highlight Focus Ring for Tracing */}
               {hoveredPoint && (
                 <g className="pointer-events-none transition-opacity duration-150">
                   <line
@@ -718,57 +810,113 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({ business
                     stroke="#d97706"
                     strokeWidth="1.5"
                     strokeDasharray="3 3"
-                    opacity="0.8"
+                    opacity="0.85"
                   />
                   <circle
                     cx={hoveredPoint.x}
                     cy={hoveredPoint.y}
                     r="9"
                     fill="#f59e0b"
-                    fillOpacity="0.25"
+                    fillOpacity="0.22"
                   />
                   <circle
                     cx={hoveredPoint.x}
                     cy={hoveredPoint.y}
-                    r="5.5"
+                    r="5"
                     fill="#d97706"
                     stroke="#ffffff"
-                    strokeWidth="2.5"
+                    strokeWidth="2.2"
                   />
                 </g>
               )}
             </svg>
           )}
 
-          {/* Interactive Floating Tooltip */}
+          {/* Interactive Floating Tooltip with Individual Orders Breakdown */}
           {hoveredPoint && (
             <div
-              className="absolute pointer-events-none z-20 bg-zinc-900/95 backdrop-blur-md text-white border border-amber-500/40 px-3.5 py-2.5 rounded-xl shadow-xl text-xs transition-transform duration-75"
+              className={`absolute z-30 bg-zinc-900/95 backdrop-blur-md text-white border border-amber-500/40 p-3.5 rounded-xl shadow-2xl text-xs w-72 sm:w-80 transition-transform duration-75 orders-tooltip-card ${
+                isPinned ? 'pointer-events-auto ring-2 ring-amber-500/30' : 'pointer-events-none'
+              }`}
               style={{
                 left: `${(hoveredPoint.x / svgWidth) * 100}%`,
                 top: `${(hoveredPoint.y / svgHeight) * 100}%`,
                 transform: `${
-                  (hoveredPoint.x / svgWidth) < 0.22
-                    ? 'translateX(0)'
-                    : (hoveredPoint.x / svgWidth) > 0.78
-                      ? 'translateX(-100%)'
+                  (hoveredPoint.x / svgWidth) < 0.28
+                    ? 'translateX(10px)'
+                    : (hoveredPoint.x / svgWidth) > 0.72
+                      ? 'translateX(-105%)'
                       : 'translateX(-50%)'
-                } ${hoveredPoint.y < 70 ? 'translateY(12px)' : 'translateY(-110%)'}`,
+                } ${hoveredPoint.y < 80 ? 'translateY(14px)' : 'translateY(-112%)'}`,
               }}
             >
-              <div className="font-extrabold text-zinc-300 border-b border-zinc-800 pb-1 mb-1.5 flex items-center justify-between gap-4">
-                <span>{hoveredPoint.date}</span>
-                <span className="text-[10px] text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">
-                  {timeRange === 'today' ? 'Hourly' : 'Daily'}
-                </span>
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5 mb-2">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-extrabold text-white text-xs">{hoveredPoint.date}</span>
+                    {isPinned ? (
+                      <span className="text-[9px] bg-amber-500/20 text-amber-400 font-bold px-1.5 py-0.2 rounded border border-amber-500/30">
+                        Pinned 📌
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-zinc-400 font-semibold bg-zinc-800 px-1.5 py-0.2 rounded">
+                        {timeRange === 'today' ? 'Hourly' : 'Daily'}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-zinc-400 block font-normal mt-0.5">
+                    {hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'settled order' : 'settled orders'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-amber-400 font-black text-sm block">
+                    {currencySymbol} {hoveredPoint.revenue.toLocaleString()}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-4 text-amber-400 font-black text-sm">
-                <span className="text-zinc-400 text-xs font-medium">Revenue:</span>
-                <span>{currencySymbol} {hoveredPoint.revenue.toLocaleString()}</span>
+
+              {/* Individual Orders List (capped with custom scrollbar) */}
+              <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 select-text">
+                {(!hoveredPoint.orderList || hoveredPoint.orderList.length === 0) ? (
+                  <div className="text-[11px] text-zinc-500 italic py-2 text-center">
+                    No settled orders for this timeline
+                  </div>
+                ) : (
+                  hoveredPoint.orderList.map((order) => (
+                    <div
+                      key={order.id}
+                      className="bg-zinc-800/80 hover:bg-zinc-800 border border-zinc-700/60 rounded-lg p-2 transition text-left"
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-amber-400 font-mono tracking-tight">{order.invoice}</span>
+                        <span className="text-white font-black">{currencySymbol} {order.amount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-zinc-400 mt-1">
+                        <span className="text-zinc-300 font-medium">{order.table} • {order.time}</span>
+                        <span className="truncate max-w-[130px] text-zinc-400" title={order.itemsSummary}>
+                          {order.itemsSummary}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-              <div className="flex items-center justify-between gap-4 text-zinc-400 text-[11px] font-semibold mt-0.5">
-                <span>Settlements:</span>
-                <span className="text-zinc-200">{hoveredPoint.orders} {hoveredPoint.orders === 1 ? 'order' : 'orders'}</span>
+
+              {/* Footer Indicator / Hint */}
+              <div className="mt-2 pt-1.5 border-t border-zinc-800/80 flex items-center justify-between text-[10px] text-zinc-400">
+                <span>{isPinned ? 'Click chart or ESC to unpin' : 'Click point to pin & inspect'}</span>
+                {isPinned && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsPinned(false);
+                    }}
+                    className="text-amber-400 hover:text-amber-300 font-bold hover:underline cursor-pointer"
+                  >
+                    Unpin
+                  </button>
+                )}
               </div>
             </div>
           )}

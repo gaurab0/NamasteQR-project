@@ -84,7 +84,8 @@ router.get('/search', (req: Request, res: Response) => {
     }
 
     const rawCategory = (req.query.category as string || '').trim();
-    const results = queryCuratedLibrary(rawQuery, rawCategory);
+    const rawFoodType = (req.query.foodType as string || '').trim();
+    const results = queryCuratedLibrary(rawQuery, rawCategory, rawFoodType);
     return res.json({ results });
   } catch (error: any) {
     console.error('Error in search endpoint:', error);

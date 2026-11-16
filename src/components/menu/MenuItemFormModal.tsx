@@ -85,7 +85,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
       setDebouncedQuery(trimmed);
       try {
         // Fetch real web search images from our server endpoint
-        const res = await fetch(`/api/images/search?q=${encodeURIComponent(trimmed)}&category=${encodeURIComponent(category)}`);
+        const res = await fetch(`/api/images/search?q=${encodeURIComponent(trimmed)}&category=${encodeURIComponent(category)}&foodType=${encodeURIComponent(foodType)}`);
         if (res.ok) {
           const data = await res.json();
           if (data && Array.isArray(data.results)) {
@@ -100,7 +100,7 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
     }, 1000); // 1-second delay as requested
 
     return () => clearTimeout(timer);
-  }, [name, category]);
+  }, [name, category, foodType]);
 
   // Initialize or reset on open/edit change
   useEffect(() => {
@@ -210,7 +210,8 @@ export const MenuItemFormModal: React.FC<MenuItemFormModalProps> = ({
     
     setIsSearchingVariantImages(prev => ({ ...prev, [index]: true }));
     try {
-      const res = await fetch(`/api/images/search?q=${encodeURIComponent(combinedQuery)}&category=${encodeURIComponent(category)}`);
+      const variantFoodType = variants[index]?.food_type || foodType;
+      const res = await fetch(`/api/images/search?q=${encodeURIComponent(combinedQuery)}&category=${encodeURIComponent(category)}&foodType=${encodeURIComponent(variantFoodType)}`);
       if (res.ok) {
         const data = await res.json();
         if (data && Array.isArray(data.results)) {
