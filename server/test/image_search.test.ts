@@ -11,17 +11,29 @@ async function testImageService() {
   console.log('Test server listening on port 3099');
 
   try {
-    const testQueries = ['fanta', 'sprite', 'coke', 'biriyani', 'momo', 'americano', 'Cold Drinks'];
-    for (const q of testQueries) {
-      const res = await fetch(`http://localhost:3099/api/images/search?q=${encodeURIComponent(q)}`);
+    const testCases = [
+      { q: 'Lunch Set (Veg)', cat: 'Entrees' },
+      { q: 'Nepali Lunch Set (Chicken)', cat: 'Entrees' },
+      { q: 'Fanta', cat: 'Beverage' },
+      { q: 'Sprite', cat: 'Beverage' },
+      { q: 'Americano (Double)', cat: 'Coffee Corner' },
+      { q: 'Garlic Spaghetti', cat: 'Special Menu' },
+      { q: 'Jhol Momo Buff', cat: 'Starters' }
+    ];
+
+    for (const tc of testCases) {
+      const res = await fetch(`http://localhost:3099/api/images/search?q=${encodeURIComponent(tc.q)}&category=${encodeURIComponent(tc.cat)}`);
       const data = await res.json();
-      console.log(`\nResults for "${q}" (count: ${data.results.length}):`);
+      console.log(`\nResults for "${tc.q}" [Category: ${tc.cat}] (count: ${data.results.length}):`);
       for (const item of data.results) {
-        console.log(`  - [${item.source}] "${item.title}": ${item.url.slice(0, 80)}`);
+        console.log(`  - [${item.source}] "${item.title}": ${item.url.slice(0, 75)}...`);
+      }
+      if (data.results.length === 0) {
+        throw new Error(`Expected results for query: ${tc.q}`);
       }
     }
 
-    // Test proxy endpoint with a known image
+    // Test proxy endpoint with a verified image
     const sampleImageUrl = 'https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ad/Bottle_of_Water.jpg/960px-Bottle_of_Water.jpg';
     const proxyRes = await fetch(`http://localhost:3099/api/images/proxy?url=${encodeURIComponent(sampleImageUrl)}`);
     console.log(`\nProxy test status: ${proxyRes.status}, Content-Type: ${proxyRes.headers.get('content-type')}`);
