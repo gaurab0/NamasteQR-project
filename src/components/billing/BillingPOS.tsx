@@ -2,6 +2,7 @@ import { CreditAccountSelectionModal } from './CreditAccountSelectionModal';
 import { CashierSalesSheet } from './CashierSalesSheet';
 import { calculateBillTotals, computeOrderBillableAmounts } from '../../utils/taxCalculations';
 import { renderFormattedDate } from '../../utils/dateFormatter';
+import { amountToWords } from '../../utils/numberToWords';
 import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
 import { applySaleDeletion, formatVenueDateStr, isSaleInRevenueWindow } from '../../utils/revenueWindow';
 import { normalizeLegacyRole } from '../../utils/tabAccess';
@@ -43,6 +44,7 @@ import {
   Tag,
   ShieldAlert,
   Sliders,
+  WifiOff,
   Check,
   Building,
   User,
@@ -211,6 +213,172 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const [isCleaningOrders, setIsCleaningOrders] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const { dispatchPrint } = usePrinter();
+
+  // Background Sale Sync & Offline Queue
+  const [saleSyncStatus, setSaleSyncStatus] = useState<{
+    id: string;
+    tableOrCounter: string;
+    amount: number;
+    status: 'SYNCING' | 'SUCCESS' | 'OFFLINE_RETRY' | 'CONFLICT';
+    message: string;
+    invoiceNumber?: string;
+    errorMessage?: string;
+    optimisticSale: SaleRecord;
+  } | null>(null);
+
+  const syncBannerTimeoutRef = useRef<any>(null);
+  const isProcessingQueueRef = useRef<boolean>(false);
+
+  const getSalesQueueKey = () => `serveflow_sales_sync_queue_${business.id}`;
+
+  const processSalesQueue = async () => {
+    if (isProcessingQueueRef.current || !business.id) return;
+    const queueKey = getSalesQueueKey();
+    let queue: any[] = [];
+    try {
+      queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    } catch {}
+    if (!queue.length) return;
+
+    isProcessingQueueRef.current = true;
+    try {
+      while (queue.length > 0) {
+        const item = queue[0];
+        try {
+          const created = await rbacService.createSaleApi(item.salePayload, item.businessId);
+
+          if (item.salePayload.table_id) {
+            const tableObj = tables.find((t) => t.id === item.salePayload.table_id);
+            rbacService.acknowledgeTablePingApi(item.salePayload.table_id, item.businessId, tableObj?.table_number).catch(() => {});
+          }
+
+          // Swap optimistic sale in state with official server created sale
+          setSales((prev) => prev.map((s) => (s.id === item.clientQueueId ? created : s)));
+
+          // Remove completed item from queue
+          queue.shift();
+          localStorage.setItem(queueKey, JSON.stringify(queue));
+
+          if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
+          setSaleSyncStatus({
+            id: item.clientQueueId,
+            status: 'SUCCESS',
+            message: `Sale for ${item.optimisticSale.table_number || 'Counter'} recorded! Invoice #${created.invoice_number}`,
+            tableOrCounter: item.optimisticSale.table_number || 'Counter',
+            amount: Number(created.total_amount) || item.optimisticSale.total_amount || 0,
+            invoiceNumber: created.invoice_number,
+            optimisticSale: created,
+          });
+
+          syncBannerTimeoutRef.current = setTimeout(() => {
+            setSaleSyncStatus((curr) => (curr?.id === item.clientQueueId ? null : curr));
+          }, 8000);
+        } catch (err: any) {
+          if (err?.message && /already been settled/i.test(err.message)) {
+            // Concurrency conflict
+            queue.shift();
+            localStorage.setItem(queueKey, JSON.stringify(queue));
+            setSales((prev) => prev.filter((s) => s.id !== item.clientQueueId));
+            if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
+            setSaleSyncStatus({
+              id: item.clientQueueId,
+              status: 'CONFLICT',
+              message: `Order for ${item.optimisticSale.table_number || 'table'} was already settled by another cashier.`,
+              tableOrCounter: item.optimisticSale.table_number || 'table',
+              amount: item.optimisticSale.total_amount || 0,
+              errorMessage: err.message,
+              optimisticSale: item.optimisticSale,
+            });
+          } else {
+            // Network/offline error - keep in queue with backoff
+            item.retryCount = (item.retryCount || 0) + 1;
+            localStorage.setItem(queueKey, JSON.stringify(queue));
+            if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
+            setSaleSyncStatus({
+              id: item.clientQueueId,
+              status: 'OFFLINE_RETRY',
+              message: `Offline / Network drop. Sale for ${item.optimisticSale.table_number || 'Counter'} queued safely. Retrying automatically...`,
+              tableOrCounter: item.optimisticSale.table_number || 'Counter',
+              amount: item.optimisticSale.total_amount || 0,
+              optimisticSale: item.optimisticSale,
+            });
+            break;
+          }
+        }
+      }
+    } finally {
+      isProcessingQueueRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    processSalesQueue();
+    const handleOnline = () => processSalesQueue();
+    window.addEventListener('online', handleOnline);
+    const interval = setInterval(() => {
+      const stored = localStorage.getItem(getSalesQueueKey());
+      if (stored && stored !== '[]') {
+        processSalesQueue();
+      }
+    }, 12000);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      clearInterval(interval);
+      if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
+    };
+  }, [business.id]);
+
+  const handleQueueSale = (salePayload: Partial<SaleRecord>, optimisticSale: SaleRecord) => {
+    // 1. Optimistic state updates - instant dismissal & table clearing
+    setSales((prev) => [optimisticSale, ...prev.filter((s) => s.id !== optimisticSale.id)]);
+    if (optimisticSale.order_id) {
+      setPendingOrders((prev) => prev.filter((o) => o.id !== optimisticSale.order_id));
+      setPayFirstOrders((prev) => prev.filter((o) => o.id !== optimisticSale.order_id));
+    }
+    if (optimisticSale.table_id) {
+      setPendingOrders((prev) => prev.filter((o) => o.table_id !== optimisticSale.table_id));
+    }
+    setShowNewSaleModal(false);
+    setSelectedOrderToSettle(undefined);
+    setSelectedTableIdToOrder(undefined);
+
+    // 2. Direct automatic background printing (no preview modal blocking the screen)
+    dispatchPrint('BILL', { ...optimisticSale, tax_config: taxConfig }).catch((err) => {
+      console.warn('Direct receipt print dispatch:', err);
+    });
+
+    // 3. Set top sync status banner
+    if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
+    setSaleSyncStatus({
+      id: optimisticSale.id,
+      status: 'SYNCING',
+      message: `Syncing sale for ${optimisticSale.table_number || 'Counter'} (Rs. ${(optimisticSale.total_amount || 0).toFixed(2)})...`,
+      tableOrCounter: optimisticSale.table_number || 'Counter',
+      amount: optimisticSale.total_amount || 0,
+      optimisticSale,
+    });
+
+    // 4. Enqueue in persistent localStorage
+    const queueKey = getSalesQueueKey();
+    let queue: any[] = [];
+    try {
+      queue = JSON.parse(localStorage.getItem(queueKey) || '[]');
+    } catch {}
+    queue.push({
+      clientQueueId: optimisticSale.id,
+      businessId: business.id,
+      salePayload,
+      optimisticSale,
+      createdAt: Date.now(),
+      retryCount: 0,
+    });
+    localStorage.setItem(queueKey, JSON.stringify(queue));
+
+    // 5. Trigger background processor
+    processSalesQueue();
+  };
+
   // Load initial data
   useEffect(() => {
     loadBillingData();
@@ -346,7 +514,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       ]);
 
       if (configData) setTaxConfig(configData);
-      setSales(salesData || []);
+      setSales((prev) => {
+        const serverIds = new Set((salesData || []).map((s) => s.id));
+        const pendingOpt = prev.filter((s) => s.id.startsWith('sale-opt-') && !serverIds.has(s.id));
+        return [...pendingOpt, ...(salesData || [])];
+      });
       setTables(tablesData || []);
       setGlAccounts(glData || []);
       if (menuData) setMenuItems(menuData || []);
@@ -1058,6 +1230,60 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Background Sale Sync Banner */}
+      {saleSyncStatus && (
+        <div
+          id="billing-sync-banner"
+          className={`p-3.5 sm:p-4 rounded-xl flex flex-wrap items-center justify-between gap-3 shadow-sm text-xs sm:text-sm font-semibold transition-all border ${
+            saleSyncStatus.status === 'SYNCING'
+              ? 'bg-amber-50 border-amber-300 text-amber-900'
+              : saleSyncStatus.status === 'SUCCESS'
+              ? 'bg-emerald-700 text-white border-emerald-600'
+              : saleSyncStatus.status === 'OFFLINE_RETRY'
+              ? 'bg-amber-600 text-white border-amber-500'
+              : 'bg-rose-700 text-white border-rose-600'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            {saleSyncStatus.status === 'SYNCING' && <RefreshCw className="w-4 h-4 animate-spin text-amber-700" />}
+            {saleSyncStatus.status === 'SUCCESS' && <CheckCircle2 className="w-4 h-4 text-emerald-200" />}
+            {saleSyncStatus.status === 'OFFLINE_RETRY' && <WifiOff className="w-4 h-4 text-amber-200" />}
+            {saleSyncStatus.status === 'CONFLICT' && <AlertTriangle className="w-4 h-4 text-rose-200" />}
+            <span>{saleSyncStatus.message}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {saleSyncStatus.status === 'SUCCESS' && saleSyncStatus.optimisticSale && (
+              <button
+                type="button"
+                onClick={() => dispatchPrint('BILL', { ...saleSyncStatus.optimisticSale, tax_config: taxConfig })}
+                className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                Re-print Receipt
+              </button>
+            )}
+            {saleSyncStatus.status === 'OFFLINE_RETRY' && (
+              <button
+                type="button"
+                onClick={() => processSalesQueue()}
+                className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Retry Now
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSaleSyncStatus(null)}
+              className="p-1 rounded-lg opacity-75 hover:opacity-100 transition-opacity cursor-pointer text-current"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Feedback Toast */}
       {statusMessage && (
         <div
@@ -1979,6 +2205,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
             setSelectedTableIdToOrder(undefined);
           }}
           onGlAccountCreated={(acc) => setGlAccounts(prev => { if (!prev.some(a => a.id === acc.id)) return [...prev, acc]; return prev; })}
+          onQueueSale={handleQueueSale}
           onSaleCreated={(newSale) => {
             setSales((prev) => (prev.some((s) => s.id === newSale.id) ? prev : [newSale, ...prev]));
             if (newSale.order_id) {
@@ -2427,6 +2654,7 @@ interface NewSaleModalProps {
   isStoreOpen?: boolean;
   onClose: () => void;
   onSaleCreated: (sale: SaleRecord) => void;
+  onQueueSale?: (payload: Partial<SaleRecord>, optimisticSale: SaleRecord) => void;
   onOrderSettledConflict?: (orderId?: string, tableId?: string) => void;
   onGlAccountCreated: (acc: any) => void;
 }
@@ -2456,6 +2684,7 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
   isStoreOpen = true,
   onClose,
   onSaleCreated,
+  onQueueSale,
   onOrderSettledConflict,
   onGlAccountCreated,
 }) => {
@@ -3345,6 +3574,53 @@ const NewSaleModal: React.FC<NewSaleModalProps> = ({
       notes,
       comp_reason: compModeActive && compReason.trim() ? compReason.trim() : undefined,
     };
+
+    if (onQueueSale) {
+      const tempId = `sale-opt-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const tempInvoiceNo = customInvoiceNumber.trim() || `INV-${Date.now().toString().slice(-4)}`;
+      const tempOrderNo = customOrderNumber.trim() || (selectedOrderId ? selectedOrderId.slice(0, 8).toUpperCase() : `ORD-${Date.now().toString().slice(-4)}`);
+
+      const optimisticSale: SaleRecord = {
+        id: tempId,
+        business_id: business.id,
+        order_id: selectedOrderId || undefined,
+        table_id: selectedTableId || undefined,
+        table_number: resolvedTableNumber,
+        customer_name: customerName.trim() || 'Walk-in Guest',
+        customer_phone: customerPhone.trim(),
+        customer_pan: customerPan.trim() || undefined,
+        invoice_number: tempInvoiceNo,
+        order_number: tempOrderNo,
+        sale_type: saleType,
+        items: validItems,
+        is_packaging_comp: isAllPkgComp,
+        packaging_charge: packagingTotal,
+        packaging_qty: packagingQtyTotal,
+        subtotal,
+        discount_percent: totalDiscountPercent,
+        discount_amount: totalDiscountAmount,
+        promo_code: appliedPromo?.code || undefined,
+        promo_discount: effectivePromoDiscount,
+        taxes: taxesList,
+        total_tax: totalTax,
+        service_charge: serviceChargeAmount,
+        total_amount: grandTotal,
+        currency,
+        payment_method: paymentMethod,
+        credit_gl_account_id: paymentMethod === 'CREDIT' ? creditGlAccount?.id : undefined,
+        credit_gl_account_name: paymentMethod === 'CREDIT' ? creditGlAccount?.name : undefined,
+        credit_gl_account_number: paymentMethod === 'CREDIT' ? creditGlAccount?.number : undefined,
+        payment_status: 'PAID',
+        cashier_name: activeCashierName,
+        cashier_id: activeCashierId,
+        notes,
+        comp_reason: compModeActive && compReason.trim() ? compReason.trim() : undefined,
+        created_at: new Date().toISOString(),
+      };
+
+      onQueueSale(salePayload, optimisticSale);
+      return;
+    }
 
     try {
       setIsSubmitting(true);
@@ -4645,6 +4921,9 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
             <div className="flex justify-between text-sm font-black text-zinc-950">
               <span>TOTAL DUE:</span>
               <span>{currency} {totalAmount.toFixed(2)}</span>
+            </div>
+            <div className="text-[10px] text-zinc-600 italic pt-0.5 leading-snug">
+              In words: {amountToWords(totalAmount, currency)}
             </div>
           </div>
 

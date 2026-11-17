@@ -1,5 +1,6 @@
 import { renderFormattedDate } from '../utils/dateFormatter';
 import { computeOrderBillableAmounts } from '../utils/taxCalculations';
+import { amountToWords } from '../utils/numberToWords';
 import { determineItemStation } from '../utils/menuUtils';
 import {
   PrinterConfig,
@@ -496,14 +497,17 @@ class PrintService {
       const tax = data.total_tax ?? data.tax_amount ?? data.tax ?? 0;
       const discount = data.discount_amount ?? data.promo_discount ?? 0;
       const total = data.total_amount !== undefined && data.total_amount !== null ? Number(data.total_amount) : Math.max(0, subtotal + Number(tax) - Number(discount));
+      const billCurrency = data.currency || (data.tax_config?.currency_symbol || data.tax_config?.currency) || 'Rs.';
+      const inWords = amountToWords(total, billCurrency);
 
       html += `
           ${billable.packagingQty > 0 ? `<div class="row"><span>Packaging (${billable.packagingQty} pkgs):</span> <span>${billable.packagingTotal === 0 ? 'Complimentary (Rs 0.00)' : `Rs ${billable.packagingTotal.toFixed(2)}`}</span></div>` : ''}
-          <div class="row"><span>Subtotal:</span> <span>Rs ${Number(subtotal).toFixed(2)}</span></div>
-          ${Number(discount) > 0 ? `<div class="row"><span>Discount:</span> <span>-Rs ${Number(discount).toFixed(2)}</span></div><div class="row"><span>Taxable Amt:</span> <span>Rs ${Math.max(0, Number(subtotal) - Number(discount)).toFixed(2)}</span></div>` : ''}
-          <div class="row"><span>Tax / VAT:</span> <span>Rs ${Number(tax).toFixed(2)}</span></div>
+          <div class="row"><span>Subtotal:</span> <span>${escapeHtml(billCurrency)} ${Number(subtotal).toFixed(2)}</span></div>
+          ${Number(discount) > 0 ? `<div class="row"><span>Discount:</span> <span>-${escapeHtml(billCurrency)} ${Number(discount).toFixed(2)}</span></div><div class="row"><span>Taxable Amt:</span> <span>${escapeHtml(billCurrency)} ${Math.max(0, Number(subtotal) - Number(discount)).toFixed(2)}</span></div>` : ''}
+          <div class="row"><span>Tax / VAT:</span> <span>${escapeHtml(billCurrency)} ${Number(tax).toFixed(2)}</span></div>
           <div class="divider"></div>
-          <div class="row total-row"><span>TOTAL:</span> <span>Rs ${Number(total).toFixed(2)}</span></div>
+          <div class="row total-row"><span>TOTAL:</span> <span>${escapeHtml(billCurrency)} ${Number(total).toFixed(2)}</span></div>
+          <div style="font-size: 11px; margin-top: 6px; font-style: italic; color: #1e293b; text-align: left; line-height: 1.35;">In words: ${escapeHtml(inWords)}</div>
           
           <div class="footer">
             Thank you for dining with us!

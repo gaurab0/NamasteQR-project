@@ -5,6 +5,7 @@ import { SaleRecord, BusinessTaxConfig } from '../../types/rbac';
 import { Business } from '../../types/auth';
 import { renderFormattedDate } from '../../utils/dateFormatter';
 import { computeOrderBillableAmounts } from '../../utils/taxCalculations';
+import { amountToWords } from '../../utils/numberToWords';
 
 export const formatPanVatDisplay = (cfg?: BusinessTaxConfig | null) => {
   if (!cfg) return null;
@@ -295,6 +296,10 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               <span>
                 {sale.currency} {displayTotalAmount.toFixed(2)}
               </span>
+            </div>
+
+            <div className="text-[10px] text-zinc-600 italic pt-0.5 leading-snug">
+              In words: {amountToWords(displayTotalAmount, sale.currency)}
             </div>
 
             <div className="flex justify-between text-[10px] text-zinc-500 pt-1">

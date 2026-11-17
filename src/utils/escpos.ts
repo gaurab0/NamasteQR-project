@@ -1,6 +1,7 @@
 import { PrinterRole, ReceiptData } from '../types/printer.types';
 import { computeOrderBillableAmounts } from './taxCalculations';
 import { determineItemStation } from './menuUtils';
+import { amountToWords } from './numberToWords';
 
 /**
  * ESC/POS Command Constants
@@ -466,10 +467,14 @@ export class EscPosEncoder {
       }
       if (tax > 0) encoder.row('Tax / VAT:', `Rs ${tax.toFixed(2)}`, cols);
 
+      const billCurrency = data.currency || (data.tax_config?.currency_symbol || data.tax_config?.currency) || 'Rs.';
       encoder.divider('=', cols);
       encoder.bold(true).size('double-height');
-      encoder.row('GRAND TOTAL:', `Rs ${total.toFixed(2)}`, cols);
+      encoder.row('GRAND TOTAL:', `${billCurrency} ${total.toFixed(2)}`, cols);
       encoder.size('normal').bold(false);
+
+      const inWords = amountToWords(total, billCurrency);
+      encoder.align('left').text(`In words: ${inWords}`).feed(1);
 
       if (data.comp_reason) {
         encoder.divider('-', cols);
