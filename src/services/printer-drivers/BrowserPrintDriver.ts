@@ -99,42 +99,59 @@ export class BrowserPrintDriver implements ThermalPrinterDriver {
    */
   public printHtml(htmlContent: string): Promise<boolean> {
     return new Promise((resolve) => {
+      let printed = false;
       const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '-1000px';
-      iframe.style.bottom = '-1000px';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
+      // Non-zero dimensions placed off-screen so Chromium layout engine does not skip paint
+      iframe.style.position = 'absolute';
+      iframe.style.left = '-9999px';
+      iframe.style.top = '-9999px';
+      iframe.style.width = '320px';
+      iframe.style.height = '600px';
       iframe.style.border = 'none';
+
+      const triggerPrint = () => {
+        if (printed) return;
+        printed = true;
+
+        setTimeout(() => {
+          try {
+            const win = iframe.contentWindow;
+            if (win) {
+              win.focus();
+              win.print();
+            }
+          } catch (e) {
+            console.warn('[BrowserPrintDriver] Print invocation exception:', e);
+          }
+
+          setTimeout(() => {
+            if (document.body.contains(iframe)) {
+              document.body.removeChild(iframe);
+            }
+            resolve(true);
+          }, 1500);
+        }, 250);
+      };
+
+      iframe.onload = triggerPrint;
 
       document.body.appendChild(iframe);
 
-      const win = iframe.contentWindow;
-      if (!win) {
-        document.body.removeChild(iframe);
-        resolve(false);
-        return;
+      if ('srcdoc' in iframe) {
+        iframe.srcdoc = htmlContent;
+      } else {
+        const win = iframe.contentWindow;
+        if (win) {
+          win.document.open();
+          win.document.write(htmlContent);
+          win.document.close();
+        }
       }
 
-      win.document.open();
-      win.document.write(htmlContent);
-      win.document.close();
-
+      // Safety fallback in case onload does not fire within 600ms
       setTimeout(() => {
-        try {
-          win.focus();
-          win.print();
-        } catch (e) {
-          console.warn('[BrowserPrintDriver] Print invocation exception:', e);
-        }
-
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-          resolve(true);
-        }, 1200);
-      }, 300);
+        if (!printed) triggerPrint();
+      }, 600);
     });
   }
 
