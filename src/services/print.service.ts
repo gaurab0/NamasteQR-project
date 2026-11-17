@@ -340,6 +340,8 @@ class PrintService {
             .row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
             .item { font-size: 13px; margin-bottom: 6px; }
             .item-qty { font-weight: bold; }
+            .kot-item { font-size: 16px; font-weight: bold; line-height: 1.35; margin-bottom: 8px; }
+            .kot-item-qty { font-weight: 800; font-size: 16px; margin-right: 4px; }
             .notes { font-size: 11px; font-style: italic; margin-left: 12px; color: #333; }
             .divider { border-bottom: 1px dashed #000; margin: 8px 0; }
             .footer { text-align: center; font-size: 11px; margin-top: 12px; border-top: 1px dashed #000; padding-top: 8px; }
@@ -413,8 +415,8 @@ class PrintService {
         }
 
         html += `
-          <div class="item">
-            <span class="item-qty">${Number(item.quantity) || 1}x</span> ${tagHtml}${escapeHtml(item.name)}
+          <div class="item kot-item">
+            <span class="item-qty kot-item-qty">{${Number(item.quantity) || 1}}</span> ${tagHtml}${escapeHtml(item.name)}
             ${(() => {
               const q = Number(item.quantity) || 1;
               const pq = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? q : 0)) || 0);

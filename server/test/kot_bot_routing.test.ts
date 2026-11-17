@@ -47,8 +47,10 @@ async function testKotBotRouting() {
   const bothText = new TextDecoder().decode(bothReceipt);
   assert(bothText.includes('KOT / BOT') || bothText.includes('KITCHEN & BAR'), 'Must have combined header');
   assert(bothText.includes('[KITCHEN] Veg Chowmein'), 'Food item must be tagged [KITCHEN]');
+  assert(bothText.includes('{2} [KITCHEN] Veg Chowmein'), 'Food item quantity must be enclosed in curly brackets {2}');
   assert(bothText.includes('[BAR] Fresh Lime Soda'), 'Drink item must be tagged [BAR]');
-  console.log('  ✅ PASS: Mixed order generated with combined title and [KITCHEN]/[BAR] tags.');
+  assert(bothText.includes('{2} [BAR] Fresh Lime Soda'), 'Drink item quantity must be enclosed in curly brackets {2}');
+  console.log('  ✅ PASS: Mixed order generated with combined title, curly bracket {qty}, and [KITCHEN]/[BAR] tags.');
   passed++;
 
   // Test 2: Dynamic title for Food-Only order on BOTH printer
@@ -93,7 +95,10 @@ async function testKotBotRouting() {
   assert(htmlOutput.includes('KOT / BOT') || htmlOutput.includes('KITCHEN &amp; BAR'), 'HTML must have combined header');
   assert(htmlOutput.includes('[KITCHEN]'), 'HTML must have [KITCHEN] badge');
   assert(htmlOutput.includes('[BAR]'), 'HTML must have [BAR] badge');
-  console.log('  ✅ PASS: HTML spooler output formatted with badges and combined header.');
+  assert(htmlOutput.includes('{2}</span>'), 'HTML KOT item quantity must be inside curly brackets {2}');
+  assert(htmlOutput.includes('kot-item'), 'HTML KOT item must use .kot-item class for larger font');
+  assert(!htmlOutput.includes('>2x</span>'), 'HTML KOT item must not use 2x format');
+  console.log('  ✅ PASS: HTML spooler output formatted with badges, {qty} curly brackets, and .kot-item font.');
   passed++;
 
   console.log(`\n========================================`);

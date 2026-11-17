@@ -25,6 +25,11 @@ import {
   Sliders,
   ChevronRight,
   Sparkles,
+  Download,
+  Copy,
+  Zap,
+  ShieldCheck,
+  ExternalLink,
 } from 'lucide-react';
 import { usePrinter } from '../../contexts/PrinterContext';
 import { PrinterConfig, PrinterRole, ConnectionType } from '../../types/printer.types';
@@ -62,6 +67,93 @@ export const PrinterConfiguration: React.FC = () => {
 
   // Active guide tab toggle
   const [showGuide, setShowGuide] = useState(false);
+
+  // Desktop POS launcher modal & copy state
+  const [showPosModal, setShowPosModal] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
+
+  const getPosTargetUrl = () => {
+    const origin = typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://namasteqr.com';
+    return `${origin}/dashboard`;
+  };
+
+  const manualShortcutCommand = `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing --user-data-dir="C:\\ServeFlowPOS" --app=${getPosTargetUrl()}`;
+
+  const handleCopyCommand = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(manualShortcutCommand);
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2500);
+    }
+  };
+
+  const handleDownloadPosLauncher = () => {
+    const targetUrl = getPosTargetUrl();
+    const batchContent = `@echo off
+title ServeFlow POS - Desktop Shortcut Setup
+color 0A
+echo ========================================================
+echo   Setting up ServeFlow POS (Silent Auto-Printing)
+echo ========================================================
+echo.
+
+set "TARGET_URL=${targetUrl}"
+set "USER_DIR=%USERPROFILE%\\ServeFlowPOS"
+
+:: Detect Chrome or Edge executable on this PC
+set "BROWSER_PATH="
+if exist "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" set "BROWSER_PATH=C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+if not defined BROWSER_PATH if exist "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe" set "BROWSER_PATH=C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+if not defined BROWSER_PATH if exist "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe" set "BROWSER_PATH=%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe"
+if not defined BROWSER_PATH if exist "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" set "BROWSER_PATH=C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+if not defined BROWSER_PATH if exist "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe" set "BROWSER_PATH=C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+
+if not defined BROWSER_PATH (
+    echo [ERROR] Neither Google Chrome nor Microsoft Edge was found on this PC.
+    echo Please install Google Chrome from https://www.google.com/chrome/ and run this setup again.
+    pause
+    exit /b 1
+)
+
+:: Create VBS script to generate the Windows desktop shortcut
+set "VBS_SCRIPT=%TEMP%\\create_serveflow_pos_shortcut.vbs"
+(
+echo Set oWS = WScript.CreateObject("WScript.Shell"^)
+echo sLinkFile = oWS.SpecialFolders("Desktop"^) ^& "\\ServeFlow POS (Silent Printing).lnk"
+echo Set oLink = oWS.CreateShortcut(sLinkFile^)
+echo oLink.TargetPath = "%BROWSER_PATH%"
+echo oLink.Arguments = "--kiosk-printing --user-data-dir=""" ^& "%USER_DIR%" ^& """ --app=%TARGET_URL%"
+echo oLink.Description = "ServeFlow POS Terminal - Silent Printing Mode"
+echo oLink.IconLocation = "%BROWSER_PATH%,0"
+echo oLink.Save
+) > "%VBS_SCRIPT%"
+
+:: Execute the VBS script
+cscript //nologo "%VBS_SCRIPT%"
+del "%VBS_SCRIPT%"
+
+echo.
+echo ========================================================
+echo   [SUCCESS] Shortcut created on your Desktop!
+echo   Icon: ServeFlow POS (Silent Printing)
+echo ========================================================
+echo.
+echo Launching ServeFlow POS Terminal now...
+start "" "%BROWSER_PATH%" --kiosk-printing --user-data-dir="%USER_DIR%" --app=%TARGET_URL%
+timeout /t 3 >nul
+exit
+`;
+
+    const blob = new Blob([batchContent], { type: 'application/x-bat' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Setup-ServeFlow-POS.bat';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // Modal ping state
   const [modalPingStatus, setModalPingStatus] = useState<{
@@ -268,7 +360,16 @@ export const PrinterConfiguration: React.FC = () => {
                 Configure physical receipt printers and map them to specific tasks (KOT, Cashier, Bar, or Combined KOT/BOT).
               </p>
             </div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowPosModal(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 transition cursor-pointer shadow-2xs"
+                title="Download 1-Click Desktop POS with Silent Thermal Printing"
+              >
+                <Monitor className="w-4 h-4 text-amber-700" />
+                <span>Desktop POS (Silent Print)</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setShowGuide(!showGuide)}
@@ -340,6 +441,34 @@ export const PrinterConfiguration: React.FC = () => {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* 1-Click Silent Desktop POS Terminal Banner */}
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/5 border border-amber-300/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Monitor className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-zinc-900">Dedicated Desktop POS & Silent Auto-Printing</h3>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                    Recommended for POS
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-600 mt-0.5 leading-relaxed">
+                  Turn your computer into a native POS cash register window. Bypasses the browser print preview dialog for 100% silent, zero-click thermal printing on customer orders.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPosModal(true)}
+              className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer shrink-0 justify-center"
+            >
+              <Download className="w-4 h-4" />
+              <span>Setup Desktop POS (1-Click)</span>
+            </button>
           </div>
 
           {/* Expandable "Any Printer" Guide Banner */}
@@ -1208,6 +1337,148 @@ export const PrinterConfiguration: React.FC = () => {
                   Save Printer Profile
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: 1-CLICK DESKTOP POS SETUP & SILENT PRINTING LAUNCHER            */}
+      {/* ========================================================================= */}
+      {showPosModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-zinc-200 space-y-5 animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Monitor className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-zinc-900">
+                    ServeFlow POS Desktop Terminal
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Isolated cashier window with zero-click silent thermal printing.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPosModal(false)}
+                className="w-8 h-8 rounded-full hover:bg-zinc-100 flex items-center justify-center text-zinc-400 hover:text-zinc-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Value Proposition Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200/80">
+                <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center mb-2">
+                  <Zap className="w-4 h-4 text-amber-600" />
+                </div>
+                <h4 className="text-xs font-bold text-zinc-900">100% Silent Print</h4>
+                <p className="text-[11px] text-zinc-600 mt-0.5 leading-snug">
+                  Bypasses the preview popup. Spits paper out instantly.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200/80">
+                <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center mb-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                </div>
+                <h4 className="text-xs font-bold text-zinc-900">Distraction-Free</h4>
+                <p className="text-[11px] text-zinc-600 mt-0.5 leading-snug">
+                  No URL address bar or tabs. Cashiers stay locked into POS.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-indigo-50/70 border border-indigo-200/80">
+                <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center mb-2">
+                  <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                </div>
+                <h4 className="text-xs font-bold text-zinc-900">Isolated Session</h4>
+                <p className="text-[11px] text-zinc-600 mt-0.5 leading-snug">
+                  Closing personal Chrome tabs never logs you out of the POS.
+                </p>
+              </div>
+            </div>
+
+            {/* Primary Action: 1-Click Installer */}
+            <div className="p-5 rounded-2xl bg-zinc-900 text-white space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    Recommended (Fastest Setup)
+                  </h4>
+                  <p className="text-xs text-zinc-300 mt-0.5">
+                    Downloads a 1-click Windows shortcut generator.
+                  </p>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
+                  Windows 10 / 11
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadPosLauncher}
+                className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-extrabold text-sm transition shadow-md cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download 1-Click Desktop POS Setup (.bat)</span>
+              </button>
+
+              <div className="text-[11px] text-zinc-400 leading-snug pt-1 flex items-start gap-1.5">
+                <span className="text-amber-400 font-bold shrink-0">How to use:</span>
+                <span>
+                  Double-click the downloaded file once. It creates the <strong>ServeFlow POS (Silent Printing)</strong> icon on your Desktop and opens the POS window immediately.
+                </span>
+              </div>
+            </div>
+
+            {/* Manual Setup Alternative */}
+            <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-800">
+                  Manual Windows Shortcut Command
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyCommand}
+                  className="flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer"
+                >
+                  {copiedCmd ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">Copied to Clipboard!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Target Command</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="p-2.5 rounded-xl bg-white border border-zinc-300 font-mono text-[10px] text-zinc-700 select-all overflow-x-auto whitespace-pre">
+                {manualShortcutCommand}
+              </div>
+              <p className="text-[10px] text-zinc-500 leading-snug">
+                Or right-click your Desktop → <strong>New → Shortcut</strong> → paste the command above → name it <em>ServeFlow POS</em>.
+              </p>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPosModal(false)}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

@@ -386,7 +386,7 @@ export class EscPosEncoder {
           const tag = st === 'BOTH' ? '[BOTH] ' : st === 'BAR' ? '[BAR] ' : '[KITCHEN] ';
           displayName = `${tag}${name}`;
         }
-        encoder.row(`${qty}x ${displayName}`, `[ ${qty} ]`, cols);
+        encoder.row(`{${qty}} ${displayName}`, `{${qty}}`, cols);
         const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? qty : 0)) || 0);
         if (packQty > 0 || item.is_packaged) {
           const packLabel = packQty > 1 && packQty < qty
