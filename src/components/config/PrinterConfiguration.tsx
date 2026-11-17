@@ -853,7 +853,7 @@ export const PrinterConfiguration: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-snug">
-                      Universal browser print. Compatible with ANY desktop printer, HP, Canon, Brother, Epson, Wi-Fi, or PDF virtual printer.
+                      Universal browser print. Uses browser print window (or silent printing when Chrome is run with <code className="font-mono text-zinc-700 bg-zinc-100 px-1 py-0.5 rounded">--kiosk-printing</code>).
                     </p>
                   </div>
 
@@ -880,7 +880,7 @@ export const PrinterConfiguration: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-snug">
-                      Direct raw ESC/POS over TCP port 9100. Stream to thermal printers connected to Ethernet router or Wi-Fi.
+                      Direct raw ESC/POS over TCP port 9100. Silent background printing with zero browser popups.
                     </p>
                   </div>
 
@@ -894,19 +894,19 @@ export const PrinterConfiguration: React.FC = () => {
                     }
                     className={`p-3.5 rounded-2xl border-2 transition cursor-pointer ${
                       editingPrinter.connectionType === 'USB'
-                        ? 'border-indigo-600 bg-indigo-50/50'
+                        ? 'border-amber-600 bg-amber-50/50 ring-2 ring-amber-500/20'
                         : 'border-zinc-200 hover:border-zinc-300 bg-white'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1.5">
                       <Usb className="w-4 h-4 text-amber-600" />
                       <span className="font-bold text-xs text-zinc-900">USB Direct (WebUSB)</span>
-                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 ml-auto">
-                        High Speed
+                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 ml-auto">
+                        Silent Auto-Print
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-snug">
-                      Direct USB ESC/POS binary streaming. Zero spooler delay. Chrome/Edge native permission pairing.
+                      Direct hardware USB streaming. 100% silent automatic printing directly to thermal printer (no browser popups). Recommended for Xprinter.
                     </p>
                   </div>
 
@@ -1069,14 +1069,20 @@ export const PrinterConfiguration: React.FC = () => {
                 )}
 
                 {editingPrinter.connectionType === 'SYSTEM' && (
-                  <div className="text-xs text-zinc-600 space-y-1">
+                  <div className="text-xs text-zinc-600 space-y-2">
                     <div className="font-bold text-zinc-800 flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                       Universal Print Spooler Active
                     </div>
-                    <p className="text-[11px] text-zinc-500">
-                      When printing, tickets will route to your operating system's standard print dialog. You can select any printer installed on your PC, tablet, or smartphone (Canon, HP, Brother, Epson, PDF, or thermal printer drivers).
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Routes print jobs through your operating system driver dialog.
                     </p>
+                    <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/80 text-[11px] text-amber-900 leading-snug flex items-start gap-2">
+                      <span className="font-bold shrink-0">💡 Silent Printing:</span>
+                      <span>
+                        To print automatically <strong>without any browser popup on screen</strong>, select <strong>"USB Direct (WebUSB)"</strong> above, or launch your Chrome shortcut with the <code className="font-mono bg-white px-1 py-0.5 rounded border border-amber-300">--kiosk-printing</code> flag.
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>

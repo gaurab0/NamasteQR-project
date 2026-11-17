@@ -353,6 +353,14 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     if (!businessId) return;
 
+    // Strictly disable background auto-printing on customer-facing pages (table ordering, menu preview)
+    const isCustomerFacingRoute = typeof window !== 'undefined' && (
+      window.location.pathname.startsWith('/table') ||
+      window.location.pathname.startsWith('/menu') ||
+      window.location.pathname.includes('/customer')
+    );
+    if (isCustomerFacingRoute) return;
+
     socketService.joinBusiness(businessId);
 
     const unsubOrder = socketService.subscribeToOrders(async (order: any) => {
