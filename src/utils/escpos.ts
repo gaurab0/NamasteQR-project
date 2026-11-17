@@ -338,7 +338,11 @@ export class EscPosEncoder {
       ? data.created_at 
       : new Date(data.created_at || Date.now()).toLocaleString();
 
-    encoder.row(`Order #: ${orderNo}`, `Table: ${tableNo}`, cols);
+    if (isKotOrBar) {
+      encoder.bold(true).row(`Order #: ${orderNo}`, `Table: ${tableNo}`, cols).bold(false);
+    } else {
+      encoder.row(`Order #: ${orderNo}`, `Table: ${tableNo}`, cols);
+    }
     if (data.invoice_number) {
       encoder.row(`Invoice #: ${data.invoice_number}`, '', cols);
     }

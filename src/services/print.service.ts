@@ -340,6 +340,7 @@ class PrintService {
             .row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
             .item { font-size: 13px; margin-bottom: 6px; }
             .item-qty { font-weight: bold; }
+            .kot-header-line { font-size: 15px; font-weight: bold; margin: 2px 0; }
             .kot-item { font-size: 16px; font-weight: bold; line-height: 1.35; margin-bottom: 8px; }
             .kot-item-qty { font-weight: 800; font-size: 16px; margin-right: 4px; }
             .notes { font-size: 11px; font-style: italic; margin-left: 12px; color: #333; }
@@ -389,11 +390,11 @@ class PrintService {
 
       html += `
           <div class="header">
-            <h2>${ticketTitle}</h2>
+            <h2 class="kot-header-line">${ticketTitle}</h2>
             ${isOrderMore ? '<div style="font-weight: bold; font-size: 13px; color: #6b21a8; margin: 2px 0;">[ORDER MORE / FOLLOW-UP]</div>' : ''}
-            <h1>${escapeHtml(orderLabel)} ${escapeHtml(orderNumber)}</h1>
-            <div>Table: ${escapeHtml(tableNo)}</div>
-            <div>Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
+            <div class="kot-header-line">${escapeHtml(orderLabel)} ${escapeHtml(orderNumber)}</div>
+            <div class="kot-header-line">Table: ${escapeHtml(tableNo)}</div>
+            <div style="font-size: 12px; margin-top: 3px;">Time: ${escapeHtml(time)} | Server: ${escapeHtml(serverName)}</div>
           </div>
       `;
 

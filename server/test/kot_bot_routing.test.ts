@@ -97,8 +97,9 @@ async function testKotBotRouting() {
   assert(htmlOutput.includes('[BAR]'), 'HTML must have [BAR] badge');
   assert(htmlOutput.includes('{2}</span>'), 'HTML KOT item quantity must be inside curly brackets {2}');
   assert(htmlOutput.includes('kot-item'), 'HTML KOT item must use .kot-item class for larger font');
+  assert(htmlOutput.includes('kot-header-line'), 'HTML KOT header must use .kot-header-line to align title, order number, and table number');
   assert(!htmlOutput.includes('>2x</span>'), 'HTML KOT item must not use 2x format');
-  console.log('  ✅ PASS: HTML spooler output formatted with badges, {qty} curly brackets, and .kot-item font.');
+  console.log('  ✅ PASS: HTML spooler output formatted with badges, {qty} curly brackets, and unified kot-header-line sizes.');
   passed++;
 
   console.log(`\n========================================`);
