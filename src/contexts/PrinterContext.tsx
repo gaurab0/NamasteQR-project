@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   PrinterConfig,
   KdsPrintMode,
@@ -10,6 +10,7 @@ import { printService } from '../services/print.service';
 import { useAuth } from '../context/AuthContext';
 import { rbacService } from '../services/rbac.service';
 import { socketService } from '../services/socket.service';
+import { determineItemStation } from '../utils/menuUtils';
 
 interface PrinterContextValue {
   // Existing state & methods
@@ -52,6 +53,8 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [isConnected, setIsConnected] = useState<boolean>(true); // browser default is ready
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const recentBothPrintsRef = useRef<Map<string, number>>(new Map());
+  const autoPrintedOrderRoundsRef = useRef<Set<string>>(new Set());
 
   const { user } = useAuth();
   const businessId = user?.business?.id;
@@ -98,6 +101,8 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const storedMode = localStorage.getItem('serveflow_kds_mode');
       if (storedMode) {
         setKdsPrintModeState(storedMode as KdsPrintMode);
+      } else if (parsed && parsed.some((p: any) => p.enabled && (p.role === 'KOT' || p.role === 'BAR' || p.role === 'BOTH'))) {
+        setKdsPrintModeState('BOTH');
       }
     } catch (e) {
       console.warn('Failed to parse printer config from local storage', e);
@@ -251,7 +256,12 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } else {
         newPrinters.push(config);
       }
-      saveToStorage(newPrinters, kdsPrintMode);
+      let nextMode = kdsPrintMode;
+      if (nextMode === 'DISPLAY_ONLY' && (config.role === 'KOT' || config.role === 'BAR' || config.role === 'BOTH') && config.enabled !== false) {
+        nextMode = 'BOTH';
+        setKdsPrintModeState('BOTH');
+      }
+      saveToStorage(newPrinters, nextMode);
       return newPrinters;
     });
 
@@ -278,17 +288,58 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [printers, businessId]);
 
   const dispatchPrint = useCallback(async (role: PrinterRole, data: any): Promise<boolean> => {
-    const assignedPrinters = printers.filter((p) => p.role === role && p.enabled);
     setIsPrinting(true);
     try {
-      if (assignedPrinters.length === 0) {
+      // Direct station printers (e.g. KOT, BAR, BILL, or direct BOTH)
+      const directPrinters = printers.filter((p) => p.role === role && p.enabled);
+
+      // If this is an order ticket (KOT, BAR, or BOTH), also identify any enabled 'BOTH' printers
+      const bothPrinters = (role === 'KOT' || role === 'BAR' || role === 'BOTH')
+        ? printers.filter((p) => p.role === 'BOTH' && p.enabled)
+        : [];
+
+      // Fallback to universal system spooler if no printers are configured for this task
+      if (directPrinters.length === 0 && bothPrinters.length === 0) {
         return await printService.printTask(role, data, undefined);
       }
+
       let allSuccess = true;
-      for (const printer of assignedPrinters) {
-        const success = await printService.printTask(role, data, printer);
-        if (!success) allSuccess = false;
+
+      // 1. Dispatch to dedicated station printers (avoid double-calling if role === 'BOTH')
+      if (role !== 'BOTH') {
+        for (const printer of directPrinters) {
+          const success = await printService.printTask(role, data, printer);
+          if (!success) allSuccess = false;
+        }
       }
+
+      // 2. Dispatch to 'BOTH' (Combined KOT/BOT) printers with de-duplication
+      if (bothPrinters.length > 0) {
+        const now = Date.now();
+        const orderId = String(data?.id || data?.order_number || 'ORD');
+        const round = String(data?.round_number || 1);
+
+        for (const printer of bothPrinters) {
+          const dedupeKey = `${printer.id}_${orderId}_${round}`;
+          const lastPrintTime = recentBothPrintsRef.current.get(dedupeKey) || 0;
+          if (now - lastPrintTime < 4000) {
+            // Already printed on this BOTH printer within 4 seconds (from paired KOT & BAR dispatch)
+            continue;
+          }
+          recentBothPrintsRef.current.set(dedupeKey, now);
+
+          // Periodically prune cache
+          if (recentBothPrintsRef.current.size > 50) {
+            for (const [k, t] of recentBothPrintsRef.current.entries()) {
+              if (now - t > 30000) recentBothPrintsRef.current.delete(k);
+            }
+          }
+
+          const success = await printService.printTask('BOTH', data, printer);
+          if (!success) allSuccess = false;
+        }
+      }
+
       return allSuccess;
     } catch (err: any) {
       console.error(`[dispatchPrint] Error printing ${role}:`, err);
@@ -297,6 +348,66 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setIsPrinting(false);
     }
   }, [printers]);
+
+  // App-Wide Background Auto-Print: Listen for incoming orders across POS, KDS, and tables
+  useEffect(() => {
+    if (!businessId) return;
+
+    socketService.joinBusiness(businessId);
+
+    const unsubOrder = socketService.subscribeToOrders(async (order: any) => {
+      if (!order || !order.id) return;
+      if (order.status === 'CANCELLED' || order.status === 'COMPLETED' || order.settled) return;
+
+      const currentMode = kdsPrintMode || (user?.business?.kds_print_mode as KdsPrintMode);
+      if (currentMode === 'DISPLAY_ONLY') return;
+
+      // Check if this device has any enabled printers that can print KOT, BAR, or BOTH
+      const hasEligiblePrinter = printers.some(
+        (p) => p.enabled && p.autoPrintKds !== false && (p.role === 'KOT' || p.role === 'BAR' || p.role === 'BOTH')
+      );
+      if (!hasEligiblePrinter) return;
+
+      const orderRound = order.round_number || 1;
+      const printKey = `${order.id}_round_${orderRound}`;
+
+      if (autoPrintedOrderRoundsRef.current.has(printKey)) return;
+
+      // Ignore orders created > 10 minutes ago to avoid printing stale orders on page reload
+      const createdAt = order.created_at ? new Date(order.created_at).getTime() : 0;
+      if (createdAt && Date.now() - createdAt > 10 * 60 * 1000) {
+        autoPrintedOrderRoundsRef.current.add(printKey);
+        return;
+      }
+
+      autoPrintedOrderRoundsRef.current.add(printKey);
+
+      // Prune if set gets large
+      if (autoPrintedOrderRoundsRef.current.size > 200) {
+        const arr = Array.from(autoPrintedOrderRoundsRef.current);
+        autoPrintedOrderRoundsRef.current = new Set(arr.slice(arr.length - 100));
+      }
+
+      const rawItems = order.items || [];
+      const hasKitchenItems = rawItems.some((it: any) => {
+        const st = (it.station || determineItemStation(it) || '').toUpperCase();
+        return st !== 'BAR';
+      });
+      const hasBarItems = rawItems.some((it: any) => {
+        const st = (it.station || determineItemStation(it) || '').toUpperCase();
+        return st === 'BAR' || st === 'BOTH';
+      });
+
+      if (hasKitchenItems) {
+        await dispatchPrint('KOT', order);
+      }
+      if (hasBarItems) {
+        await dispatchPrint('BAR', order);
+      }
+    });
+
+    return () => unsubOrder();
+  }, [businessId, kdsPrintMode, user?.business?.kds_print_mode, printers, dispatchPrint]);
 
   const probeNetworkPrinter = useCallback(async (host: string, port: number = 9100) => {
     try {

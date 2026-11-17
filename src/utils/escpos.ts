@@ -1,5 +1,6 @@
 import { PrinterRole, ReceiptData } from '../types/printer.types';
 import { computeOrderBillableAmounts } from './taxCalculations';
+import { determineItemStation } from './menuUtils';
 
 /**
  * ESC/POS Command Constants
@@ -241,12 +242,13 @@ export class EscPosEncoder {
     const role = options.role || (data.order_type === 'KOT' ? 'KOT' : 'BILL');
     const isKot = role === 'KOT';
     const isBar = role === 'BAR';
-    const isKotOrBar = isKot || isBar;
+    const isBoth = role === 'BOTH';
+    const isKotOrBar = isKot || isBar || isBoth;
 
     const encoder = new EscPosEncoder();
 
     // Kick cash drawer if configured for cashier receipts
-    if (options.openCashDrawer && !isKot && !isBar) {
+    if (options.openCashDrawer && !isKotOrBar) {
       encoder.cashDrawer();
     }
 
@@ -261,13 +263,45 @@ export class EscPosEncoder {
       encoder.feed(1);
     }
 
+    const rawItems = (Array.isArray(data.items) ? data.items : []).filter(
+      (item: any) => item && (item.name || '').trim().length > 0
+    );
+    const hasKitchenItems = rawItems.some((it: any) => {
+      const st = determineItemStation(it);
+      return st === 'KITCHEN' || st === 'BOTH';
+    });
+    const hasBarItems = rawItems.some((it: any) => {
+      const st = determineItemStation(it);
+      return st === 'BAR' || st === 'BOTH';
+    });
+
     const roundMatch = String(data.order_number || data.id || '').match(/\(Round\s*(\d+)\)/i);
     const roundNum = data.round_number || (roundMatch ? parseInt(roundMatch[1], 10) : (data.is_follow_up ? 2 : 1));
     const isOrderMore = Boolean(data.is_follow_up || roundNum > 1 || roundMatch);
 
     // Title banner
     encoder.bold(true).size('double-height');
-    if (isKot) {
+    if (isBoth) {
+      if (hasKitchenItems && hasBarItems) {
+        if (isOrderMore) {
+          encoder.line(`*** KOT / BOT (ROUND ${roundNum} - ORDER MORE) ***`);
+        } else {
+          encoder.line('*** KITCHEN & BAR (KOT / BOT) ***');
+        }
+      } else if (hasBarItems && !hasKitchenItems) {
+        if (isOrderMore) {
+          encoder.line(`*** BOT (ROUND ${roundNum} - ORDER MORE) ***`);
+        } else {
+          encoder.line('*** BAR ORDER TICKET (BOT) ***');
+        }
+      } else {
+        if (isOrderMore) {
+          encoder.line(`*** KOT (ROUND ${roundNum} - ORDER MORE) ***`);
+        } else {
+          encoder.line('*** KITCHEN ORDER TICKET (KOT) ***');
+        }
+      }
+    } else if (isKot) {
       if (isOrderMore) {
         encoder.line(`*** KOT (ROUND ${roundNum} - ORDER MORE) ***`);
       } else {
@@ -326,7 +360,14 @@ export class EscPosEncoder {
     encoder.bold(false).divider('-', cols);
 
     const items = (Array.isArray(data.items) ? data.items : []).filter(
-      (item: any) => item && (item.name || '').trim().length > 0
+      (item: any) => {
+        if (!item || !(item.name || '').trim().length) return false;
+        if (isBoth || !isKotOrBar) return true;
+        const st = determineItemStation(item);
+        if (isKot) return st === 'KITCHEN' || st === 'BOTH';
+        if (isBar) return st === 'BAR' || st === 'BOTH';
+        return true;
+      }
     );
     items.forEach((item: any) => {
       const qty = Number(item.quantity) || 1;
@@ -339,7 +380,13 @@ export class EscPosEncoder {
 
       encoder.bold(isKotOrBar);
       if (isKotOrBar) {
-        encoder.row(`${qty}x ${name}`, `[ ${qty} ]`, cols);
+        let displayName = name;
+        if (isBoth) {
+          const st = determineItemStation(item);
+          const tag = st === 'BOTH' ? '[BOTH] ' : st === 'BAR' ? '[BAR] ' : '[KITCHEN] ';
+          displayName = `${tag}${name}`;
+        }
+        encoder.row(`${qty}x ${displayName}`, `[ ${qty} ]`, cols);
         const packQty = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? qty : 0)) || 0);
         if (packQty > 0 || item.is_packaged) {
           const packLabel = packQty > 1 && packQty < qty

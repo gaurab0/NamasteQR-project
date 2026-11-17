@@ -341,20 +341,6 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         } else {
           playChime();
           next = [formattedOrder, ...prev];
-          // KOT printing for new orders
-          if (effectiveKdsPrintMode !== 'DISPLAY_ONLY') {
-            const createdAtTime = formattedOrder.created_at ? new Date(formattedOrder.created_at).getTime() : 0;
-            if (Date.now() - createdAtTime < 15000) {
-              const hasKitchenItems = (formattedOrder.items || []).some((it: any) => it.station !== 'BAR');
-              const hasBarItems = (formattedOrder.items || []).some((it: any) => it.station === 'BAR' || it.station === 'BOTH');
-              if (hasKitchenItems) {
-                dispatchPrint('KOT', formattedOrder);
-              }
-              if (hasBarItems) {
-                dispatchPrint('BAR', formattedOrder);
-              }
-            }
-          }
         }
         return next.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       });

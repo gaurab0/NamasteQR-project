@@ -1,4 +1,4 @@
-export type PrinterRole = 'KOT' | 'BILL' | 'BAR';
+export type PrinterRole = 'KOT' | 'BILL' | 'BAR' | 'BOTH';
 export type ConnectionType = 'SYSTEM' | 'NETWORK' | 'USB' | 'BLUETOOTH';
 export type KdsPrintMode = 'DISPLAY_ONLY' | 'PRINT_ONLY' | 'BOTH';
 export type DriverType = 'usb' | 'bluetooth' | 'lan' | 'browser';

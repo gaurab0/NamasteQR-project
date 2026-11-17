@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { RestaurantTable } from '../../types/rbac';
 import { rbacService } from '../../services/rbac.service';
+import { printService } from '../../services/print.service';
 import { Button } from '../ui/Button';
 
 interface TableQrCardModalProps {
@@ -402,13 +403,179 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
     };
   };
 
-  const handlePrintCard = () => {
-    window.print();
+  const handlePrintCard = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      window.print();
+      return;
+    }
+    const qrDataUrl = canvas.toDataURL('image/png');
+
+    const escapeHtml = (str: any) =>
+      String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Table Stand - Table ${escapeHtml(table.table_number)}</title>
+          <style>
+            @media print {
+              @page { margin: 0; size: auto; }
+              body { margin: 2mm 3mm; }
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+              width: 280px;
+              margin: 0 auto;
+              padding: 6px 2px;
+              color: #000;
+              background: #fff;
+              text-align: center;
+              box-sizing: border-box;
+            }
+            .badge {
+              display: inline-block;
+              font-size: 10px;
+              font-weight: 800;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              padding: 2px 8px;
+              border: 1px solid #000;
+              border-radius: 9999px;
+              margin-bottom: 4px;
+            }
+            .title {
+              font-size: 20px;
+              font-weight: 900;
+              margin: 2px 0 6px 0;
+              line-height: 1.2;
+              letter-spacing: -0.5px;
+            }
+            .table-box {
+              background: #000;
+              color: #fff;
+              font-size: 16px;
+              font-weight: 900;
+              padding: 5px 12px;
+              border-radius: 6px;
+              display: inline-block;
+              margin: 4px 0 6px 0;
+              letter-spacing: 0.5px;
+            }
+            .meta {
+              font-size: 11px;
+              font-weight: 600;
+              color: #333;
+              margin-bottom: 6px;
+            }
+            .divider {
+              border-bottom: 1px dashed #000;
+              margin: 6px 0 10px 0;
+            }
+            .qr-container {
+              display: block;
+              margin: 6px auto;
+              text-align: center;
+            }
+            .qr-image {
+              width: 190px;
+              height: 190px;
+              display: block;
+              margin: 0 auto;
+              image-rendering: pixelated;
+            }
+            .instructions {
+              margin-top: 8px;
+            }
+            .instructions h3 {
+              font-size: 13px;
+              font-weight: 900;
+              margin: 0 0 2px 0;
+            }
+            .instructions p {
+              font-size: 10px;
+              color: #444;
+              margin: 0;
+            }
+            .cut-line {
+              border-bottom: 1px dashed #999;
+              margin-top: 14px;
+              padding-top: 4px;
+              font-size: 9px;
+              color: #777;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="badge">Digital Table Stand</div>
+          <div class="title">${escapeHtml(businessName)}</div>
+          <div>
+            <div class="table-box">TABLE #${escapeHtml(table.table_number)}</div>
+          </div>
+          <div class="meta">
+            ${table.building ? `${escapeHtml(table.building)} • ` : ''}
+            ${table.floor ? `${escapeHtml(table.floor)} • ` : ''}
+            ${table.capacity ? `${table.capacity} Seats` : ''}
+          </div>
+          <div class="divider"></div>
+          <div class="qr-container">
+            <img class="qr-image" src="${qrDataUrl}" alt="Table QR Code" />
+          </div>
+          <div class="instructions">
+            <h3>Scan to View Menu &amp; Order</h3>
+            <p>Instant live table ordering with digital menu</p>
+          </div>
+          <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+        </body>
+      </html>
+    `;
+
+    const driver = printService.getDriver('browser') as any;
+    if (driver && typeof driver.printHtml === 'function') {
+      await driver.printHtml(html);
+    } else {
+      window.print();
+    }
   };
 
   return (
-    <div 
-      id="table-qr-modal-backdrop"
+    <>
+      <style>{`
+        @media print {
+          body {
+            overflow: visible !important;
+            background: #fff !important;
+          }
+          #table-qr-modal-backdrop {
+            position: static !important;
+            background: transparent !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            inset: auto !important;
+          }
+          #qr-stand-card-printable {
+            max-height: none !important;
+            overflow: visible !important;
+            box-shadow: none !important;
+            border: 1px solid #ddd !important;
+            width: 280px !important;
+            max-width: 280px !important;
+            margin: 0 auto !important;
+          }
+          #qr-stand-card-printable canvas {
+            max-width: 190px !important;
+            max-height: 190px !important;
+            height: auto !important;
+          }
+        }
+      `}</style>
+      <div 
+        id="table-qr-modal-backdrop"
       className="fixed inset-0 z-50 overflow-y-auto bg-zinc-950/70 backdrop-blur-xs p-3 sm:p-6"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -916,5 +1083,6 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

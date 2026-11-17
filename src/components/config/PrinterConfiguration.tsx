@@ -19,6 +19,7 @@ import {
   UtensilsCrossed,
   Receipt,
   Wine,
+  Layers,
   HelpCircle,
   Radio,
   Sliders,
@@ -264,7 +265,7 @@ export const PrinterConfiguration: React.FC = () => {
                 Hardware & Print Routing
               </h2>
               <p className="text-sm text-zinc-500 mt-1">
-                Configure physical receipt printers and map them to specific tasks (KOT, Cashier, Bar).
+                Configure physical receipt printers and map them to specific tasks (KOT, Cashier, Bar, or Combined KOT/BOT).
               </p>
             </div>
             <div className="flex items-center gap-2.5">
@@ -472,13 +473,16 @@ export const PrinterConfiguration: React.FC = () => {
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                 : p.role === 'BAR'
                                 ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                : p.role === 'BOTH'
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
                                 : 'bg-amber-50 text-amber-700 border border-amber-200'
                             }`}
                           >
                             {p.role === 'BILL' && <Receipt className="w-3 h-3" />}
                             {p.role === 'BAR' && <Wine className="w-3 h-3" />}
                             {p.role === 'KOT' && <UtensilsCrossed className="w-3 h-3" />}
-                            {p.role === 'BILL' ? 'Cashier Receipt' : p.role === 'BAR' ? 'Bar Ticket' : 'Kitchen KOT'}
+                            {p.role === 'BOTH' && <Layers className="w-3 h-3" />}
+                            {p.role === 'BILL' ? 'Cashier Receipt' : p.role === 'BAR' ? 'Bar Ticket' : p.role === 'BOTH' ? 'Both (KOT/BOT)' : 'Kitchen KOT'}
                           </span>
 
                           {/* Connection Badge */}
@@ -758,13 +762,13 @@ export const PrinterConfiguration: React.FC = () => {
                       value={editingPrinter.name || ''}
                       onChange={(e) => setEditingPrinter({ ...editingPrinter, name: e.target.value })}
                       className="w-full px-3.5 py-2.5 rounded-xl border border-zinc-300 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none"
-                      placeholder="e.g. Main Kitchen KOT, Cashier POS"
+                      placeholder="e.g. Main Kitchen KOT, Combined KOT/BOT, Cashier POS"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-zinc-600 mb-1">Task Routing Role</label>
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                       <button
                         type="button"
                         onClick={() => setEditingPrinter({ ...editingPrinter, role: 'KOT' })}
@@ -803,6 +807,17 @@ export const PrinterConfiguration: React.FC = () => {
                         }`}
                       >
                         🍸 Bar Ticket
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingPrinter({ ...editingPrinter, role: 'BOTH' })}
+                        className={`px-2 py-2 rounded-xl text-xs font-bold border transition cursor-pointer text-center ${
+                          editingPrinter.role === 'BOTH'
+                            ? 'bg-blue-50 text-blue-800 border-blue-300 ring-2 ring-blue-500/30'
+                            : 'bg-zinc-50 text-zinc-600 border-zinc-200 hover:bg-zinc-100'
+                        }`}
+                      >
+                        🍳🍸 Both (KOT/BOT)
                       </button>
                     </div>
                   </div>

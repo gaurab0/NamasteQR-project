@@ -69,6 +69,11 @@ async function runPrinterTests() {
     const kot58 = EscPosEncoder.buildReceipt(billData, { paperWidth: '58mm', role: 'KOT', autoCut: true });
     assert(kot58.length > 30, '58mm KOT receipt should compile');
 
+    const both80 = EscPosEncoder.buildReceipt(billData, { paperWidth: '80mm', role: 'BOTH', autoCut: true });
+    assert(both80.length > 50, '80mm BOTH (KOT/BOT) receipt should compile');
+    const textDecoded = new TextDecoder().decode(both80);
+    assert(textDecoded.includes('KOT / BOT') || textDecoded.includes('KITCHEN & BAR'), 'BOTH receipt must contain combined KOT/BOT title');
+
     const testSlip = EscPosEncoder.buildTestPrint({
       name: 'Kitchen POS-80',
       connectionType: 'NETWORK',

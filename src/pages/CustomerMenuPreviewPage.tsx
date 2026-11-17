@@ -291,6 +291,8 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const userManuallySelectedCategoryRef = useRef(false);
+  const prevBizIdRef = useRef<string | undefined>(undefined);
   const [searchQuery, setSearchQuery] = useState('');
   const [dietaryFilter, setDietaryFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
   const [selectedVariants, setSelectedVariants] = useState<Record<string, MenuItemVariant>>({});
@@ -1646,6 +1648,10 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
 
   const loadData = async (bId?: string) => {
     try {
+      if (bId && bId !== prevBizIdRef.current) {
+        prevBizIdRef.current = bId;
+        userManuallySelectedCategoryRef.current = false;
+      }
       setLoading(true);
       const [itemsData, catsData, bizData, taxCfgData] = await Promise.all([
         rbacService.getMenusApi(bId).catch(() => []),
@@ -1962,6 +1968,27 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
       return a.name.localeCompare(b.name);
     });
   }, [categories, businessProfile?.menu_theme_config?.categoryOrder]);
+
+  // Default selected category dynamically to the first category in the queue (or 'All' if none exist)
+  useEffect(() => {
+    if (!loading) {
+      if (!userManuallySelectedCategoryRef.current) {
+        if (orderedCategories.length > 0) {
+          if (selectedCategory !== orderedCategories[0].name) {
+            setSelectedCategory(orderedCategories[0].name);
+          }
+        } else if (selectedCategory !== 'All') {
+          setSelectedCategory('All');
+        }
+      } else if (
+        selectedCategory !== 'All' &&
+        orderedCategories.length > 0 &&
+        !orderedCategories.some((c) => c.name.toLowerCase() === selectedCategory.toLowerCase())
+      ) {
+        setSelectedCategory(orderedCategories[0].name);
+      }
+    }
+  }, [loading, orderedCategories, selectedCategory]);
 
   // Filter items (accounting for multi-category items and custom sort)
   const filteredItems = useMemo(() => {
@@ -2550,8 +2577,36 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
             />
           </div>
 
-          {/* Dietary Filter Buttons */}
+          {/* Dietary & Menu Filter Buttons */}
           <div className="flex items-center gap-1.5 w-full sm:w-auto justify-start sm:justify-end overflow-x-auto scrollbar-none flex-nowrap min-w-0 max-w-full py-0">
+            {/* All Menu Button */}
+            <button
+              id="filter-all-menu"
+              type="button"
+              onClick={() => {
+                userManuallySelectedCategoryRef.current = true;
+                setSelectedCategory('All');
+                setSearchQuery('');
+                setDietaryFilter('all');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                selectedCategory === 'All'
+                  ? `${theme.categoryActive}`
+                  : `${theme.categoryInactive}`
+              }`}
+            >
+              <span>All Menu</span>
+              {menuItems.length > 0 && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                    selectedCategory === 'All' ? theme.categoryActiveBadge : theme.categoryInactiveBadge
+                  }`}
+                >
+                  {menuItems.length}
+                </span>
+              )}
+            </button>
+
             <button
               id="dietary-filter-veg"
               type="button"
@@ -2631,70 +2686,47 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         )}
 
         {/* Category Filter Tabs */}
-        <MinimalistScrollContainer
-          trackWidth={130}
-          contentClassName="flex items-center gap-1.5 pb-0 w-full min-w-0"
-          indicatorClassName="pt-0.5 pb-0"
-        >
-          {/* All Menu Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedCategory('All');
-              setSearchQuery('');
-              setDietaryFilter('all');
-            }}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-              selectedCategory === 'All'
-                ? `${theme.categoryActive}`
-                : `${theme.categoryInactive}`
-            }`}
+        {orderedCategories.length > 0 && (
+          <MinimalistScrollContainer
+            trackWidth={130}
+            contentClassName="flex items-center gap-1.5 pb-0 w-full min-w-0"
+            indicatorClassName="pt-0.5 pb-0"
           >
-            <span>All Menu</span>
-            {menuItems.length > 0 && (
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                  selectedCategory === 'All' ? theme.categoryActiveBadge : theme.categoryInactiveBadge
-                }`}
-              >
-                {menuItems.length}
-              </span>
-            )}
-          </button>
+            {orderedCategories.map((cat) => {
+              const count = categoryCounts[cat.name.toLowerCase()] || 0;
+              const isSelected = selectedCategory.toLowerCase() === cat.name.toLowerCase();
 
-          {orderedCategories.map((cat) => {
-            const count = categoryCounts[cat.name.toLowerCase()] || 0;
-            const isSelected = selectedCategory.toLowerCase() === cat.name.toLowerCase();
-
-            return (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => {
-                  setSelectedCategory(cat.name);
-                  setSearchQuery('');
-                  setDietaryFilter('all');
-                }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
-                  isSelected
-                    ? `${theme.categoryActive}`
-                    : `${theme.categoryInactive}`
-                }`}
-              >
-                <span>{cat.name}</span>
-                {count > 0 && (
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                      isSelected ? theme.categoryActiveBadge : theme.categoryInactiveBadge
-                    }`}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </MinimalistScrollContainer>
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => {
+                    userManuallySelectedCategoryRef.current = true;
+                    setSelectedCategory(cat.name);
+                    setSearchQuery('');
+                    setDietaryFilter('all');
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition whitespace-nowrap shrink-0 flex items-center gap-1 cursor-pointer ${
+                    isSelected
+                      ? `${theme.categoryActive}`
+                      : `${theme.categoryInactive}`
+                  }`}
+                >
+                  <span>{cat.name}</span>
+                  {count > 0 && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                        isSelected ? theme.categoryActiveBadge : theme.categoryInactiveBadge
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </MinimalistScrollContainer>
+        )}
 
         {/* Menu Items Grid */}
         {loading ? (
@@ -2718,7 +2750,8 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
               type="button"
               onClick={() => {
                 setSearchQuery('');
-                setSelectedCategory('All');
+                userManuallySelectedCategoryRef.current = false;
+                setSelectedCategory(orderedCategories[0]?.name || 'All');
                 setDietaryFilter('all');
               }}
               className="mt-4 px-4 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-xl text-xs font-bold transition"

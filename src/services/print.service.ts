@@ -1,5 +1,6 @@
 import { renderFormattedDate } from '../utils/dateFormatter';
 import { computeOrderBillableAmounts } from '../utils/taxCalculations';
+import { determineItemStation } from '../utils/menuUtils';
 import {
   PrinterConfig,
   PrinterRole,
@@ -259,6 +260,7 @@ class PrintService {
   public generateHtml(taskType: PrinterRole, data: any): string {
     const isKot = taskType === 'KOT';
     const isBar = taskType === 'BAR';
+    const isBoth = taskType === 'BOTH';
     const isBill = taskType === 'BILL';
 
     const rawOrderNumber = data.order_number || (data.id ? String(data.id).slice(0, 8).toUpperCase() : 'ORD');
@@ -351,10 +353,37 @@ class PrintService {
     const roundNum = data.round_number || (roundMatch ? parseInt(roundMatch[1], 10) : (data.is_follow_up ? 2 : 1));
     const isOrderMore = Boolean(data.is_follow_up || roundNum > 1 || roundMatch);
 
-    if (isKot || isBar) {
-      const ticketTitle = isBar
-        ? (isOrderMore ? `BAR ORDER TICKET (BOT - ROUND ${roundNum})` : 'BAR ORDER TICKET (BOT)')
-        : (isOrderMore ? `KITCHEN ORDER TICKET (KOT - ROUND ${roundNum})` : 'KITCHEN ORDER TICKET (KOT)');
+    const rawItems = (data.items || []).filter((item: any) => item && (item.name || '').trim().length > 0);
+    const hasKitchenItems = rawItems.some((it: any) => {
+      const st = determineItemStation(it);
+      return st === 'KITCHEN' || st === 'BOTH';
+    });
+    const hasBarItems = rawItems.some((it: any) => {
+      const st = determineItemStation(it);
+      return st === 'BAR' || st === 'BOTH';
+    });
+
+    if (isKot || isBar || isBoth) {
+      let ticketTitle = '';
+      if (isBoth) {
+        if (hasKitchenItems && hasBarItems) {
+          ticketTitle = isOrderMore
+            ? `KITCHEN &amp; BAR ORDER TICKET (KOT / BOT - ROUND ${roundNum})`
+            : 'KITCHEN &amp; BAR ORDER TICKET (KOT / BOT)';
+        } else if (hasBarItems && !hasKitchenItems) {
+          ticketTitle = isOrderMore
+            ? `BAR ORDER TICKET (BOT - ROUND ${roundNum})`
+            : 'BAR ORDER TICKET (BOT)';
+        } else {
+          ticketTitle = isOrderMore
+            ? `KITCHEN ORDER TICKET (KOT - ROUND ${roundNum})`
+            : 'KITCHEN ORDER TICKET (KOT)';
+        }
+      } else if (isBar) {
+        ticketTitle = isOrderMore ? `BAR ORDER TICKET (BOT - ROUND ${roundNum})` : 'BAR ORDER TICKET (BOT)';
+      } else {
+        ticketTitle = isOrderMore ? `KITCHEN ORDER TICKET (KOT - ROUND ${roundNum})` : 'KITCHEN ORDER TICKET (KOT)';
+      }
 
       html += `
           <div class="header">
@@ -366,11 +395,26 @@ class PrintService {
           </div>
       `;
 
-      const items = (data.items || []).filter((item: any) => item && (item.name || '').trim().length > 0);
+      const items = rawItems.filter((item: any) => {
+        if (isBoth) return true;
+        const st = determineItemStation(item);
+        if (isKot) return st === 'KITCHEN' || st === 'BOTH';
+        if (isBar) return st === 'BAR' || st === 'BOTH';
+        return true;
+      });
+
       items.forEach((item: any) => {
+        let tagHtml = '';
+        if (isBoth) {
+          const itemStation = determineItemStation(item);
+          const tag = itemStation === 'BOTH' ? '[KITCHEN &amp; BAR]' : itemStation === 'BAR' ? '[BAR]' : '[KITCHEN]';
+          const tagColor = itemStation === 'BAR' ? '#6b21a8' : '#b45309';
+          tagHtml = `<span style="font-weight: bold; font-size: 11px; margin-right: 4px; color: ${tagColor};">${tag}</span>`;
+        }
+
         html += `
           <div class="item">
-            <span class="item-qty">${Number(item.quantity) || 1}x</span> ${escapeHtml(item.name)}
+            <span class="item-qty">${Number(item.quantity) || 1}x</span> ${tagHtml}${escapeHtml(item.name)}
             ${(() => {
               const q = Number(item.quantity) || 1;
               const pq = Math.max(0, Number(item.pack_qty ?? (item.is_packaged ? q : 0)) || 0);
