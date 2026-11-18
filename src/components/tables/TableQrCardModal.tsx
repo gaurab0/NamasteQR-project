@@ -329,75 +329,93 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
     }
   };
 
+  const displayTitle = 
+    table.credit_only && !table.table_number.toLowerCase().includes('credit')
+      ? `${table.table_number}(Credit)`
+      : table.table_number;
+
+  const locationParts = [table.building, table.floor].filter(Boolean);
+  const displaySubtitle = locationParts.length > 0
+    ? locationParts.join(' • ')
+    : businessName || 'Dine-In • Live Table Ordering';
+
   const handleDownloadQr = () => {
     if (!qrDataUrl) return;
 
-    // Create high-res download with branded border and label
+    // Create high-res download matching Image 1
     const exportCanvas = document.createElement('canvas');
-    exportCanvas.width = 600;
-    exportCanvas.height = 760;
+    exportCanvas.width = 540;
+    exportCanvas.height = 720;
     const ctx = exportCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Background
-    ctx.fillStyle = '#ffffff';
-    ctx.roundRect(0, 0, 600, 760, 24);
-    ctx.fill();
-
-    // Top decorative bar
-    ctx.fillStyle = '#d97706'; // amber-600
-    ctx.fillRect(0, 0, 600, 16);
-
-    // Business Name
-    ctx.fillStyle = '#18181b';
-    ctx.font = 'bold 30px system-ui, -apple-system, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(businessName, 300, 75);
-
-    // Subtitle
-    ctx.fillStyle = '#71717a';
-    ctx.font = '16px system-ui, -apple-system, sans-serif';
-    ctx.fillText('Digital Dining & Smart Ordering', 300, 105);
-
-    // Table Badge
+    // Background: warm light cream (#fef3c7) matching Image 1
     ctx.fillStyle = '#fef3c7';
-    ctx.roundRect(175, 130, 250, 48, 24);
-    ctx.fill();
-    ctx.fillStyle = '#92400e';
-    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
-    ctx.fillText(table.table_number, 300, 162);
+    ctx.fillRect(0, 0, 540, 720);
 
-    // Location (Floor / Building)
-    const locText = [table.building, table.floor].filter(Boolean).join(' • ');
-    if (locText) {
-      ctx.fillStyle = '#52525b';
-      ctx.font = '14px system-ui, -apple-system, sans-serif';
-      ctx.fillText(locText, 300, 205);
-    }
+    // Title: Table / Space Name (e.g. Cabin-901(Credit)) in #a25a29
+    ctx.fillStyle = '#a25a29';
+    ctx.font = 'bold 28px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(displayTitle, 270, 75);
+
+    // Subtitle: Location / Building • Floor
+    ctx.fillStyle = '#52525b';
+    ctx.font = '500 15px system-ui, -apple-system, sans-serif';
+    ctx.fillText(displaySubtitle, 270, 105);
 
     // Draw QR Code
     const qrImg = new Image();
     qrImg.src = qrDataUrl;
     qrImg.onload = () => {
-      ctx.drawImage(qrImg, 125, 230, 350, 350);
+      // Crisp white box for QR code
+      ctx.fillStyle = '#ffffff';
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(100, 125, 340, 340, 16);
+        ctx.fill();
+      } else {
+        ctx.fillRect(100, 125, 340, 340);
+      }
+      ctx.drawImage(qrImg, 110, 135, 320, 320);
 
       // Call to action
       ctx.fillStyle = '#18181b';
-      ctx.font = 'bold 20px system-ui, -apple-system, sans-serif';
-      ctx.fillText('Scan with Camera to Order', 300, 630);
+      ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+      ctx.fillText('Scan with Camera to Order', 270, 505);
 
+      // Subtext
       ctx.fillStyle = '#71717a';
-      ctx.font = '14px system-ui, -apple-system, sans-serif';
-      ctx.fillText('Instant digital menu • No app download required', 300, 660);
+      ctx.font = '500 13px system-ui, -apple-system, sans-serif';
+      ctx.fillText('Instant digital menu • No app download required', 270, 532);
+
+      // 3 Steps pill container
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(40, 555, 460, 42, 10);
+        ctx.fill();
+      } else {
+        ctx.fillRect(40, 555, 460, 42);
+      }
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.35)';
+      ctx.lineWidth = 1;
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(40, 555, 460, 42, 10);
+        ctx.stroke();
+      }
+
+      // Steps text
+      ctx.fillStyle = '#18181b';
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.fillText('1. Scan QR   →   2. Select Dishes   →   3. Confirm Order', 270, 581);
 
       // Footer branding
-      ctx.fillStyle = '#a1a1aa';
-      ctx.font = '12px system-ui, -apple-system, sans-serif';
-      ctx.fillText('Powered by NamasteQR', 300, 720);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '500 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText('Powered by NamasteQR', 270, 642);
 
       // Download
       const link = document.createElement('a');
-      link.download = `QR-${table.table_number.replace(/\s+/g, '_')}-${businessName.replace(/\s+/g, '_')}.png`;
+      link.download = `QR-${displayTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.png`;
       link.href = exportCanvas.toDataURL('image/png');
       link.click();
     };
@@ -422,115 +440,154 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>Table Stand - Table ${escapeHtml(table.table_number)}</title>
+          <title>Table Stand - ${escapeHtml(displayTitle)}</title>
           <style>
             @media print {
               @page { margin: 0; size: auto; }
-              body { margin: 2mm 3mm; }
+              body { margin: 0; padding: 2mm 3mm; }
+            }
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
             }
             body {
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace, sans-serif;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
               width: 280px;
+              max-width: 100%;
               margin: 0 auto;
-              padding: 6px 2px;
-              color: #000;
-              background: #fff;
+              padding: 4px 2px;
+              color: #18181b;
+              background: #ffffff;
               text-align: center;
-              box-sizing: border-box;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
             }
-            .badge {
-              display: inline-block;
-              font-size: 10px;
-              font-weight: 800;
-              text-transform: uppercase;
-              letter-spacing: 0.5px;
-              padding: 2px 8px;
-              border: 1px solid #000;
-              border-radius: 9999px;
-              margin-bottom: 4px;
+            .stand-card {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              padding: 4px 2px;
             }
-            .title {
+            .table-title {
               font-size: 20px;
               font-weight: 900;
-              margin: 2px 0 6px 0;
+              color: #000000;
               line-height: 1.2;
-              letter-spacing: -0.5px;
+              letter-spacing: -0.3px;
+              margin-bottom: 2px;
             }
-            .table-box {
-              background: #000;
-              color: #fff;
-              font-size: 16px;
-              font-weight: 900;
-              padding: 5px 12px;
-              border-radius: 6px;
-              display: inline-block;
-              margin: 4px 0 6px 0;
-              letter-spacing: 0.5px;
-            }
-            .meta {
+            .table-subtitle {
               font-size: 11px;
               font-weight: 600;
-              color: #333;
+              color: #4b5563;
+              line-height: 1.25;
               margin-bottom: 6px;
             }
-            .divider {
-              border-bottom: 1px dashed #000;
-              margin: 6px 0 10px 0;
-            }
-            .qr-container {
-              display: block;
-              margin: 6px auto;
-              text-align: center;
+            .qr-wrapper {
+              display: inline-block;
+              margin: 0 auto;
+              padding: 3px;
+              background: #ffffff;
+              border: 1px solid #d4d4d8;
+              border-radius: 8px;
             }
             .qr-image {
-              width: 190px;
-              height: 190px;
+              width: 195px;
+              height: 195px;
               display: block;
               margin: 0 auto;
               image-rendering: pixelated;
             }
-            .instructions {
-              margin-top: 8px;
+            .cta-title {
+              font-size: 14px;
+              font-weight: 800;
+              color: #000000;
+              margin-top: 6px;
+              line-height: 1.2;
             }
-            .instructions h3 {
-              font-size: 13px;
-              font-weight: 900;
-              margin: 0 0 2px 0;
-            }
-            .instructions p {
+            .cta-subtext {
               font-size: 10px;
-              color: #444;
-              margin: 0;
+              font-weight: 500;
+              color: #52525b;
+              margin-top: 2px;
+              margin-bottom: 6px;
+            }
+            .steps-container {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-wrap: wrap;
+              gap: 3px;
+              padding: 4px 5px;
+              background: #f4f4f5;
+              border: 1px solid #e4e4e7;
+              border-radius: 6px;
+              margin: 2px 0 6px 0;
+              width: 100%;
+              max-width: 275px;
+              font-size: 9px;
+              font-weight: 700;
+              color: #18181b;
+            }
+            .step-item {
+              display: inline-flex;
+              align-items: center;
+              gap: 2px;
+              white-space: nowrap;
+            }
+            .step-num {
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              width: 13px;
+              height: 13px;
+              border-radius: 50%;
+              background: #18181b;
+              color: #ffffff;
+              font-size: 8px;
+              font-weight: 900;
+              line-height: 1;
+            }
+            .step-arrow {
+              color: #71717a;
+              font-size: 9px;
+            }
+            .footer-branding {
+              font-size: 9px;
+              color: #71717a;
+              font-weight: 500;
+              margin-top: 3px;
             }
             .cut-line {
-              border-bottom: 1px dashed #999;
-              margin-top: 14px;
-              padding-top: 4px;
-              font-size: 9px;
-              color: #777;
+              border-bottom: 1px dashed #a1a1aa;
+              margin-top: 10px;
+              padding-top: 2px;
+              font-size: 8px;
+              color: #71717a;
+              width: 100%;
             }
           </style>
         </head>
         <body>
-          <div class="badge">Digital Table Stand</div>
-          <div class="title">${escapeHtml(businessName)}</div>
-          <div>
-            <div class="table-box">TABLE #${escapeHtml(table.table_number)}</div>
+          <div class="stand-card">
+            <div class="table-title">${escapeHtml(displayTitle)}</div>
+            <div class="table-subtitle">${escapeHtml(displaySubtitle)}</div>
+            <div class="qr-wrapper">
+              <img class="qr-image" src="${qrDataUrl}" alt="Table QR Code" />
+            </div>
+            <div class="cta-title">Scan with Camera to Order</div>
+            <div class="cta-subtext">Instant digital menu • No app download required</div>
+            <div class="steps-container">
+              <span class="step-item"><span class="step-num">1</span> Scan QR</span>
+              <span class="step-arrow">→</span>
+              <span class="step-item"><span class="step-num">2</span> Select Dishes</span>
+              <span class="step-arrow">→</span>
+              <span class="step-item"><span class="step-num">3</span> Confirm Order</span>
+            </div>
+            <div class="footer-branding">Powered by NamasteQR</div>
+            <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
           </div>
-          <div class="meta">
-            ${table.building ? `${escapeHtml(table.building)} • ` : ''}
-            ${table.floor ? `${escapeHtml(table.floor)} • ` : ''}
-            ${table.capacity ? `${table.capacity} Seats` : ''}
-          </div>
-          <div class="divider"></div>
-          <div class="qr-container">
-            <img class="qr-image" src="${qrDataUrl}" alt="Table QR Code" />
-          </div>
-          <div class="instructions">
-            <h3>Scan to View Menu &amp; Order</h3>
-            <p>Instant live table ordering with digital menu</p>
-          </div>
-          <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
         </body>
       </html>
     `;
@@ -562,15 +619,25 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
             max-height: none !important;
             overflow: visible !important;
             box-shadow: none !important;
-            border: 1px solid #ddd !important;
+            border: none !important;
             width: 280px !important;
             max-width: 280px !important;
             margin: 0 auto !important;
+            padding: 0 !important;
           }
           #qr-stand-card-printable canvas {
-            max-width: 190px !important;
-            max-height: 190px !important;
+            max-width: 195px !important;
+            max-height: 195px !important;
             height: auto !important;
+          }
+          .print-card-box {
+            border: none !important;
+            background: #ffffff !important;
+            padding: 4px 2px !important;
+            box-shadow: none !important;
+          }
+          .print-card-box h3 {
+            color: #000000 !important;
           }
         }
       `}</style>
@@ -587,8 +654,8 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
           id="qr-stand-card-printable"
           className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-zinc-200 flex flex-col max-h-[90vh] overflow-hidden relative animate-in fade-in zoom-in-95 duration-200 my-auto"
         >
-          {/* Card Header (Sticky at top of card) */}
-          <div className="p-4 sm:p-5 pb-3 border-b border-zinc-100 flex items-start justify-between gap-3 bg-white z-10 shrink-0">
+          {/* Card Header (Sticky at top of card, hidden on print) */}
+          <div className="p-4 sm:p-5 pb-3 border-b border-zinc-100 flex items-start justify-between gap-3 bg-white z-10 shrink-0 print:hidden">
             <div className="space-y-1">
               <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/80">
                 <Sparkles className="w-3 h-3 text-amber-600" />
@@ -635,26 +702,51 @@ export const TableQrCardModal: React.FC<TableQrCardModalProps> = ({
 
           {/* Scrollable Card Body */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {/* Central QR Display */}
+            {/* Central QR Display matching Image 1 */}
             <div className="flex flex-col items-center justify-center">
-              <div className="p-4 bg-white rounded-2xl border-2 border-zinc-900 shadow-md flex flex-col items-center max-w-[280px] w-full">
-                {/* Table Number Pill */}
-                <div className="px-4 py-1 rounded-full bg-amber-500 text-white font-extrabold text-sm tracking-wide mb-2 shadow-xs">
-                  Table {table.table_number}
+              <div className="print-card-box p-5 bg-amber-50/70 border border-amber-200/90 rounded-2xl shadow-xs flex flex-col items-center max-w-[290px] w-full text-center">
+                {/* Table Title */}
+                <h3 className="text-lg font-black text-amber-900 tracking-tight leading-tight">
+                  {displayTitle}
+                </h3>
+                {/* Location / Subtitle */}
+                <p className="text-[11px] font-medium text-zinc-500 mt-0.5 leading-snug">
+                  {displaySubtitle}
+                </p>
+
+                {/* QR Canvas Box */}
+                <div className="my-2.5 p-2 bg-white rounded-xl border border-amber-200/60 shadow-2xs flex items-center justify-center">
+                  <canvas ref={canvasRef} className="rounded-lg max-w-[190px] max-h-[190px] w-full h-auto" />
                 </div>
 
-                {/* Canvas */}
-                <div className="p-2 bg-white rounded-xl flex items-center justify-center">
-                  <canvas ref={canvasRef} className="rounded-lg max-w-[200px] max-h-[200px] w-full h-auto" />
+                {/* Call to Action */}
+                <p className="text-xs font-black text-zinc-900 mt-0.5">Scan with Camera to Order</p>
+                <p className="text-[10px] text-zinc-500 mt-0.5">Instant digital menu • No app download required</p>
+
+                {/* 3 Compact Steps with Arrows */}
+                <div className="mt-2.5 w-full flex items-center justify-center gap-1.5 py-1 px-1.5 bg-white/80 border border-amber-200/70 rounded-lg text-[9.5px] font-bold text-zinc-800">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-3.5 h-3.5 rounded-full bg-zinc-900 text-white text-[8px] font-black flex items-center justify-center">1</span>
+                    Scan QR
+                  </span>
+                  <span className="text-zinc-400">→</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-3.5 h-3.5 rounded-full bg-zinc-900 text-white text-[8px] font-black flex items-center justify-center">2</span>
+                    Select Dishes
+                  </span>
+                  <span className="text-zinc-400">→</span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-3.5 h-3.5 rounded-full bg-zinc-900 text-white text-[8px] font-black flex items-center justify-center">3</span>
+                    Confirm Order
+                  </span>
                 </div>
 
-                <div className="mt-2 text-center">
-                  <p className="text-xs font-bold text-zinc-900">Scan to View Menu & Order</p>
-                  <p className="text-[10px] text-zinc-500 mt-0.5">Instant live table ordering</p>
-                </div>
+                {/* Branding Footer */}
+                <p className="text-[9px] font-medium text-zinc-400 mt-2">Powered by NamasteQR</p>
               </div>
 
-              <div className="mt-3 flex items-center gap-2">
+              {/* Status pills - hidden on print */}
+              <div className="mt-3 flex items-center gap-2 print:hidden">
                 <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                   table.status === 'ACTIVE'
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
