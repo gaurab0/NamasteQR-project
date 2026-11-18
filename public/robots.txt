@@ -2,8 +2,8 @@
 
 User-agent: *
 Allow: /
-Allow: /signup
-Allow: /login
+Disallow: /login
+Disallow: /signup
 Disallow: /menu
 Disallow: /menu-preview
 Disallow: /dashboard
@@ -13,6 +13,8 @@ Disallow: /api/
 # OpenAI / ChatGPT
 User-agent: GPTBot
 Allow: /
+Disallow: /login
+Disallow: /signup
 Disallow: /menu
 Disallow: /menu-preview
 Disallow: /dashboard
@@ -22,6 +24,8 @@ Disallow: /api/
 # Anthropic / Claude
 User-agent: ClaudeBot
 Allow: /
+Disallow: /login
+Disallow: /signup
 Disallow: /menu
 Disallow: /menu-preview
 Disallow: /dashboard
@@ -31,6 +35,8 @@ Disallow: /api/
 # Perplexity AI
 User-agent: PerplexityBot
 Allow: /
+Disallow: /login
+Disallow: /signup
 Disallow: /menu
 Disallow: /menu-preview
 Disallow: /dashboard
@@ -40,6 +46,8 @@ Disallow: /api/
 # Googlebot
 User-agent: Googlebot
 Allow: /
+Disallow: /login
+Disallow: /signup
 Disallow: /menu
 Disallow: /menu-preview
 Disallow: /dashboard
@@ -49,6 +57,8 @@ Disallow: /api/
 # Microsoft Bingbot
 User-agent: Bingbot
 Allow: /
+Disallow: /login
+Disallow: /signup
 Disallow: /menu
 Disallow: /menu-preview
 Disallow: /dashboard

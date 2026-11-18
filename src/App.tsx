@@ -126,6 +126,19 @@ function AppContent() {
     }
   }, [isCustomerMenuRoute]);
 
+  // Set meta robots based on current route (strictly noindex on auth & private admin routes)
+  useEffect(() => {
+    const robotsMeta = document.querySelector('meta[name="robots"]');
+    if (robotsMeta) {
+      const basePath = currentPath.split('?')[0];
+      if (basePath === '/login' || basePath === '/signup' || basePath.startsWith('/dashboard') || basePath.startsWith('/menu-management')) {
+        robotsMeta.setAttribute('content', 'noindex, nofollow');
+      } else {
+        robotsMeta.setAttribute('content', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+      }
+    }
+  }, [currentPath]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 text-zinc-900">
