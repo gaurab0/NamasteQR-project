@@ -798,8 +798,8 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                     >
                       {opt.icon}
                     </span>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold truncate flex items-center gap-1.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold leading-snug text-zinc-900">
                         <span>{opt.label}</span>
                       </div>
                       <div className="text-[11px] text-zinc-500 font-normal truncate mt-0.5">
@@ -811,7 +811,7 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
                   <div className="flex items-center gap-1.5 shrink-0">
                     {opt.badge && (
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 hidden sm:inline-block ${
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 hidden xl:inline-block ${
                           opt.badgeColor || 'bg-zinc-100 text-zinc-700'
                         }`}
                       >

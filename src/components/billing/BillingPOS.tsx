@@ -64,9 +64,11 @@ import {
   Activity,
   ChevronRight,
   ShieldCheck,
-  Gift
+  Gift,
+  SlidersHorizontal
 } from 'lucide-react';
 import { LiveStationOrdersModal } from '../dashboard/LiveStationOrdersModal';
+import { QuickItemAvailabilityDrawer } from '../availability/QuickItemAvailabilityDrawer';
 import { 
   exportSalesToExcel, 
   buildSalesWorkbookData, 
@@ -156,6 +158,18 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const [payFirstOrders, setPayFirstOrders] = useState<TableOrder[]>([]);
   const [glAccounts, setGlAccounts] = useState<GLAccountLink[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [isAvailabilityDrawerOpen, setIsAvailabilityDrawerOpen] = useState(false);
+
+  const unavailableItemCount = useMemo(() => {
+    return (menuItems || []).reduce((count, it) => {
+      const isItemOff = !it.is_available || it.status === 'out_of_stock' || it.status === 'unavailable';
+      if (isItemOff) return count + 1;
+      const offVariants = Array.isArray(it.variants)
+        ? it.variants.filter((v) => v.is_available === false || v.status === 'out_of_stock' || v.status === 'unavailable').length
+        : 0;
+      return count + offVariants;
+    }, 0);
+  }, [menuItems]);
 
   // Time & search filters
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'records' | 'gl_accounts'>('pos');
@@ -662,6 +676,13 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       loadBillingData();
     });
 
+    // Real-time menu updates (syncs availability changes from other stations/devices)
+    const unsubMenu = socketService.subscribeToMenu(() => {
+      rbacService.getMenusApi(business.id).then((fresh) => {
+        if (fresh && Array.isArray(fresh)) setMenuItems(fresh);
+      }).catch(() => {});
+    });
+
     // 5-second polling fallback to keep tables & scan check-in sessions fresh
     const tablePollInterval = setInterval(() => {
       rbacService.getTablesApi(business.id).then((fresh) => {
@@ -675,6 +696,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
       unsubSales();
       unsubSalesDel();
       unsubReconnect();
+      unsubMenu();
       clearInterval(tablePollInterval);
     };
   }, [business.id]);
@@ -1342,6 +1364,26 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
               Settle Table Bill ({groupedTableOrders.length})
             </button>
           )}
+
+          {/* Quick Item Availability Drawer */}
+          <button
+            id="btn-pos-quick-availability"
+            type="button"
+            onClick={() => setIsAvailabilityDrawerOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 border border-zinc-200 text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+            title="Manage Item & Variant Availability (86 / Out of Stock)"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-600" />
+            <span className="hidden sm:inline">Item Availability</span>
+            <span className="sm:hidden">Availability</span>
+            {unavailableItemCount > 0 ? (
+              <span className="px-1.5 py-0.2 text-[10px] font-black rounded-full bg-rose-500 text-white">
+                {unavailableItemCount}
+              </span>
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            )}
+          </button>
 
           {/* Quick POS Register Sale */}
           <button
@@ -2631,6 +2673,21 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
           onNavigateTab?.('checkins');
         }}
         currency={currencySymbol}
+      />
+
+      {/* Quick Item Availability Slide-in Drawer */}
+      <QuickItemAvailabilityDrawer
+        isOpen={isAvailabilityDrawerOpen}
+        onClose={() => setIsAvailabilityDrawerOpen(false)}
+        businessId={business.id}
+        menuItems={menuItems}
+        onItemsUpdated={(updated) => setMenuItems(updated)}
+        onRefresh={() => {
+          rbacService.getMenusApi(business.id).then((fresh) => {
+            if (fresh && Array.isArray(fresh)) setMenuItems(fresh);
+          }).catch(() => {});
+        }}
+        userRole={currentStaffSession?.role || activeRole || user?.role}
       />
     </div>
   );

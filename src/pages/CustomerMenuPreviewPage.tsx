@@ -43,6 +43,7 @@ import {
   X,
   Receipt,
   FileText,
+  Ban,
   Globe,
   ChevronDown
 } from 'lucide-react';
@@ -2806,18 +2807,44 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                 <div
                   key={item.id}
                   onClick={(e) => {
+                    if (isItemOutOfStock) {
+                      e.stopPropagation();
+                      return;
+                    }
                     if (effectiveStyle !== 'cards') {
                       setSelectedDetailItem(item);
                       setIsDetailModalOpen(true);
                     }
                   }}
-                  className={`rounded-2xl border transition-all ${effectiveStyle !== 'cards' ? 'cursor-pointer hover:shadow-lg hover:scale-[1.01]' : 'shadow-xs'} ${theme.cardBg} ${colSpanClass} flex flex-col justify-between overflow-hidden`}
+                  className={`rounded-2xl border transition-all ${
+                    isItemOutOfStock
+                      ? 'grayscale contrast-75 opacity-70 cursor-not-allowed select-none relative'
+                      : effectiveStyle !== 'cards'
+                      ? 'cursor-pointer hover:shadow-lg hover:scale-[1.01]'
+                      : 'shadow-xs'
+                  } ${theme.cardBg} ${colSpanClass} flex flex-col justify-between overflow-hidden relative`}
                 >
+                  {/* Foreground Overlay for Unavailable / Out of Stock Item */}
+                  {isItemOutOfStock && (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
+                      className="absolute inset-0 z-30 bg-zinc-950/25 backdrop-blur-[0.5px] flex items-center justify-center p-3 pointer-events-auto"
+                    >
+                      <div className="px-3.5 py-1.5 rounded-xl bg-zinc-900/90 text-white border border-white/20 shadow-xl flex items-center gap-1.5 font-black text-xs uppercase tracking-wider">
+                        <Ban className="w-3.5 h-3.5 text-rose-400" />
+                        <span>{item.status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* ------------------------------------------------------------- */}
                   {/* STYLE A: HERO BANNER (Full-width Featured Showcase)           */}
                   {/* ------------------------------------------------------------- */}
                   {effectiveStyle === 'hero' ? (
-                      <div className="flex flex-col h-full justify-between cursor-pointer" onClick={() => { setSelectedDetailItem(item); setIsDetailModalOpen(true); }}>
+                      <div className="flex flex-col h-full justify-between cursor-pointer" onClick={() => { if (!isItemOutOfStock) { setSelectedDetailItem(item); setIsDetailModalOpen(true); } }}>
                       {showPhoto && displayImage ? (
                         <div className="relative w-full h-56 sm:h-72 overflow-hidden bg-zinc-900">
                           <img
@@ -2918,7 +2945,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                       }}
                                       className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 border shrink-0 ${
                                         isVariantUnavailable
-                                          ? 'opacity-60 bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed'
+                                          ? 'grayscale opacity-50 bg-zinc-200/80 border-zinc-300 text-zinc-400 cursor-not-allowed select-none pointer-events-none'
                                           : isSelected
                                             ? theme.variantActive + ' cursor-pointer'
                                             : theme.variantInactive + ' cursor-pointer'
@@ -2935,7 +2962,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                       </span>
                                       {isVariantUnavailable && (
                                         <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded-xs ml-0.5">
-                                          Sold Out
+                                          {(v as any).status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}
                                         </span>
                                       )}
                                     </button>
@@ -2975,7 +3002,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                       /* ------------------------------------------------------------- */
                       /* STYLE B: BENTO SPLIT CARDS (Compact Photo + Details Beside)   */
                       /* ------------------------------------------------------------- */
-                      <div className="p-3 sm:p-3.5 flex flex-col gap-2 cursor-pointer" onClick={() => { setSelectedDetailItem(item); setIsDetailModalOpen(true); }}>
+                      <div className="p-3 sm:p-3.5 flex flex-col gap-2 cursor-pointer" onClick={() => { if (!isItemOutOfStock) { setSelectedDetailItem(item); setIsDetailModalOpen(true); } }}>
                       <div className="flex items-start gap-3 sm:gap-3.5">
                         {showPhoto && displayImage && (
                           <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden shrink-0 bg-zinc-100 relative shadow-2xs">
@@ -3094,7 +3121,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                   }}
                                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 border shrink-0 ${
                                     isVariantUnavailable
-                                      ? 'opacity-60 bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed'
+                                      ? 'grayscale opacity-50 bg-zinc-200/80 border-zinc-300 text-zinc-400 cursor-not-allowed select-none pointer-events-none'
                                       : isSelected
                                         ? theme.variantActive + ' cursor-pointer'
                                         : theme.variantInactive + ' cursor-pointer'
@@ -3111,7 +3138,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                   </span>
                                   {isVariantUnavailable && (
                                     <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded-xs ml-0.5">
-                                      Sold Out
+                                      {(v as any).status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}
                                     </span>
                                   )}
                                 </button>
@@ -3195,7 +3222,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                     }}
                                     className={`px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap flex items-center gap-1 border shrink-0 ${
                                       isVariantUnavailable
-                                        ? 'opacity-60 bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed'
+                                        ? 'grayscale opacity-50 bg-zinc-200/80 border-zinc-300 text-zinc-400 cursor-not-allowed select-none pointer-events-none'
                                         : isSelected
                                           ? theme.variantActive + ' cursor-pointer'
                                           : theme.variantInactive + ' cursor-pointer'
@@ -3212,7 +3239,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                     </span>
                                     {isVariantUnavailable && (
                                       <span className="text-[9px] font-bold text-rose-500 bg-rose-50 border border-rose-200 px-1 py-0.2 rounded-xs ml-0.5">
-                                        Sold Out
+                                        {(v as any).status === 'unavailable' ? 'Unavailable' : 'Out of Stock'}
                                       </span>
                                     )}
                                   </button>
@@ -3379,7 +3406,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
                                       }} 
                                       className={`flex items-center rounded-xl overflow-hidden border transition-all ${
                                         isVariantUnavailable
-                                          ? 'bg-zinc-100 border-zinc-200 text-zinc-400 cursor-not-allowed opacity-75'
+                                          ? 'grayscale opacity-50 bg-zinc-200/80 border-zinc-300 text-zinc-400 cursor-not-allowed select-none pointer-events-none'
                                           : isExpanded 
                                             ? 'bg-[#5c4a3d] border-[#5c4a3d] text-white shadow-2xs' 
                                             : 'bg-[#faf8f5] border-[#e8e4e1] text-[#3b2d24] cursor-pointer hover:bg-[#f3eee8] hover:border-[#ded8d2]'

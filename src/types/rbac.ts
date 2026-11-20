@@ -66,6 +66,7 @@ export interface MenuItemVariant {
   name: string; // e.g. "Small", "Medium", "Large" or "Half", "Full", or "30ml", "60ml", "Bottle"
   price: number;
   is_available?: boolean;
+  status?: MenuStatus;
   image_url?: string;
   description?: string;
   food_type?: FoodType;

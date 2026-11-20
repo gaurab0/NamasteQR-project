@@ -338,16 +338,28 @@ export class ClientRBACService {
     if (!res.ok) throw new Error(data.error?.message || 'Failed to update menu item');
   }
 
-  public async updateMenuItemStatusApi(id: string, status: MenuStatus, businessId?: string): Promise<void> {
+  public async updateMenuItemStatusApi(id: string, status: MenuStatus, businessId?: string, variantId?: string): Promise<void> {
     const url = businessId ? `/api/menus/${id}/status?businessId=${encodeURIComponent(businessId)}` : `/api/menus/${id}/status`;
     const res = await fetch(url, {
       method: 'PATCH',
       headers: this.getAuthHeaders(undefined, businessId),
       credentials: 'include',
-      body: JSON.stringify({ status, is_available: status === 'available', business_id: businessId }),
+      body: JSON.stringify({ status, is_available: status === 'available', business_id: businessId, variant_id: variantId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error?.message || 'Failed to update menu item status');
+  }
+
+  public async bulkMakeAllAvailableApi(businessId?: string): Promise<{ success: boolean; count: number }> {
+    const url = businessId ? `/api/menus/availability/bulk-available?businessId=${encodeURIComponent(businessId)}` : `/api/menus/availability/bulk-available`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.getAuthHeaders(undefined, businessId),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || 'Failed to bulk reset item availability');
+    return data;
   }
 
   public async deleteMenuItemApi(id: string, businessId?: string): Promise<void> {

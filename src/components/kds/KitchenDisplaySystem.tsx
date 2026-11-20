@@ -1,7 +1,7 @@
 import { renderFormattedDate, DateFormatMode } from '../../utils/dateFormatter';
 import { useAuth } from '../../context/AuthContext';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { TableOrder, OrderStatus, TableOrderItem, ServiceRequest, RestaurantTable } from '../../types/rbac';
+import { TableOrder, OrderStatus, TableOrderItem, ServiceRequest, RestaurantTable, MenuItem } from '../../types/rbac';
 
 import { rbacService } from '../../services/rbac.service';
 import { socketService } from '../../services/socket.service';
@@ -43,9 +43,11 @@ import {
   Hand,
   Copy,
   Printer,
-  Package
+  Package,
+  SlidersHorizontal
 } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { QuickItemAvailabilityDrawer } from '../availability/QuickItemAvailabilityDrawer';
 
 export const formatKdsTableName = (tableNum?: string | null): string => {
   if (!tableNum || !tableNum.trim()) return 'Counter / Takeaway';
@@ -106,6 +108,36 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
   const prevBillPingsRef = useRef<number>(0);
+
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [isAvailabilityDrawerOpen, setIsAvailabilityDrawerOpen] = useState(false);
+  const unavailableItemCount = useMemo(() => {
+    return (menuItems || []).reduce((count, it) => {
+      const isItemOff = !it.is_available || it.status === 'out_of_stock' || it.status === 'unavailable';
+      if (isItemOff) return count + 1;
+      const offVariants = Array.isArray(it.variants)
+        ? it.variants.filter((v) => v.is_available === false || v.status === 'out_of_stock' || v.status === 'unavailable').length
+        : 0;
+      return count + offVariants;
+    }, 0);
+  }, [menuItems]);
+
+  useEffect(() => {
+    if (!businessId) return;
+    rbacService.getMenusApi(businessId).then((data) => {
+      if (data && Array.isArray(data)) setMenuItems(data);
+    }).catch(() => {});
+
+    const unsubMenu = socketService.subscribeToMenu(() => {
+      rbacService.getMenusApi(businessId).then((data) => {
+        if (data && Array.isArray(data)) setMenuItems(data);
+      }).catch(() => {});
+    });
+
+    return () => {
+      unsubMenu?.();
+    };
+  }, [businessId]);
 
   // Ensure Waiter view cannot be opened in Orders section (where defaultStation is KITCHEN)
   useEffect(() => {
@@ -2487,6 +2519,24 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
           {/* Right: Audio, Refresh & Small Exit Button */}
           <div className="flex items-center gap-2">
             <button
+              id="btn-kds-quick-availability-fs"
+              type="button"
+              onClick={() => setIsAvailabilityDrawerOpen(true)}
+              className="p-2 sm:px-3 sm:py-1.5 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+              title="Manage Item & Variant Availability (86 / Out of Stock)"
+            >
+              <SlidersHorizontal className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Availability</span>
+              {unavailableItemCount > 0 ? (
+                <span className="px-1.5 py-0.2 text-[10px] font-black rounded-full bg-rose-500 text-white">
+                  {unavailableItemCount}
+                </span>
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 hidden sm:inline-block" />
+              )}
+            </button>
+
+            <button
               type="button"
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
@@ -2551,6 +2601,21 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
           {renderOrdersList(true)}
         </div>
+
+        {/* Quick Item Availability Slide-in Drawer */}
+        <QuickItemAvailabilityDrawer
+          isOpen={isAvailabilityDrawerOpen}
+          onClose={() => setIsAvailabilityDrawerOpen(false)}
+          businessId={businessId}
+          menuItems={menuItems}
+          onItemsUpdated={(updated) => setMenuItems(updated)}
+          onRefresh={() => {
+            rbacService.getMenusApi(businessId).then((data) => {
+              if (data && Array.isArray(data)) setMenuItems(data);
+            }).catch(() => {});
+          }}
+          userRole={currentUserRole}
+        />
       </div>
     );
   }
@@ -2583,6 +2648,24 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
           {/* Quick controls: Full Screen, Sound & Reload */}
           <div className="flex items-center gap-2">
+            <button
+              id="btn-kds-quick-availability"
+              type="button"
+              onClick={() => setIsAvailabilityDrawerOpen(true)}
+              className="p-2.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-800 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+              title="Manage Item & Variant Availability (86 / Out of Stock)"
+            >
+              <SlidersHorizontal className="w-4 h-4 text-zinc-600" />
+              <span className="hidden sm:inline">Item Availability</span>
+              {unavailableItemCount > 0 ? (
+                <span className="px-1.5 py-0.2 text-[10px] font-black rounded-full bg-rose-500 text-white">
+                  {unavailableItemCount}
+                </span>
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 hidden sm:inline-block" />
+              )}
+            </button>
+
             <button
               id="btn-open-fullscreen-top"
               type="button"
@@ -2844,6 +2927,21 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
 
       {/* Orders Grid in Standard Mode */}
       {renderOrdersList(false)}
+
+      {/* Quick Item Availability Slide-in Drawer */}
+      <QuickItemAvailabilityDrawer
+        isOpen={isAvailabilityDrawerOpen}
+        onClose={() => setIsAvailabilityDrawerOpen(false)}
+        businessId={businessId}
+        menuItems={menuItems}
+        onItemsUpdated={(updated) => setMenuItems(updated)}
+        onRefresh={() => {
+          rbacService.getMenusApi(businessId).then((data) => {
+            if (data && Array.isArray(data)) setMenuItems(data);
+          }).catch(() => {});
+        }}
+        userRole={currentUserRole}
+      />
     </div>
   );
 };

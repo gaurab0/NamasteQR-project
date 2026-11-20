@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { prisma } from '../lib/prisma';
+import { realtimeEmitter } from '../lib/socket';
 import { authenticate, optionalAuthenticate, requireResourceAccess, AuthenticatedRequest, assertBusinessAccess } from '../middleware/auth.middleware';
 import { db } from '../services/db.service';
 import { MenuItem, MenuCategory, FoodType, MenuStatus, MenuItemVariant } from '../types/rbac.types';
@@ -696,8 +697,80 @@ router.put('/:id', authenticate, requireResourceAccess('menus', 'write'), async 
 });
 
 /**
+ * POST /api/menus/availability/bulk-available
+ * Bulk reset all unavailable or out-of-stock items and variants in the venue to available
+ */
+router.post('/availability/bulk-available', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const businessId = await resolveBusinessId(req);
+    const isAuthorized = await assertBusinessAccess(req.user, businessId);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'TENANT_ACCESS_DENIED', message: `Access denied for venue '${businessId}'.` },
+      });
+    }
+
+    const allItems = await prisma.menuItem.findMany({
+      where: { business_id: businessId },
+    });
+
+    let updatedCount = 0;
+    const updates: Promise<any>[] = [];
+
+    for (const item of allItems) {
+      const isItemOff = !item.is_available || item.status !== 'available';
+      let variantsModified = false;
+      let nextVariants = item.variants;
+
+      if (Array.isArray(item.variants) && item.variants.length > 0) {
+        nextVariants = (item.variants as any[]).map((v) => {
+          if (v.is_available === false || (v.status && v.status !== 'available')) {
+            variantsModified = true;
+            return { ...v, is_available: true, status: 'available' };
+          }
+          return v;
+        });
+      }
+
+      if (isItemOff || variantsModified) {
+        updatedCount++;
+        updates.push(
+          prisma.menuItem.update({
+            where: { id: item.id },
+            data: {
+              is_available: true,
+              status: 'available',
+              variants: nextVariants as any,
+            },
+          })
+        );
+      }
+    }
+
+    if (updates.length > 0) {
+      await prisma.$transaction(updates);
+    }
+
+    realtimeEmitter.menuUpdated(businessId);
+
+    return res.json({
+      success: true,
+      message: `Reset ${updatedCount} item(s) to available`,
+      count: updatedCount,
+    });
+  } catch (err: any) {
+    console.error('Error in bulk-available endpoint:', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'BULK_UPDATE_ERROR', message: err.message || 'Failed to bulk reset item availability' },
+    });
+  }
+});
+
+/**
  * PATCH /api/menus/:id/status
- * Quick toggle for item availability status
+ * Quick toggle for item availability status (supports optional variant_id)
  */
 router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'), async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -718,7 +791,53 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
       });
     }
 
-    const { status, is_available } = req.body;
+    const { status, is_available, variant_id, variantId } = req.body;
+    const targetVariantId = variant_id || variantId;
+
+    if (targetVariantId && Array.isArray(existing.variants)) {
+      const normStatus = status ? String(status).toLowerCase() : undefined;
+      const isAvail = is_available !== undefined ? Boolean(is_available) : (normStatus === 'available' || normStatus === 'in_stock');
+      const finalStatus = normStatus || (isAvail ? 'available' : 'unavailable');
+
+      const updatedVariants = (existing.variants as any[]).map((v) => {
+        if (v.id === targetVariantId) {
+          return {
+            ...v,
+            is_available: isAvail,
+            status: finalStatus,
+          };
+        }
+        return v;
+      });
+
+      const allVariantsUnavailable = updatedVariants.every(
+        (v) => v.is_available === false || v.status === 'out_of_stock' || v.status === 'unavailable'
+      );
+
+      const updateData: any = { variants: updatedVariants };
+      if (allVariantsUnavailable) {
+        updateData.is_available = false;
+        updateData.status = 'unavailable';
+      } else if (!existing.is_available && !allVariantsUnavailable) {
+        updateData.is_available = true;
+        updateData.status = 'available';
+      }
+
+      const updated = await prisma.menuItem.update({
+        where: { id: itemId },
+        data: updateData,
+      });
+
+      realtimeEmitter.menuUpdated(existing.business_id);
+
+      return res.json({
+        success: true,
+        message: `Variant status updated to ${finalStatus}`,
+        status: updated.status,
+        is_available: updated.is_available,
+        item: updated,
+      });
+    }
 
     const updates: any = {};
     if (status !== undefined && is_available !== undefined) {
@@ -744,6 +863,8 @@ router.patch('/:id/status', authenticate, requireResourceAccess('menus', 'write'
       where: { id: itemId },
       data: updates,
     });
+
+    realtimeEmitter.menuUpdated(existing.business_id);
 
     return res.json({
       success: true,
