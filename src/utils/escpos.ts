@@ -48,6 +48,7 @@ export interface EscPosReceiptOptions {
   autoCut?: boolean;
   feedLines?: number;
   openCashDrawer?: boolean;
+  opsConfig?: any;
 }
 
 /**
@@ -374,6 +375,27 @@ export class EscPosEncoder {
         return true;
       }
     );
+    const excludeComp = Boolean(
+      options.opsConfig?.exclude_comp_from_bills ||
+      data.opsConfig?.exclude_comp_from_bills ||
+      data.operations_config?.exclude_comp_from_bills ||
+      (data as any)?.exclude_comp_from_bills
+    );
+
+    const isAllCompOrder = !isKotOrBar && items.length > 0 && items.every((it: any) => {
+      const q = Number(it.quantity) || 1;
+      const cq = Math.max(0, Math.min(q, Number(it.comp_qty) || (it.is_comp ? q : 0)));
+      return Boolean(it.is_comp || cq >= q);
+    });
+
+    if (isAllCompOrder && excludeComp) {
+      encoder.align('center').bold(true);
+      encoder.text('*** COURTESY SLIP ***').feed(1);
+      encoder.text('COURTESY OF MANAGEMENT').feed(1);
+      encoder.text('COMPLIMENTARY - TOTAL: RS. 0.00').feed(1);
+      encoder.bold(false).feed(1);
+    }
+
     items.forEach((item: any) => {
       const qty = Number(item.quantity) || 1;
       const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
@@ -402,15 +424,27 @@ export class EscPosEncoder {
           encoder.align('left').bold(true).text(packLabel).feed(1).bold(false);
         }
       } else {
-        if (cols === 32) {
-          encoder.row(`${qty}x ${name}`, `Rs ${lineTotal.toFixed(2)}`, cols);
+        if (excludeComp) {
+          if (isComp || billedQty === 0) {
+            return; // Omit 100% comped items completely
+          }
+          if (cols === 32) {
+            encoder.row(`${billedQty}x ${name}`, `Rs ${lineTotal.toFixed(2)}`, cols);
+          } else {
+            const pricePart = `${price.toFixed(2)}  ${lineTotal.toFixed(2)}`;
+            encoder.row(`${billedQty}x ${name}`, `Rs ${pricePart}`, cols);
+          }
         } else {
-          const pricePart = `${price.toFixed(2)}  ${lineTotal.toFixed(2)}`;
-          encoder.row(`${qty}x ${name}`, `Rs ${pricePart}`, cols);
-        }
-        if (compQty > 0 || isComp) {
-          const badgeText = isComp ? '  [COMPLIMENTARY]' : `  [${compQty}x COMP]`;
-          encoder.align('left').bold(true).text(badgeText).feed(1).bold(false);
+          if (cols === 32) {
+            encoder.row(`${qty}x ${name}`, `Rs ${lineTotal.toFixed(2)}`, cols);
+          } else {
+            const pricePart = `${price.toFixed(2)}  ${lineTotal.toFixed(2)}`;
+            encoder.row(`${qty}x ${name}`, `Rs ${pricePart}`, cols);
+          }
+          if (compQty > 0 || isComp) {
+            const badgeText = isComp ? '  [COMPLIMENTARY]' : `  [${compQty}x COMP]`;
+            encoder.align('left').bold(true).text(badgeText).feed(1).bold(false);
+          }
         }
       }
       encoder.bold(false);

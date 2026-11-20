@@ -454,22 +454,59 @@ class PrintService {
           </div>
       `;
 
+      const excludeComp = Boolean(
+        data?.opsConfig?.exclude_comp_from_bills ||
+        data?.operations_config?.exclude_comp_from_bills ||
+        data?.business?.operations_config?.exclude_comp_from_bills ||
+        (data as any)?.exclude_comp_from_bills
+      );
+
       const items = (data.items || []).filter((item: any) => item && (item.name || '').trim().length > 0);
+      const isAllCompOrder = items.length > 0 && items.every((it: any) => {
+        const q = Number(it.quantity) || 1;
+        const cq = Math.max(0, Math.min(q, Number(it.comp_qty) || (it.is_comp ? q : 0)));
+        return Boolean(it.is_comp || cq >= q);
+      });
+
+      if (isAllCompOrder && excludeComp) {
+        html += `
+          <div style="text-align: center; padding: 8px; margin-bottom: 8px; border: 1px dashed #000; font-weight: bold;">
+            <div>*** COURTESY SLIP ***</div>
+            <div>COURTESY OF MANAGEMENT</div>
+            <div>COMPLIMENTARY - TOTAL: RS. 0.00</div>
+          </div>
+        `;
+      }
+
       items.forEach((item: any) => {
         const qty = Number(item.quantity) || 1;
         const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
         const isComp = Boolean(item.is_comp || compQty >= qty);
         const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
         const lineTotal = isComp ? 0 : (billedQty * (Number(item.price) || 0));
-        html += `
-          <div class="item">
-            <div class="row">
-              <span>${qty}x ${escapeHtml(item.name)}${isComp ? ' (🎁 Comp)' : compQty > 0 ? ` (${compQty}x Comp)` : ''}</span>
-              <span>${isComp ? 'Rs 0.00' : `Rs ${lineTotal.toFixed(2)}`}</span>
+
+        if (excludeComp) {
+          if (isComp || billedQty === 0) return;
+          html += `
+            <div class="item">
+              <div class="row">
+                <span>${billedQty}x ${escapeHtml(item.name)}</span>
+                <span>Rs ${lineTotal.toFixed(2)}</span>
+              </div>
+              ${(item.special_instructions || item.notes) ? `<div class="notes" style="font-weight: bold; color: #1e293b;">* Request: ${escapeHtml(item.special_instructions || item.notes)}</div>` : ''}
             </div>
-            ${(item.special_instructions || item.notes) ? `<div class="notes" style="font-weight: bold; color: #1e293b;">* Request: ${escapeHtml(item.special_instructions || item.notes)}</div>` : ''}
-          </div>
-        `;
+          `;
+        } else {
+          html += `
+            <div class="item">
+              <div class="row">
+                <span>${qty}x ${escapeHtml(item.name)}${isComp ? ' (🎁 Comp)' : compQty > 0 ? ` (${compQty}x Comp)` : ''}</span>
+                <span>${isComp ? 'Rs 0.00' : `Rs ${lineTotal.toFixed(2)}`}</span>
+              </div>
+              ${(item.special_instructions || item.notes) ? `<div class="notes" style="font-weight: bold; color: #1e293b;">* Request: ${escapeHtml(item.special_instructions || item.notes)}</div>` : ''}
+            </div>
+          `;
+        }
       });
 
       html += `<div class="divider"></div>`;

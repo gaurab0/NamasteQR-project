@@ -338,3 +338,20 @@ export function computeOrderBillableAmounts(
     isAllComp,
   };
 }
+
+/**
+ * Determines whether a sale record is a 100% complimentary transaction.
+ */
+export function isSaleAllComp(sale: any): boolean {
+  if (!sale) return false;
+  if ((sale.payment_method || '').toUpperCase() === 'COMPLIMENTARY') return true;
+  const items = Array.isArray(sale.items) ? sale.items : [];
+  if (items.length === 0) {
+    return Number(sale.total_amount) === 0;
+  }
+  return items.every((it: any) => {
+    const qty = Number(it.quantity) || 1;
+    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || (it.is_comp ? qty : 0)));
+    return Boolean(it.is_comp || compQty >= qty);
+  });
+}

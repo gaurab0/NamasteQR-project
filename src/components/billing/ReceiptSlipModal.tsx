@@ -193,41 +193,69 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
 
           {/* Items List */}
           <div className="space-y-1.5 text-[11px]">
-            {sale.items
-              .filter((item) => (item.name || '').trim().length > 0)
-              .map((item, idx) => {
-              const qty = Number(item.quantity) || 1;
-              const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
-              const isComp = Boolean(item.is_comp || compQty >= qty);
-              const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
-              const uPrice = Number(item.unit_price ?? item.price ?? 0);
-              const tPrice = isComp ? 0 : billedQty * uPrice;
+            {(() => {
+              const excludeComp = Boolean(business?.operations_config?.exclude_comp_from_bills);
+              const validItems = (sale.items || []).filter((item) => (item.name || '').trim().length > 0);
+              const isAllComp = validItems.length > 0 && validItems.every((item) => {
+                const q = Number(item.quantity) || 1;
+                const cq = Math.max(0, Math.min(q, Number(item.comp_qty) || (item.is_comp ? q : 0)));
+                return Boolean(item.is_comp || cq >= q);
+              });
 
-              return (
-                <div key={idx} className="flex justify-between items-start">
-                  <div className="flex-1 pr-2">
-                    <span className="font-bold">{item.name}</span>
-                    {(compQty > 0 || isComp) && (
-                      <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold uppercase tracking-wider">
-                        {isComp ? 'COMPLIMENTARY' : `${compQty}× COMP`}
-                      </span>
-                    )}
-                    <span className="text-[10px] text-zinc-500 block">
-                      {isComp ? (
-                        `${qty} x ${sale.currency} 0.00 (Complimentary)`
-                      ) : compQty > 0 ? (
-                        `${billedQty} x ${sale.currency} ${uPrice.toFixed(2)} (+${compQty}x Comp)`
-                      ) : (
-                        `${qty} x ${sale.currency} ${uPrice.toFixed(2)}`
+              if (excludeComp && isAllComp) {
+                return (
+                  <div className="text-center py-3 px-2 bg-amber-50/60 rounded-xl border border-amber-200 text-xs text-amber-900 font-semibold space-y-0.5">
+                    <div className="font-extrabold uppercase tracking-wider text-[11px] text-amber-800">*** Courtesy Slip ***</div>
+                    <div>Courtesy of Management</div>
+                    <div className="text-[10px] text-amber-700">Complimentary · Total: {sale.currency} 0.00</div>
+                  </div>
+                );
+              }
+
+              const visibleItems = excludeComp
+                ? validItems.filter((item) => {
+                    const q = Number(item.quantity) || 1;
+                    const cq = Math.max(0, Math.min(q, Number(item.comp_qty) || (item.is_comp ? q : 0)));
+                    return !item.is_comp && cq < q;
+                  })
+                : validItems;
+
+              return visibleItems.map((item, idx) => {
+                const qty = Number(item.quantity) || 1;
+                const compQty = Math.max(0, Math.min(qty, Number(item.comp_qty) || (item.is_comp ? qty : 0)));
+                const isComp = Boolean(item.is_comp || compQty >= qty);
+                const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                const uPrice = Number(item.unit_price ?? item.price ?? 0);
+                const tPrice = isComp ? 0 : billedQty * uPrice;
+
+                return (
+                  <div key={idx} className="flex justify-between items-start">
+                    <div className="flex-1 pr-2">
+                      <span className="font-bold">{item.name}</span>
+                      {!excludeComp && (compQty > 0 || isComp) && (
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[9px] font-bold uppercase tracking-wider">
+                          {isComp ? 'COMPLIMENTARY' : `${compQty}× COMP`}
+                        </span>
                       )}
+                      <span className="text-[10px] text-zinc-500 block">
+                        {excludeComp ? (
+                          `${billedQty} x ${sale.currency} ${uPrice.toFixed(2)}`
+                        ) : isComp ? (
+                          `${qty} x ${sale.currency} 0.00 (Complimentary)`
+                        ) : compQty > 0 ? (
+                          `${billedQty} x ${sale.currency} ${uPrice.toFixed(2)} (+${compQty}x Comp)`
+                        ) : (
+                          `${qty} x ${sale.currency} ${uPrice.toFixed(2)}`
+                        )}
+                      </span>
+                    </div>
+                    <span className="font-bold shrink-0">
+                      {sale.currency} {tPrice.toFixed(2)}
                     </span>
                   </div>
-                  <span className="font-bold shrink-0">
-                    {sale.currency} {tPrice.toFixed(2)}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
 
           <div className="border-b border-dashed border-zinc-300 my-2" />

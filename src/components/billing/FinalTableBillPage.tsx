@@ -30,6 +30,7 @@ interface FinalTableBillPageProps {
   hostToken?: string | null;
   businessId?: string;
   businessName?: string;
+  operationsConfig?: any;
   onDoneReturnToMenu: (settledOrder?: TableOrder) => void;
   onRequestBillDispatched?: () => void;
 }
@@ -41,6 +42,7 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   hostToken,
   businessId,
   businessName = 'Restaurant Dining Service',
+  operationsConfig,
   onDoneReturnToMenu,
   onRequestBillDispatched,
 }) => {
@@ -288,6 +290,18 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
   const totalTax = billCalc.totalTax;
   const totalAmount = billCalc.grandTotal;
   const isInclusiveTax = billCalc.isInclusive;
+
+  const excludeComp = Boolean(operationsConfig?.exclude_comp_from_bills);
+  const displayItems = useMemo(() => {
+    if (!excludeComp) return liveOrder.items;
+    return liveOrder.items.filter(it => {
+      const qty = Number(it.quantity) || 1;
+      const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
+      const isComp = Boolean(it.is_comp || compQty >= qty);
+      return !isComp;
+    });
+  }, [liveOrder.items, excludeComp]);
+  const allItemsComped = liveOrder.items.length > 0 && displayItems.length === 0;
 
   // Actions
   const handleRequestBillAction = async () => {
@@ -600,81 +614,93 @@ export const FinalTableBillPage: React.FC<FinalTableBillPageProps> = ({
             <div>
               <h3 className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center justify-between">
                 <span>Itemized Order Details</span>
-                <span>{liveOrder.items.length} {liveOrder.items.length === 1 ? 'dish' : 'dishes'}</span>
+                <span>{displayItems.length} {displayItems.length === 1 ? 'dish' : 'dishes'}</span>
               </h3>
 
-              <div className="border border-zinc-200 rounded-xl overflow-hidden divide-y divide-zinc-100 bg-white">
-                {liveOrder.items.map((it, idx) => {
-                  const qty = Number(it.quantity) || 1;
-                  const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
-                  const isComp = Boolean(it.is_comp || compQty >= qty);
-                  const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
-                  const lineTotal = isComp ? 0 : (billedQty * (Number(it.price) || 0));
+              {allItemsComped ? (
+                <div className="p-4 text-center bg-amber-50/70 border border-amber-200 rounded-xl space-y-1">
+                  <div className="text-amber-800 font-bold text-xs uppercase tracking-wider">*** Courtesy Slip ***</div>
+                  <div className="text-amber-900 font-medium text-xs">Courtesy of Management - Complimentary</div>
+                  <div className="text-zinc-500 text-[11px]">All items complimentary ({currencySymbol} 0.00)</div>
+                </div>
+              ) : (
+                <div className="border border-zinc-200 rounded-xl overflow-hidden divide-y divide-zinc-100 bg-white">
+                  {displayItems.map((it, idx) => {
+                    const qty = Number(it.quantity) || 1;
+                    const compQty = Math.max(0, Math.min(qty, Number(it.comp_qty) || 0));
+                    const isComp = Boolean(it.is_comp || compQty >= qty);
+                    const billedQty = isComp ? 0 : Math.max(0, qty - compQty);
+                    const lineTotal = isComp ? 0 : (billedQty * (Number(it.price) || 0));
 
-                  return (
-                    <div key={idx} className="px-3 py-2 sm:py-2.5 flex items-start sm:items-center justify-between gap-2.5 text-xs hover:bg-zinc-50/50 transition">
-                      <div className="space-y-0.5 min-w-0 flex-1 pr-1.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-zinc-900 text-xs sm:text-sm break-words leading-tight">
-                            {it.name}
-                          </span>
-                          {it.variant_name && (
-                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                              [{it.variant_name}]
+                    return (
+                      <div key={idx} className="px-3 py-2 sm:py-2.5 flex items-start sm:items-center justify-between gap-2.5 text-xs hover:bg-zinc-50/50 transition">
+                        <div className="space-y-0.5 min-w-0 flex-1 pr-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-zinc-900 text-xs sm:text-sm break-words leading-tight">
+                              {it.name}
                             </span>
-                          )}
-                          {isComp && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
-                              🎁 Comp
-                            </span>
-                          )}
-                          {!isComp && compQty > 0 && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                              {compQty}x Comp
-                            </span>
-                          )}
-                          {(Boolean(it.is_packaged) || (Number(it.pack_qty) || 0) > 0) && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5">
-                              <Package className="w-2.5 h-2.5 text-amber-700" />
-                              {(Number(it.pack_qty) || 0) > 1 ? `${it.pack_qty}x Pack` : 'Pack'}
-                            </span>
-                          )}
-                          {it.station === 'BAR' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold shrink-0">
-                              Bar
-                            </span>
-                          )}
-                          {it.status === 'READY' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200 shrink-0">
-                              Ready
-                            </span>
-                          )}
-                          {it.status === 'SERVED' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 font-medium shrink-0">
-                              Served
-                            </span>
-                          )}
+                            {it.variant_name && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                [{it.variant_name}]
+                              </span>
+                            )}
+                            {!excludeComp && isComp && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-200/80 text-amber-900 border border-amber-300">
+                                🎁 Comp
+                              </span>
+                            )}
+                            {!excludeComp && !isComp && compQty > 0 && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                {compQty}x Comp
+                              </span>
+                            )}
+                            {(Boolean(it.is_packaged) || (Number(it.pack_qty) || 0) > 0) && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5">
+                                <Package className="w-2.5 h-2.5 text-amber-700" />
+                                {(Number(it.pack_qty) || 0) > 1 ? `${it.pack_qty}x Pack` : 'Pack'}
+                              </span>
+                            )}
+                            {it.station === 'BAR' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold shrink-0">
+                                Bar
+                              </span>
+                            )}
+                            {it.status === 'READY' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200 shrink-0">
+                                Ready
+                              </span>
+                            )}
+                            {it.status === 'SERVED' && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-100 text-zinc-600 font-medium shrink-0">
+                                Served
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] sm:text-[11px] text-zinc-500 leading-tight notranslate">
+                            {isComp ? (
+                              <span className="font-semibold text-emerald-700">Complimentary (Rs. 0.00)</span>
+                            ) : compQty > 0 ? (
+                              excludeComp ? (
+                                <span>{billedQty} × {currencySymbol} {Number(it.price).toFixed(2)}</span>
+                              ) : (
+                                <span>{billedQty} × {currencySymbol} {Number(it.price).toFixed(2)} (+{compQty}x Comp)</span>
+                              )
+                            ) : (
+                              <span>{it.quantity} × {currencySymbol} {Number(it.price).toFixed(2)}</span>
+                            )}
+                            {it.special_instructions && (
+                              <span className="italic text-zinc-400 block mt-0.5">Note: "{it.special_instructions}"</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="text-[10px] sm:text-[11px] text-zinc-500 leading-tight notranslate">
-                          {isComp ? (
-                            <span className="font-semibold text-emerald-700">Complimentary (Rs. 0.00)</span>
-                          ) : compQty > 0 ? (
-                            <span>{billedQty} × {currencySymbol} {Number(it.price).toFixed(2)} (+{compQty}x Comp)</span>
-                          ) : (
-                            <span>{it.quantity} × {currencySymbol} {Number(it.price).toFixed(2)}</span>
-                          )}
-                          {it.special_instructions && (
-                            <span className="italic text-zinc-400 block mt-0.5">Note: "{it.special_instructions}"</span>
-                          )}
-                        </div>
+                        <span className="font-mono font-black text-zinc-900 text-xs sm:text-sm shrink-0 pt-0.5 sm:pt-0 notranslate">
+                          {currencySymbol} {lineTotal.toFixed(2)}
+                        </span>
                       </div>
-                      <span className="font-mono font-black text-zinc-900 text-xs sm:text-sm shrink-0 pt-0.5 sm:pt-0 notranslate">
-                        {currencySymbol} {lineTotal.toFixed(2)}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Tax & Total Calculation */}

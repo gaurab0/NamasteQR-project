@@ -39,6 +39,8 @@ export interface BusinessOperatingHours {
   timezone?: string;
   timezoneOffsetMinutes?: number;
   default_language?: string;
+  exclude_comp_from_bills?: boolean;
+  exclude_comp_from_sales_register?: boolean;
 }
 
 export interface OperationalDayRecord {

@@ -2203,6 +2203,7 @@ export const CustomerMenuPreviewPage: React.FC<CustomerMenuPreviewPageProps> = (
         businessId={tableParams.businessId || user?.business?.id || activeOrder.business_id}
         businessName={businessProfile?.name || 'Restaurant Dining Service'}
         dateFormatBilling={businessProfile?.date_format_billing || user?.business?.date_format_billing || 'ENGLISH'}
+        operationsConfig={businessProfile?.operations_config || user?.business?.operations_config}
         onDoneReturnToMenu={handleDoneReturnToMenu}
         onRequestBillDispatched={() => {
             // Keep customer on the final bill page waiting for waiter. Settlement listener will auto-conclude session.

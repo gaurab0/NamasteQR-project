@@ -342,6 +342,40 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
   };
 
   // ==========================================
+  // COMPLIMENTARY POLICIES STATE & HANDLERS
+  // ==========================================
+  const [compPolicySaving, setCompPolicySaving] = useState(false);
+  const [compPolicySuccess, setCompPolicySuccess] = useState<string | null>(null);
+
+  const handleToggleCompPolicy = async (policyKey: 'exclude_comp_from_bills' | 'exclude_comp_from_sales_register', val: boolean) => {
+    try {
+      setCompPolicySaving(true);
+      const currentOps = (businessProfile as any)?.operations_config || {};
+      const updatedOps = {
+        ...currentOps,
+        [policyKey]: val,
+      };
+
+      await rbacService.updateBusinessProfileApi({
+        operations_config: updatedOps,
+      }, businessId);
+
+      const freshBiz = {
+        ...businessProfile,
+        operations_config: updatedOps,
+      };
+      setBusinessProfile(freshBiz);
+      updateBusiness(freshBiz);
+      setCompPolicySuccess(policyKey === 'exclude_comp_from_bills' ? 'Customer bills policy updated' : 'Sales register policy updated');
+      setTimeout(() => setCompPolicySuccess(null), 3000);
+    } catch (err: any) {
+      alert(`Failed to save complimentary policy: ${err.message}`);
+    } finally {
+      setCompPolicySaving(false);
+    }
+  };
+
+  // ==========================================
   // DOMAIN 1: MENU & DISH CATALOG STATE
   // ==========================================
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -1348,6 +1382,95 @@ export const BusinessConfigurationCenter: React.FC<BusinessConfigurationCenterPr
           {/* ========================================================== */}
           {activeDomain === 'taxes' && (
             <div className="space-y-4 animate-in fade-in duration-200">
+              {/* Complimentary Items & Sales Policies Card */}
+              <div className="bg-white rounded-3xl border border-zinc-200 p-5 sm:p-6 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center font-bold">
+                      <Gift className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-sm sm:text-base text-zinc-900">
+                        Complimentary Policies
+                      </h3>
+                      <p className="text-xs text-zinc-500">
+                        Control how complimentary items appear on customer bills and main sales registers.
+                      </p>
+                    </div>
+                  </div>
+                  {compPolicySuccess && (
+                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1 animate-in fade-in">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {compPolicySuccess}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                  {/* Toggle 1: Exclude from Bills */}
+                  <div className="p-4 rounded-2xl border border-zinc-200 bg-zinc-50/50 flex flex-col justify-between gap-3">
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-xs text-zinc-900">
+                          Exclude from Customer Bills
+                        </span>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean((businessProfile as any)?.operations_config?.exclude_comp_from_bills)}
+                            disabled={compPolicySaving || !isOwnerOrAdmin}
+                            onChange={(e) => handleToggleCompPolicy('exclude_comp_from_bills', e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-zinc-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                        </label>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
+                        When enabled, 100% complimentary items are omitted from customer receipts. Partially comped items print only the paid quantity.
+                      </p>
+                    </div>
+                    <div className="text-[10px] font-semibold text-zinc-400">
+                      Status: {Boolean((businessProfile as any)?.operations_config?.exclude_comp_from_bills) ? (
+                        <span className="text-amber-700 font-bold">Excluded (Hidden from Bills)</span>
+                      ) : (
+                        <span className="text-zinc-600">Included (Printed with [COMP] Tag)</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Toggle 2: Exclude from Main Sales Register */}
+                  <div className="p-4 rounded-2xl border border-zinc-200 bg-zinc-50/50 flex flex-col justify-between gap-3">
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-xs text-zinc-900">
+                          Exclude from Sales Register
+                        </span>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean((businessProfile as any)?.operations_config?.exclude_comp_from_sales_register)}
+                            disabled={compPolicySaving || !isOwnerOrAdmin}
+                            onChange={(e) => handleToggleCompPolicy('exclude_comp_from_sales_register', e.target.checked)}
+                            className="sr-only peer"
+                          />
+                          <div className="w-9 h-5 bg-zinc-300 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600"></div>
+                        </label>
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-1 leading-relaxed">
+                        When enabled, 100% complimentary sales are filtered out of the main POS and Operations registers. All comp records remain in the Complementary Ledger.
+                      </p>
+                    </div>
+                    <div className="text-[10px] font-semibold text-zinc-400">
+                      Status: {Boolean((businessProfile as any)?.operations_config?.exclude_comp_from_sales_register) ? (
+                        <span className="text-amber-700 font-bold">Excluded from Main Register</span>
+                      ) : (
+                        <span className="text-zinc-600">Included (Rs. 0.00 Collection)</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {taxConfig ? (
                 <TaxConfigurationPanel
                   isInline={true}

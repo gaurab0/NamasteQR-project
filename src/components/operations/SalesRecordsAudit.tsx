@@ -28,6 +28,7 @@ import { rbacService } from '../../services/rbac.service';
 import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
 import { formatVenueDateStr, isSaleInRevenueWindow } from '../../utils/revenueWindow';
 import { renderFormattedDate } from '../../utils/dateFormatter';
+import { isSaleAllComp } from '../../utils/taxCalculations';
 import { exportSalesToExcel, buildSalesWorkbookData, ExcelSheetData } from '../../utils/excelExport';
 import { ExcelSheetPreviewModal } from '../billing/ExcelSheetPreviewModal';
 import { ReceiptSlipModal } from '../billing/ReceiptSlipModal';
@@ -139,6 +140,10 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
         }
       }
 
+      if (opsConfig?.exclude_comp_from_sales_register && isSaleAllComp(sale)) {
+        return false;
+      }
+
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
         const matchesInvoice = sale.invoice_number.toLowerCase().includes(query);
@@ -153,7 +158,7 @@ export const SalesRecordsAudit: React.FC<SalesRecordsAuditProps> = ({
 
       return true;
     });
-  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery]);
+  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery, opsConfig?.exclude_comp_from_sales_register]);
 
   // Key metrics
   const metrics = useMemo(() => {

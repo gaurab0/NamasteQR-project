@@ -160,6 +160,10 @@ export function buildCashierSalesSheet(
     const status = (sale.payment_status || 'PAID').toUpperCase();
     if (status === 'REFUNDED' || status === 'CANCELLED') return false;
 
+    if (options.opsConfig?.exclude_comp_from_sales_register && isSaleAllComp(sale)) {
+      return false;
+    }
+
     const saleDate = getSaleVenueDate(sale, options.opsConfig);
     if (options.dateMode === 'TODAY') {
       if (!isSaleInRevenueWindow(sale, activeWindow)) return false;

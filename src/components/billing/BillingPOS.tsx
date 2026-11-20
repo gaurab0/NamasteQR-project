@@ -1,6 +1,6 @@
 import { CreditAccountSelectionModal } from './CreditAccountSelectionModal';
 import { CashierSalesSheet } from './CashierSalesSheet';
-import { calculateBillTotals, computeOrderBillableAmounts } from '../../utils/taxCalculations';
+import { calculateBillTotals, computeOrderBillableAmounts, isSaleAllComp } from '../../utils/taxCalculations';
 import { renderFormattedDate } from '../../utils/dateFormatter';
 import { amountToWords } from '../../utils/numberToWords';
 import { useSyncedOperationsState } from '../../hooks/useSyncedOperationsState';
@@ -918,6 +918,11 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
         if (sale.payment_method !== paymentFilter) return false;
       }
 
+      // Complimentary Sales Filter
+      if (opsConfig?.exclude_comp_from_sales_register && isSaleAllComp(sale)) {
+        return false;
+      }
+
       // Cashier Scope: Cashiers only see their own; Owners/Managers can filter or see all
       if (!isManagerOrOwner) {
         const myId = activeCashier.id;
@@ -945,7 +950,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
       return true;
     });
-  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery, isManagerOrOwner, activeCashier.id, activeCashier.name, activeCashier.email, selectedCashierFilter]);
+  }, [sales, timeFilter, todayStr, weekRange, monthRange, customDate, paymentFilter, searchQuery, isManagerOrOwner, activeCashier.id, activeCashier.name, activeCashier.email, selectedCashierFilter, opsConfig?.exclude_comp_from_sales_register]);
 
   // Earnings and Key Metrics Calculations
   const metrics = useMemo(() => {
@@ -1001,6 +1006,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   // Today's summary for POS Register View (Cashier-scoped or Manager-selected, synchronized to revenueWindow)
   const todaySales = useMemo(() => {
     return sales.filter((sale) => {
+      if (opsConfig?.exclude_comp_from_sales_register && isSaleAllComp(sale)) return false;
       if (!isSaleInRevenueWindow(sale, revenueWindow)) return false;
 
       // Cashier scope: Cashiers only see their own settled bills
@@ -1017,7 +1023,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
       return true;
     });
-  }, [sales, revenueWindow, isManagerOrOwner, activeCashier.id, activeCashier.name, activeCashier.email, selectedCashierFilter]);
+  }, [sales, revenueWindow, isManagerOrOwner, activeCashier.id, activeCashier.name, activeCashier.email, selectedCashierFilter, opsConfig?.exclude_comp_from_sales_register]);
 
   const todayGross = useMemo(() => {
     return todaySales.reduce((acc, s) => acc + (Number(s.total_amount) || 0), 0);
