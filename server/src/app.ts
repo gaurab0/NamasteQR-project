@@ -99,11 +99,8 @@ export function createApp() {
   // 5. Input validation & Prototype pollution sanitization
   app.use(sanitizeInput);
 
-  // 6. General API Rate Limiting for all /api endpoints
-  app.use('/api', generalApiLimiter);
-
-  // Health check endpoint
-  app.get('/api/health', (req, res) => {
+  // Health checks are intentionally public and do not query the database.
+  const healthHandler = (_req: express.Request, res: express.Response) => {
     res.json({ 
       status: 'ok', 
       service: 'NamasteQR Core API', 
@@ -111,7 +108,12 @@ export function createApp() {
       env: config.nodeEnv,
       timestamp: new Date().toISOString() 
     });
-  });
+  };
+  app.get('/health', healthHandler);
+
+  // 6. General API Rate Limiting for all /api endpoints
+  app.use('/api', generalApiLimiter);
+  app.get('/api/health', healthHandler);
 
   // Short URL Table Router: e.g. /t/tbl-cabin-901-floor-9-6fcf or /t/1
   app.get('/t/:tableId', async (req, res, next) => {

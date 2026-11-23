@@ -1358,7 +1358,7 @@ When a user has no `allowed_tabs`, derive once on read (server `db.ensureAllowed
 - **Resolution**:
   1. **Switched to Supabase Session Pooler (Port `5432`)**:
      - Updated `.env` and documented in `.env.example`:
-       `DATABASE_URL="postgresql://postgres.qlfcpfljiofjwqleppfs:Pikapika%20123%21@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?connection_limit=10&pool_timeout=20"`
+       `DATABASE_URL="postgresql://postgres.qlfcpfljiofjwqleppfs:[REDACTED]@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?connection_limit=10&pool_timeout=20"`
      - Port `5432` is configured for stateful Node.js servers, retaining persistent connections and supporting full PostgreSQL session capabilities without aggressive idle termination.
   2. **Implemented Resilient Query Retry Layer in `server/src/lib/prisma.ts`**:
      - Utilized Prisma 6 client extension (`$extends.query.$allModels.$allOperations`).

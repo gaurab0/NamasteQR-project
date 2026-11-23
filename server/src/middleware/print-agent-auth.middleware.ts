@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { ipKeyGenerator } from 'express-rate-limit';
 import { prisma } from '../lib/prisma';
 import { createRateLimiter } from './rateLimit.middleware';
 import { hashAgentToken, secureHashEquals } from '../services/print-job.service';
@@ -32,7 +33,10 @@ export async function authenticatePrintAgent(req: PrintAgentRequest, res: Respon
 export const printAgentLimiter = createRateLimiter({
   windowMs: 60 * 1000,
   limit: 90,
-  keyGenerator: (req) => (req as PrintAgentRequest).printAgent?.id || req.ip || 'unknown-agent',
+  keyGenerator: (req) => {
+    const agentId = (req as PrintAgentRequest).printAgent?.id;
+    return agentId || (req.ip ? ipKeyGenerator(req.ip) : 'unknown-agent');
+  },
   message: 'Print-agent poll limit reached. Back off briefly and retry.',
   code: 'PRINT_AGENT_RATE_LIMITED',
 });

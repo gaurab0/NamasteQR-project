@@ -2,12 +2,21 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const databaseUrl = process.env.DATABASE_URL?.trim() || '';
+if (process.env.NODE_ENV === 'production' && !databaseUrl) {
+  throw new Error('FATAL CONFIGURATION ERROR: DATABASE_URL must be set in production.');
+}
+const frontendUrl = process.env.FRONTEND_URL?.trim() || '';
+if (process.env.NODE_ENV === 'production' && !frontendUrl) {
+  throw new Error('FATAL CONFIGURATION ERROR: FRONTEND_URL must be set in production for Socket.IO CORS.');
+}
+
 export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   isProduction: process.env.NODE_ENV === 'production',
   port: parseInt(process.env.PORT || '3000', 10),
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
-  databaseUrl: process.env.DATABASE_URL || '',
+  frontendUrl: frontendUrl || 'http://localhost:3000',
+  databaseUrl,
   jwtSecret: (() => {
     if (process.env.JWT_SECRET && process.env.JWT_SECRET.trim().length > 0) {
       return process.env.JWT_SECRET.trim();

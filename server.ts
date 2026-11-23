@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import express from 'express';
 import { createApp } from './server/src/app';
+import { prisma } from './server/src/lib/prisma';
 import { initSocketServer } from './server/src/lib/socket';
 
 process.on('uncaughtException', (err) => {
@@ -19,7 +20,7 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
 
   // Initialize Socket.io real-time engine
-  initSocketServer(httpServer);
+  const socketServer = initSocketServer(httpServer);
 
   // Determine whether to serve compiled dist or attach live Vite middleware
   const hasDist = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'));
@@ -96,8 +97,36 @@ async function startServer() {
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 NamasteQR Server running on http://0.0.0.0:${PORT}`);
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}; closing HTTP, Socket.IO, and database connections.`);
+
+    const forceExit = setTimeout(() => {
+      console.error('Graceful shutdown timed out; forcing process exit.');
+      process.exit(1);
+    }, 10_000);
+    forceExit.unref();
+
+    socketServer.close(async () => {
+      clearTimeout(forceExit);
+      try {
+        await prisma.$disconnect();
+        console.log('Graceful shutdown complete.');
+      } catch (error) {
+        console.error('Database disconnect failed during shutdown:', error);
+        process.exitCode = 1;
+      }
+    });
+  };
+
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {
   console.error('Fatal server startup error:', err);
+  process.exitCode = 1;
 });
