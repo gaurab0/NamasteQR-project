@@ -41,7 +41,7 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
   taxConfig,
   onClose,
 }) => {
-  const { dispatchPrint } = usePrinter();
+  const { dispatchPrint, printers } = usePrinter();
 
   const handlePrint = async () => {
     await dispatchPrint('BILL', { ...sale, tax_config: taxConfig });
@@ -97,6 +97,23 @@ export const ReceiptSlipModal: React.FC<ReceiptSlipModalProps> = ({
               <Printer className="w-3.5 h-3.5" />
               Print Slip
             </button>
+            {printers.some((printer) => printer.enabled) && (
+              <select
+                aria-label="Print invoice to another printer"
+                defaultValue=""
+                onChange={(event) => {
+                  const printerId = event.target.value;
+                  event.target.value = '';
+                  if (printerId) dispatchPrint('BILL', { ...sale, tax_config: taxConfig }, printerId, true);
+                }}
+                className="max-w-28 rounded-xl border border-zinc-200 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-600"
+              >
+                <option value="">Print to…</option>
+                {printers.filter((printer) => printer.enabled).map((printer) => (
+                  <option key={printer.id} value={printer.id}>{printer.name}</option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               onClick={onClose}

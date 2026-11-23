@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import net from 'net';
+import { isIP } from 'net';
 import { printerLimiter } from '../middleware/rateLimit.middleware';
-import { authenticate } from '../middleware/auth.middleware';
-import { config } from '../config/env';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { enqueueRawPrintJob } from '../services/print-job.service';
+import { prisma } from '../lib/prisma';
 
 const router = Router();
 
@@ -12,14 +14,10 @@ router.use(printerLimiter);
 /**
  * Restricted system ports: prevent TCP port scanning or SSRF against internal databases/services
  */
-const BLOCKED_SYSTEM_PORTS = new Set([
-  20, 21, 22, 23, 25, 53, 80, 110, 135, 137, 138, 139, 143, 443, 445,
-  465, 587, 993, 995, 1433, 1434, 1521, 2049, 2375, 2376, 3000, 3306,
-  3389, 5432, 5900, 6379, 8000, 8080, 8443, 8888, 11211, 27017,
-]);
-
 export function isRestrictedPort(port: number): boolean {
-  return BLOCKED_SYSTEM_PORTS.has(port);
+  const configured = (process.env.NAMASTEQR_PRINTER_ALLOWED_PORTS || '')
+    .split(',').map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0 && value <= 65535);
+  return port !== 9100 && !configured.includes(port);
 }
 
 /**
@@ -27,31 +25,20 @@ export function isRestrictedPort(port: number): boolean {
  */
 export function isRestrictedHost(host: string): boolean {
   const normalized = host.toLowerCase().trim();
-  if (
-    normalized === '169.254.169.254' ||
-    normalized === 'metadata.google.internal' ||
-    normalized === 'metadata' ||
-    normalized === 'instance-data' ||
-    normalized.startsWith('169.254.') ||
-    normalized.includes('169.254.169.254') ||
-    normalized === 'fd00:ec2::254' ||
-    normalized === '0.0.0.0' ||
-    normalized.includes('::ffff:169.254')
-  ) {
-    return true;
+  const explicitHosts = (process.env.NAMASTEQR_PRINTER_ALLOWED_HOSTS || '')
+    .split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (explicitHosts.includes(normalized)) return false;
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split('.').map(Number);
+    return !(octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168));
   }
-  if (config.isProduction) {
-    if (
-      normalized === 'localhost' ||
-      normalized === '127.0.0.1' ||
-      normalized === '::1' ||
-      normalized.startsWith('127.') ||
-      normalized.includes('::ffff:127.')
-    ) {
-      return true;
-    }
+  if (isIP(normalized) === 6) {
+    const address = normalized.replace(/^\[|\]$/g, '');
+    return !(address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe8') ||
+      address.startsWith('fe9') || address.startsWith('fea') || address.startsWith('feb'));
   }
-  return false;
+  return true;
 }
 
 
@@ -75,7 +62,7 @@ export function validateTestConnectionInput(req: Request, res: Response, next: (
   if (isRestrictedHost(host)) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid host: connections to cloud metadata or loopback endpoints are strictly prohibited.',
+    error: 'Invalid host: only private LAN addresses or explicitly allowlisted hosts are permitted.',
     });
   }
 
@@ -132,7 +119,7 @@ export function validateLanPrintInput(req: Request, res: Response, next: () => v
   if (isRestrictedHost(host)) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid host: connections to cloud metadata endpoints are strictly prohibited.',
+    error: 'Invalid host: only private LAN addresses or explicitly allowlisted hosts are permitted.',
     });
   }
 
@@ -272,6 +259,65 @@ router.post('/test-connection', authenticate, validateTestConnectionInput, (req:
       error: `Connection timed out after ${timeout}ms while contacting ${host}:${port}`,
     });
   });
+});
+
+/**
+ * Queues a browser-generated ESC/POS payload for the on-site agent. The browser sends only a
+ * logical role; private printer addresses are kept in the agent's local config.
+ */
+router.post('/queue', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  const role = String(req.body?.role || '').toUpperCase();
+  const base64 = req.body?.base64;
+  const idempotencyKey = String(req.body?.idempotencyKey || '');
+  const allowedRoles = new Set(['KOT', 'BOT', 'BAR', 'BILL', 'BOTH']);
+  if (!allowedRoles.has(role)) {
+    return res.status(400).json({ success: false, error: 'A supported printer role is required.' });
+  }
+  if (typeof base64 !== 'string' || !base64 || base64.length > 4_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
+    return res.status(413).json({ success: false, error: 'Print payload is missing, malformed, or too large.' });
+  }
+  const decoded = Buffer.from(base64, 'base64');
+  if (!decoded.length || decoded.length > 3_000_000) {
+    return res.status(413).json({ success: false, error: 'Print payload is empty or exceeds the 3 MB limit.' });
+  }
+  if (!/^[A-Za-z0-9:_-]{8,160}$/.test(idempotencyKey)) {
+    return res.status(400).json({ success: false, error: 'A valid idempotencyKey is required.' });
+  }
+  const businessId = req.user?.business?.id;
+  if (!businessId) return res.status(401).json({ success: false, error: 'Business session is required.' });
+
+  try {
+    const job = await enqueueRawPrintJob({
+      businessId,
+      role: role === 'BAR' || role === 'BOTH' ? 'BOT' : role,
+      base64,
+      idempotencyKey,
+    });
+    if (!job) {
+      return res.status(409).json({ success: false, code: 'NO_PRINT_AGENT', error: 'No active print agent is registered for this business.' });
+    }
+    return res.status(202).json({ success: true, queued: true, jobId: job.id });
+  } catch (error) {
+    console.error('[PrintRoute] Could not queue print job:', error);
+    return res.status(503).json({ success: false, error: 'Could not queue print job. Retry shortly.' });
+  }
+});
+
+/** Reports whether this business has an active on-site print agent. */
+router.get('/agent-status', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  const businessId = req.user?.business?.id;
+  if (!businessId) return res.status(401).json({ success: false, error: 'Business session is required.' });
+  try {
+    const agent = await prisma.printerAgent.findFirst({
+      where: { business_id: businessId, revoked_at: null },
+      select: { id: true, last_seen_at: true },
+      orderBy: { last_seen_at: 'desc' },
+    });
+    return res.json({ success: true, available: Boolean(agent), lastSeenAt: agent?.last_seen_at || null });
+  } catch (error) {
+    console.error('[PrintRoute] Could not check print agent:', error);
+    return res.status(503).json({ success: false, error: 'Could not check print agent status.' });
+  }
 });
 
 /**

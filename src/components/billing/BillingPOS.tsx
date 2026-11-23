@@ -227,7 +227,7 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
   const [isCleaningOrders, setIsCleaningOrders] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const { dispatchPrint } = usePrinter();
+  const { dispatchPrint, printers } = usePrinter();
 
   // Background Sale Sync & Offline Queue
   const [saleSyncStatus, setSaleSyncStatus] = useState<{
@@ -1282,14 +1282,33 @@ export const BillingPOS: React.FC<BillingPOSProps> = ({
 
           <div className="flex items-center gap-2">
             {saleSyncStatus.status === 'SUCCESS' && saleSyncStatus.optimisticSale && (
-              <button
-                type="button"
-                onClick={() => dispatchPrint('BILL', { ...saleSyncStatus.optimisticSale, tax_config: taxConfig })}
-                className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Re-print Receipt
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => dispatchPrint('BILL', { ...saleSyncStatus.optimisticSale, tax_config: taxConfig }, undefined, true)}
+                  className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Re-print Receipt
+                </button>
+                {printers.some((printer) => printer.enabled) && (
+                  <select
+                    aria-label="Print receipt to another printer"
+                    defaultValue=""
+                    onChange={(event) => {
+                      const printerId = event.target.value;
+                      event.target.value = '';
+                      if (printerId) dispatchPrint('BILL', { ...saleSyncStatus.optimisticSale, tax_config: taxConfig }, printerId, true);
+                    }}
+                    className="max-w-28 rounded-lg border border-white/30 bg-white/10 px-2 py-1.5 text-xs font-semibold text-white"
+                  >
+                    <option className="text-zinc-900" value="">Print to…</option>
+                    {printers.filter((printer) => printer.enabled).map((printer) => (
+                      <option className="text-zinc-900" key={printer.id} value={printer.id}>{printer.name}</option>
+                    ))}
+                  </select>
+                )}
+              </>
             )}
             {saleSyncStatus.status === 'OFFLINE_RETRY' && (
               <button
@@ -4759,7 +4778,7 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
   taxConfig,
   onClose,
 }) => {
-  const { dispatchPrint } = usePrinter();
+  const { dispatchPrint, printers } = usePrinter();
   const activeItems = (order.items || []).filter((i) => i.status !== 'CANCELLED');
   const cancelledItems = (order.items || []).filter((i) => i.status === 'CANCELLED');
   const slipPkgComp =
@@ -4826,6 +4845,26 @@ const TableBillCheckSlipModal: React.FC<TableBillCheckSlipModalProps> = ({
               <Printer className="w-3.5 h-3.5" />
               Print Slip
             </button>
+            {printers.some((printer) => printer.enabled) && (
+              <select
+                aria-label="Print folio to another printer"
+                defaultValue=""
+                onChange={(event) => {
+                  const printerId = event.target.value;
+                  event.target.value = '';
+                  if (printerId) dispatchPrint('BILL', {
+                    ...order, items: activeItems, subtotal, tax_amount: taxAmount,
+                    total_tax: taxAmount, total_amount: totalAmount,
+                  }, printerId, true);
+                }}
+                className="max-w-28 rounded-xl border border-zinc-200 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-600"
+              >
+                <option value="">Print to…</option>
+                {printers.filter((printer) => printer.enabled).map((printer) => (
+                  <option key={printer.id} value={printer.id}>{printer.name}</option>
+                ))}
+              </select>
+            )}
             <button
               type="button"
               onClick={onClose}

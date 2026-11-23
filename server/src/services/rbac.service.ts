@@ -29,6 +29,7 @@ import {
 } from '../types';
 import { db } from './db.service';
 import { prisma } from '../lib/prisma';
+import { enqueueOrderPrintJobs } from './print-job.service';
 import { realtimeEmitter } from '../lib/socket';
 import { auditService } from './audit.service';
 import { incrementSequence } from '../utils/sequence.util';
@@ -2434,8 +2435,9 @@ export class RBACService {
         updated_at: now,
       };
 
-      try {
-        await prisma.tableOrder.create({
+      let printAgentManaged = false;
+      await prisma.$transaction(async (tx) => {
+        await tx.tableOrder.create({
           data: {
             id: followUpOrder.id,
             business_id: businessId,
@@ -2467,9 +2469,9 @@ export class RBACService {
             packaging_qty: followUpOrder.packaging_qty || 0,
           },
         });
-      } catch (e: any) {
-        console.warn('Prisma createTableOrder followUp insert error:', e.message);
-      }
+        const result = await enqueueOrderPrintJobs(tx, followUpOrder as any);
+        printAgentManaged = result.agentManaged;
+      });
 
       // Keep table occupied
       if (followUpOrder.table_id) {
@@ -2491,7 +2493,7 @@ export class RBACService {
         status: 'ONLINE',
       });
 
-      realtimeEmitter.orderCreated(businessId, followUpOrder);
+      realtimeEmitter.orderCreated(businessId, { ...followUpOrder, print_agent_managed: printAgentManaged });
       return followUpOrder;
     }
 
@@ -2552,6 +2554,7 @@ export class RBACService {
       updated_at: now,
     };
 
+    let printAgentManaged = false;
     try {
       await db.ensureBusiness(businessId);
       if (order.table_id) {
@@ -2584,7 +2587,8 @@ export class RBACService {
           }
         }
       }
-      await prisma.tableOrder.upsert({
+      await prisma.$transaction(async (tx) => {
+      await tx.tableOrder.upsert({
         where: { id: order.id },
         create: {
           id: order.id,
@@ -2629,8 +2633,12 @@ export class RBACService {
           credit_gl_account_name: order.credit_gl_account_name || null,
         },
       });
+      const result = await enqueueOrderPrintJobs(tx, order as any);
+      printAgentManaged = result.agentManaged;
+      });
     } catch (e: any) {
-      console.warn('Prisma createTableOrder insert error:', e.message);
+      console.error('Prisma createTableOrder insert error:', e.message);
+      throw e;
     }
 
     // Make sure the table remains OCCUPIED
@@ -2653,7 +2661,7 @@ export class RBACService {
       status: 'ONLINE',
     });
 
-    realtimeEmitter.orderCreated(businessId, order);
+    realtimeEmitter.orderCreated(businessId, { ...order, print_agent_managed: printAgentManaged });
     return order;
   }
 
@@ -5550,6 +5558,7 @@ export class RBACService {
       status: it.status === 'AWAITING_PAYMENT' ? 'RECEIVED' : (it.status || 'RECEIVED'),
     }));
 
+    let printAgentManaged = false;
     try {
       await db.ensureBusiness(businessId);
       if (order.table_id) {
@@ -5582,7 +5591,8 @@ export class RBACService {
           }
         }
       }
-      await prisma.tableOrder.upsert({
+      await prisma.$transaction(async (tx) => {
+      await tx.tableOrder.upsert({
         where: { id: orderId },
         create: {
           id: orderId,
@@ -5624,8 +5634,18 @@ export class RBACService {
           items: updatedItems as any,
         },
       });
+      const printResult = await enqueueOrderPrintJobs(tx, {
+        ...order,
+        items: updatedItems,
+        status: 'RECEIVED',
+        payment_status: 'PAID',
+        round_number: order.round_number || 1,
+      });
+      printAgentManaged = printResult.agentManaged;
+      });
     } catch (e: any) {
-      console.warn('Prisma confirmTableOrderPayment error:', e.message);
+      console.error('Prisma confirmTableOrderPayment error:', e.message);
+      throw e;
     }
 
     const updatedPrismaOrder = await prisma.tableOrder.findUnique({ where: { id: orderId } });
@@ -5641,6 +5661,7 @@ export class RBACService {
       payment_confirmed_by: cashierName,
       payment_confirmed_at: new Date(),
       sale_id: createdSale.id,
+      print_agent_managed: printAgentManaged,
     });
   }
 

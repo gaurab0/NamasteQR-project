@@ -54,6 +54,8 @@ async function runPrintSecurityTests() {
   });
   await new Promise<void>((resolve) => mockPrinter.listen(0, '127.0.0.1', () => resolve()));
   const mockPrinterPort = (mockPrinter.address() as net.AddressInfo).port;
+  process.env.NAMASTEQR_PRINTER_ALLOWED_HOSTS = '127.0.0.1';
+  process.env.NAMASTEQR_PRINTER_ALLOWED_PORTS = String(mockPrinterPort);
 
   try {
     // -------------------------------------------------------------
@@ -70,6 +72,22 @@ async function runPrintSecurityTests() {
     });
     assert.strictEqual(metaRes.status, 400);
     pass('Targeting cloud metadata IP returns 400');
+
+    const publicHostRes = await fetch(`${baseUrl}/api/print/test-connection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({ host: '8.8.8.8', port: 9100 }),
+    });
+    assert.strictEqual(publicHostRes.status, 400);
+    pass('Public IP target returns 400');
+
+    const unsafePortRes = await fetch(`${baseUrl}/api/print/test-connection`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({ host: '192.168.1.50', port: 5432 }),
+    });
+    assert.strictEqual(unsafePortRes.status, 400);
+    pass('Non-printer port returns 400');
 
     const sysPortRes = await fetch(`${baseUrl}/api/print/test-connection`, {
       method: 'POST',
@@ -127,6 +145,19 @@ async function runPrintSecurityTests() {
     });
     assert.strictEqual(authLanRes.status, 200);
     pass('Authenticated POST /api/print/lan with valid token transmits print job (200)');
+
+    const hangingPrinter = net.createServer(() => undefined);
+    await new Promise<void>((resolve) => hangingPrinter.listen(0, '127.0.0.1', () => resolve()));
+    const hangingPort = (hangingPrinter.address() as net.AddressInfo).port;
+    process.env.NAMASTEQR_PRINTER_ALLOWED_PORTS = `${mockPrinterPort},${hangingPort}`;
+    const timeoutRes = await fetch(`${baseUrl}/api/print/lan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
+      body: JSON.stringify({ host: '127.0.0.1', port: hangingPort, timeout: 100, data: [0x1b, 0x40] }),
+    });
+    assert.strictEqual(timeoutRes.status, 504);
+    pass('Hung printer connection is stopped by timeout');
+    hangingPrinter.close();
 
   } catch (err: any) {
     fail('Unhandled print security test error', err);

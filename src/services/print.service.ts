@@ -10,6 +10,7 @@ import {
   ThermalPrinterDriver,
 } from '../types/printer.types';
 import { EscPosEncoder } from '../utils/escpos';
+import { printQueue } from './print-queue';
 import {
   WebUsbDriver,
   WebBluetoothDriver,
@@ -32,6 +33,31 @@ class PrintService {
   private bluetoothDriver = new WebBluetoothDriver();
   private lanDriver = new NetworkLanDriver();
   private browserDriver = new BrowserPrintDriver();
+  private readonly printerDrivers = new Map<string, { signature: string; driver: ThermalPrinterDriver }>();
+
+  private getPrinterDriver(config: PrinterConfig): ThermalPrinterDriver {
+    const signature = JSON.stringify({
+      connection: config.connectionType,
+      address: config.targetAddress,
+      port: config.port,
+      usbVendorId: config.usbVendorId,
+      usbProductId: config.usbProductId,
+      bluetoothDeviceId: config.bluetoothDeviceId,
+    });
+    const existing = this.printerDrivers.get(config.id);
+    if (existing && existing.signature === signature) return existing.driver;
+    if (existing) void existing.driver.disconnect();
+    const type = mapDriverType(config.connectionType);
+    let driver: ThermalPrinterDriver;
+    switch (type) {
+      case 'usb': driver = new WebUsbDriver(); break;
+      case 'bluetooth': driver = new WebBluetoothDriver(); break;
+      case 'lan': driver = new NetworkLanDriver(); break;
+      default: driver = new BrowserPrintDriver();
+    }
+    this.printerDrivers.set(config.id, { signature, driver });
+    return driver;
+  }
 
   /**
    * Resolves driver instance based on connection type
@@ -75,48 +101,13 @@ class PrintService {
   public async printTask(
     taskType: PrinterRole,
     orderData: any,
-    printerConfig?: PrinterConfig
+    printerConfig?: PrinterConfig,
+    bypassDuplicateGuard = false,
   ): Promise<boolean> {
     if (!printerConfig) {
-      if (this.usbDriver.isConnected) {
-        return this.printTask(taskType, orderData, {
-          id: 'connected_usb',
-          name: this.usbDriver.getName(),
-          role: taskType,
-          connectionType: 'USB',
-          targetAddress: 'Direct USB',
-          paperWidth: '80mm',
-          enabled: true,
-          autoPrintKds: true,
-        });
-      }
-      if (this.bluetoothDriver.isConnected) {
-        return this.printTask(taskType, orderData, {
-          id: 'connected_ble',
-          name: this.bluetoothDriver.getName(),
-          role: taskType,
-          connectionType: 'BLUETOOTH',
-          targetAddress: 'Direct BLE',
-          paperWidth: '80mm',
-          enabled: true,
-          autoPrintKds: true,
-        });
-      }
-      if (this.lanDriver.isConnected) {
-        return this.printTask(taskType, orderData, {
-          id: 'connected_lan',
-          name: this.lanDriver.getName(),
-          role: taskType,
-          connectionType: 'NETWORK',
-          targetAddress: this.lanDriver.getName(),
-          paperWidth: '80mm',
-          enabled: true,
-          autoPrintKds: true,
-        });
-      }
       console.warn(`[PrintService] No printer configured for ${taskType}. Falling back to universal browser print.`);
       const html = this.generateHtml(taskType, orderData);
-      return this.browserDriver.printHtml(html);
+      return this.enqueuePrint('browser-dialog', taskType, orderData, () => this.browserDriver.printHtml(html), bypassDuplicateGuard);
     }
 
     if (!printerConfig.enabled) {
@@ -127,12 +118,13 @@ class PrintService {
     // Direct hardware thermal printing for USB, Bluetooth, and Network/LAN
     if (printerConfig.connectionType !== 'SYSTEM') {
       try {
-        const driver = this.getDriver(printerConfig.connectionType);
+        const driver = this.getPrinterDriver(printerConfig);
 
         if (printerConfig.connectionType === 'NETWORK') {
-          this.lanDriver.configure(
+          (driver as NetworkLanDriver).configure(
             printerConfig.targetAddress || printerConfig.name,
-            printerConfig.port || 9100
+            printerConfig.port || 9100,
+            taskType
           );
         }
 
@@ -146,25 +138,49 @@ class PrintService {
         });
 
         this.showToast(`Printing to ${printerConfig.name} via ${printerConfig.connectionType}...`);
-        await driver.sendRaw(rawPayload);
+        const success = await this.enqueuePrint(
+          printerConfig.id,
+          taskType,
+          orderData,
+          () => driver.sendRaw(rawPayload),
+          bypassDuplicateGuard,
+          () => this.printTask(taskType, orderData, printerConfig, true),
+          () => { void driver.disconnect(); },
+        );
+        if (!success) return false;
         this.showToast(`Successfully printed on ${printerConfig.name}!`);
         return true;
       } catch (hardwareErr: any) {
         console.error(`[PrintService] Direct thermal print error for ${printerConfig.name}:`, hardwareErr);
-        this.showToast(
-          `Hardware print error: ${hardwareErr.message || 'Printer not reached'}. Falling back to system print...`,
-          true
-        );
-
-        // Fail-safe fallback: Never lose a customer receipt or KOT ticket!
-        const html = this.generateHtml(taskType, orderData);
-        return this.browserDriver.printHtml(html);
+        this.showToast(`Print failed on ${printerConfig.name}: ${hardwareErr.message || 'Printer not reached'}.`, true, () => this.printTask(taskType, orderData, printerConfig, true));
+        return false;
       }
     }
 
     // Standard Browser / System Spooler print (Universal fallback for Canon, HP, Epson, PDF, etc.)
     const htmlPayload = this.generateHtml(taskType, orderData);
-    return await this.browserDriver.printHtml(htmlPayload);
+    const browserDriver = this.getPrinterDriver(printerConfig) as BrowserPrintDriver;
+    return await this.enqueuePrint('browser-dialog', taskType, orderData, () => browserDriver.printHtml(htmlPayload), bypassDuplicateGuard, () => this.printTask(taskType, orderData, printerConfig, true));
+  }
+
+  private async enqueuePrint(
+    printerId: string,
+    role: PrinterRole,
+    data: { id?: string; order_number?: string | number; round_number?: number },
+    task: () => Promise<unknown>,
+    bypassDuplicateGuard: boolean,
+    retryTask?: () => Promise<boolean>,
+    onTimeout?: () => void,
+  ): Promise<boolean> {
+    const documentId = String(data.id || data.order_number || 'print-document');
+    const identity = `${role}:${documentId}:${String(data.round_number || 1)}`;
+    try {
+      const result = await printQueue.enqueue(printerId, identity, task, { bypassDuplicateGuard, onTimeout });
+      return result.skippedDuplicate || result.value !== false;
+    } catch (error) {
+      this.showToast(error instanceof Error ? error.message : 'Print failed. Retry or choose another printer.', true, retryTask);
+      return false;
+    }
   }
 
   /**
@@ -184,14 +200,15 @@ class PrintService {
         total_amount: 113.0,
       };
       const html = this.generateHtml(config.role, mockData);
-      return this.browserDriver.printHtml(html);
+      const browserDriver = this.getPrinterDriver(config) as BrowserPrintDriver;
+      return this.enqueuePrint('browser-dialog', config.role, mockData, () => browserDriver.printHtml(html), false);
     }
 
     try {
-      const driver = this.getDriver(config.connectionType);
+      const driver = this.getPrinterDriver(config);
 
       if (config.connectionType === 'NETWORK') {
-        this.lanDriver.configure(config.targetAddress || '', config.port || 9100);
+        (driver as NetworkLanDriver).configure(config.targetAddress || '', config.port || 9100, config.role);
       }
 
       const testPayload = EscPosEncoder.buildTestPrint({
@@ -204,7 +221,16 @@ class PrintService {
       });
 
       this.showToast(`Sending test pattern to ${config.name}...`);
-      await driver.sendRaw(testPayload);
+      const printed = await this.enqueuePrint(
+        config.id,
+        config.role,
+        { id: `test:${config.id}` },
+        () => driver.sendRaw(testPayload),
+        true,
+        undefined,
+        () => { void driver.disconnect(); },
+      );
+      if (!printed) throw new Error('Printer test failed. Check the connection and retry.');
       this.showToast(`Test pattern printed on ${config.name}!`);
       return true;
     } catch (err: any) {
@@ -217,12 +243,15 @@ class PrintService {
   /**
    * Temporary visual toast notification
    */
-  public showToast(message: string, isError: boolean = false) {
+  public showToast(message: string, isError: boolean = false, onRetry?: () => Promise<boolean>) {
     if (typeof document === 'undefined') return;
 
     const toast = document.createElement('div');
     toast.textContent = (isError ? '⚠️ ' : '🖨️ ') + message;
     toast.style.position = 'fixed';
+    toast.style.display = 'flex';
+    toast.style.alignItems = 'center';
+    toast.style.gap = '12px';
     toast.style.bottom = '24px';
     toast.style.right = '24px';
     toast.style.backgroundColor = isError ? '#991b1b' : '#18181b';
@@ -236,6 +265,20 @@ class PrintService {
     toast.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
     toast.style.transform = 'translateY(20px)';
     toast.style.opacity = '0';
+
+    if (onRetry) {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.textContent = 'Retry';
+      retry.style.color = '#fff';
+      retry.style.background = 'rgba(255,255,255,0.18)';
+      retry.style.border = '1px solid rgba(255,255,255,0.45)';
+      retry.style.borderRadius = '6px';
+      retry.style.padding = '4px 8px';
+      retry.style.cursor = 'pointer';
+      retry.onclick = () => { void onRetry(); };
+      toast.appendChild(retry);
+    }
 
     document.body.appendChild(toast);
 
@@ -559,6 +602,13 @@ class PrintService {
 
     return html;
   }
+}
+
+function mapDriverType(connection: ConnectionType): DriverType {
+  if (connection === 'USB') return 'usb';
+  if (connection === 'BLUETOOTH') return 'bluetooth';
+  if (connection === 'NETWORK') return 'lan';
+  return 'browser';
 }
 
 export const printService = new PrintService();

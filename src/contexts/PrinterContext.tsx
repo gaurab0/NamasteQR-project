@@ -5,22 +5,28 @@ import {
   PrinterRole,
   DriverType,
   ReceiptData,
+  PrinterSettings,
+  PrinterProfile,
+  DocumentRole,
 } from '../types/printer.types';
 import { printService } from '../services/print.service';
 import { useAuth } from '../context/AuthContext';
 import { rbacService } from '../services/rbac.service';
 import { socketService } from '../services/socket.service';
 import { determineItemStation } from '../utils/menuUtils';
+import { normalizePrinterSettings, resolvePrinter, splitOrderByStation } from '../services/printer-routing';
 
 interface PrinterContextValue {
   // Existing state & methods
   printers: PrinterConfig[];
+  printerAssignments: PrinterSettings['assignments'];
+  setPrinterAssignment: (role: DocumentRole | 'defaultPrinterId', printerId: string | null) => void;
   kdsPrintMode: KdsPrintMode;
   savePrinter: (config: PrinterConfig) => void;
   deletePrinter: (id: string) => void;
   setKdsPrintMode: (mode: KdsPrintMode) => void;
   testPrinter: (config: PrinterConfig) => Promise<boolean>;
-  dispatchPrint: (role: PrinterRole, data: any) => Promise<boolean>;
+  dispatchPrint: (role: PrinterRole, data: any, overridePrinterId?: string, bypassDuplicateGuard?: boolean) => Promise<boolean>;
 
   // Thermal hardware state & drivers
   activeDriver: DriverType | null;
@@ -45,6 +51,10 @@ const PrinterContext = createContext<PrinterContextValue | null>(null);
 
 export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
+  const [printerAssignments, setPrinterAssignments] = useState<PrinterSettings['assignments']>({
+    KOT: null, BOT: null, BILL: null, defaultPrinterId: null,
+  });
+  const settingsRef = useRef<PrinterSettings>({ schemaVersion: 2, printers: [], assignments: { KOT: null, BOT: null, BILL: null, defaultPrinterId: null } });
   const [kdsPrintMode, setKdsPrintModeState] = useState<KdsPrintMode>('DISPLAY_ONLY');
 
   // Hardware states
@@ -87,31 +97,43 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     try {
       const storedPrinters = localStorage.getItem('serveflow_printers');
-      if (storedPrinters) {
-        const parsed: PrinterConfig[] = JSON.parse(storedPrinters);
-        setPrinters(parsed);
-        if (parsed.length > 0) {
-          const first = parsed[0];
-          setActivePrinter(first);
-          const mappedDriver = mapConnectionToDriver(first.connectionType);
-          setActiveDriver(mappedDriver);
-          setIsConnected(mappedDriver === 'browser');
-        }
+      const backupKey = 'serveflow_printers_legacy_backup';
+      if (storedPrinters && !localStorage.getItem(backupKey)) localStorage.setItem(backupKey, storedPrinters);
+      const normalized = normalizePrinterSettings(storedPrinters ? JSON.parse(storedPrinters) : null);
+      settingsRef.current = normalized;
+      setPrinterAssignments(normalized.assignments);
+      const legacyView = normalized.printers.map((profile) => profileToConfig({
+        ...profile,
+        status: profile.connection === 'USB' || (profile.connection === 'BLUETOOTH' && bluetoothRestoreAvailable())
+          ? undefined
+          : profile.connection === 'BLUETOOTH' ? 'disconnected' : profile.status,
+      }, normalized.assignments));
+      setPrinters(legacyView);
+      if (legacyView.length > 0) {
+        setActivePrinter(legacyView[0]);
+        const mappedDriver = mapConnectionToDriver(legacyView[0].connectionType);
+        setActiveDriver(mappedDriver);
+        setIsConnected(mappedDriver === 'browser');
       }
       const storedMode = localStorage.getItem('serveflow_kds_mode');
       if (storedMode) {
         setKdsPrintModeState(storedMode as KdsPrintMode);
-      } else if (parsed && parsed.some((p: any) => p.enabled && (p.role === 'KOT' || p.role === 'BAR' || p.role === 'BOTH'))) {
+      } else if (legacyView.some((p) => p.enabled && (p.role === 'KOT' || p.role === 'BAR' || p.role === 'BOTH'))) {
         setKdsPrintModeState('BOTH');
+      }
+      if (storedPrinters) {
+        localStorage.setItem('serveflow_printers', JSON.stringify(normalized));
       }
     } catch (e) {
       console.warn('Failed to parse printer config from local storage', e);
     }
   }, []);
 
-  const saveToStorage = (newPrinters: PrinterConfig[], newMode: KdsPrintMode) => {
+  const saveToStorage = (newPrinters: PrinterConfig[], newMode: KdsPrintMode, assignments = printerAssignments) => {
     try {
-      localStorage.setItem('serveflow_printers', JSON.stringify(newPrinters));
+      const normalized = normalizePrinterSettings({ schemaVersion: 2, printers: newPrinters.map(configToProfile), assignments });
+      settingsRef.current = normalized;
+      localStorage.setItem('serveflow_printers', JSON.stringify(normalized));
       localStorage.setItem('serveflow_kds_mode', newMode);
     } catch (e) {
       console.error('Failed to save printer configuration to localStorage:', e);
@@ -237,45 +259,80 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setError(null);
     try {
       const result = await printService.testPrinter(config);
+      if (!result) throw new Error('Printer test did not complete successfully. Retry the connection.');
+      setPrinters((previous) => {
+        const next = previous.map((printer) => printer.id === config.id ? { ...printer, status: 'connected' as const } : printer);
+        saveToStorage(next, kdsPrintMode);
+        return next;
+      });
       return result;
     } catch (err: any) {
       const msg = err.message || 'Test print failed';
       setError(msg);
+      setPrinters((previous) => {
+        const next = previous.map((printer) => printer.id === config.id ? { ...printer, status: 'disconnected' as const } : printer);
+        saveToStorage(next, kdsPrintMode);
+        return next;
+      });
       return false;
     } finally {
       setIsPrinting(false);
     }
-  }, []);
+  }, [kdsPrintMode, printerAssignments]);
 
   const savePrinter = useCallback((config: PrinterConfig) => {
     setPrinters((prev) => {
       const existingIdx = prev.findIndex((p) => p.id === config.id);
+      const isNew = existingIdx < 0;
       const newPrinters = [...prev];
       if (existingIdx >= 0) {
         newPrinters[existingIdx] = config;
       } else {
         newPrinters.push(config);
       }
+      const assignments = { ...printerAssignments };
+      const role = config.role === 'BAR' ? 'BOT' : config.role;
+      if (isNew && (role === 'KOT' || role === 'BOT' || role === 'BILL')) assignments[role] = config.id;
+      if (!assignments.defaultPrinterId) assignments.defaultPrinterId = config.id;
+      if (!config.enabled) {
+        const cleared = (['KOT', 'BOT', 'BILL', 'defaultPrinterId'] as const)
+          .filter((key) => assignments[key] === config.id);
+        for (const key of cleared) assignments[key] = null;
+        if (cleared.length) printService.showToast(`${config.name} disabled. Unassigned: ${cleared.map((entry) => entry === 'defaultPrinterId' ? 'Default' : entry).join(', ')}.`, true);
+      }
+      setPrinterAssignments(assignments);
       let nextMode = kdsPrintMode;
       if (nextMode === 'DISPLAY_ONLY' && (config.role === 'KOT' || config.role === 'BAR' || config.role === 'BOTH') && config.enabled !== false) {
         nextMode = 'BOTH';
         setKdsPrintModeState('BOTH');
       }
-      saveToStorage(newPrinters, nextMode);
+      saveToStorage(newPrinters, nextMode, assignments);
       return newPrinters;
     });
 
     setActivePrinter(config);
     setActiveDriver(mapConnectionToDriver(config.connectionType));
-  }, [kdsPrintMode]);
+  }, [kdsPrintMode, printerAssignments]);
 
   const deletePrinter = useCallback((id: string) => {
     setPrinters((prev) => {
       const newPrinters = prev.filter((p) => p.id !== id);
-      saveToStorage(newPrinters, kdsPrintMode);
+      const assignments = { ...printerAssignments };
+      const cleared = (['KOT', 'BOT', 'BILL', 'defaultPrinterId'] as const)
+        .filter((key) => assignments[key] === id);
+      for (const key of cleared) assignments[key] = null;
+      setPrinterAssignments(assignments);
+      saveToStorage(newPrinters, kdsPrintMode, assignments);
+      if (cleared.length) printService.showToast(`Printer removed. Unassigned: ${cleared.map((role) => role === 'defaultPrinterId' ? 'Default' : role).join(', ')}.`, true);
       return newPrinters;
     });
-  }, [kdsPrintMode]);
+  }, [kdsPrintMode, printerAssignments]);
+
+  const setPrinterAssignment = useCallback((role: DocumentRole | 'defaultPrinterId', printerId: string | null) => {
+    const assignments = { ...printerAssignments, [role]: printerId };
+    setPrinterAssignments(assignments);
+    saveToStorage(printers, kdsPrintMode, assignments);
+  }, [printerAssignments, printers, kdsPrintMode]);
 
   const setKdsPrintMode = useCallback((mode: KdsPrintMode) => {
     setKdsPrintModeState(mode);
@@ -285,69 +342,64 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
         console.warn('[PrinterContext] Failed to persist kds_print_mode to backend:', err);
       });
     }
-  }, [printers, businessId]);
+  }, [printers, businessId, printerAssignments]);
 
-  const dispatchPrint = useCallback(async (role: PrinterRole, data: any): Promise<boolean> => {
+  const dispatchPrint = useCallback(async (role: PrinterRole, data: any, overridePrinterId?: string, bypassDuplicateGuard = false): Promise<boolean> => {
     setIsPrinting(true);
     try {
-      // Direct station printers (e.g. KOT, BAR, BILL, or direct BOTH)
-      const directPrinters = printers.filter((p) => p.role === role && p.enabled);
-
-      // If this is an order ticket (KOT, BAR, or BOTH), also identify any enabled 'BOTH' printers
-      const bothPrinters = (role === 'KOT' || role === 'BAR' || role === 'BOTH')
-        ? printers.filter((p) => p.role === 'BOTH' && p.enabled)
-        : [];
-
-      // Fallback to universal system spooler if no printers are configured for this task
-      if (directPrinters.length === 0 && bothPrinters.length === 0) {
-        return await printService.printTask(role, data, undefined);
+      const documentRole: DocumentRole = role === 'BAR' ? 'BOT' : role === 'BOTH' ? 'KOT' : role;
+      const resolution = resolvePrinter({ schemaVersion: 2, printers: printers.map(configToProfile), assignments: printerAssignments }, documentRole, overridePrinterId);
+      if ('error' in resolution) {
+        const targetId = overridePrinterId || printerAssignments[documentRole] || printerAssignments.defaultPrinterId;
+        const target = printers.find((printer) => printer.id === targetId);
+        const retry = target?.enabled ? async () => {
+          const retryData = documentRole === 'KOT' || documentRole === 'BOT'
+            ? (documentRole === 'KOT' ? splitOrderByStation(data).KOT : splitOrderByStation(data).BOT) || data
+            : data;
+          const printed = await printService.printTask(documentRole === 'BOT' ? 'BAR' : documentRole, retryData, target, true);
+          setPrinters((previous) => {
+            const next = previous.map((printer) => printer.id === target.id
+              ? { ...printer, status: printed ? 'connected' as const : 'disconnected' as const }
+              : printer);
+            saveToStorage(next, kdsPrintMode, printerAssignments);
+            return next;
+          });
+          return printed;
+        } : undefined;
+        printService.showToast(`${resolution.error} Choose another printer or reconnect it.`, true, retry);
+        return false;
       }
-
-      let allSuccess = true;
-
-      // 1. Dispatch to dedicated station printers (avoid double-calling if role === 'BOTH')
-      if (role !== 'BOTH') {
-        for (const printer of directPrinters) {
-          const success = await printService.printTask(role, data, printer);
-          if (!success) allSuccess = false;
-        }
+      const chosen = resolution.printer;
+      const config = profileToConfig(chosen, printerAssignments, documentRole);
+      const splitOrder = documentRole === 'KOT' || documentRole === 'BOT' ? splitOrderByStation(data) : null;
+      if (documentRole === 'KOT' && splitOrder?.unclassifiedItems.length) {
+        printService.showToast(`Unclassified items routed to KOT: ${splitOrder.unclassifiedItems.join(', ')}`, true);
       }
-
-      // 2. Dispatch to 'BOTH' (Combined KOT/BOT) printers with de-duplication
-      if (bothPrinters.length > 0) {
-        const now = Date.now();
-        const orderId = String(data?.id || data?.order_number || 'ORD');
-        const round = String(data?.round_number || 1);
-
-        for (const printer of bothPrinters) {
-          const dedupeKey = `${printer.id}_${orderId}_${round}`;
-          const lastPrintTime = recentBothPrintsRef.current.get(dedupeKey) || 0;
-          if (now - lastPrintTime < 4000) {
-            // Already printed on this BOTH printer within 4 seconds (from paired KOT & BAR dispatch)
-            continue;
-          }
-          recentBothPrintsRef.current.set(dedupeKey, now);
-
-          // Periodically prune cache
-          if (recentBothPrintsRef.current.size > 50) {
-            for (const [k, t] of recentBothPrintsRef.current.entries()) {
-              if (now - t > 30000) recentBothPrintsRef.current.delete(k);
-            }
-          }
-
-          const success = await printService.printTask('BOTH', data, printer);
-          if (!success) allSuccess = false;
-        }
+      const stationOrder = splitOrder ? (documentRole === 'KOT' ? splitOrder.KOT : splitOrder.BOT) : null;
+      if (splitOrder && !stationOrder) {
+        printService.showToast(`No ${documentRole === 'KOT' ? 'kitchen' : 'bar'} items to print for this order.`);
+        return false;
       }
-
-      return allSuccess;
+      const payload = stationOrder || data;
+      const where = resolution.reason === 'browser-fallback' ? 'System Print Dialog (fallback)' : `${chosen.name} (${chosen.connection}${chosen.address.lan ? ` ${chosen.address.lan.host}` : ''})`;
+      printService.showToast(`${documentRole} → ${where} • ${resolution.reason}`);
+      const printed = await printService.printTask(documentRole === 'BOT' ? 'BAR' : documentRole, payload, config, bypassDuplicateGuard);
+      setPrinters((previous) => {
+        const next = previous.map((printer) => printer.id === chosen.id
+          ? { ...printer, status: printed ? 'connected' as const : 'disconnected' as const }
+          : printer);
+        saveToStorage(next, kdsPrintMode, printerAssignments);
+        return next;
+      });
+      return printed;
     } catch (err: any) {
       console.error(`[dispatchPrint] Error printing ${role}:`, err);
+      printService.showToast(`Print failed: ${err.message || 'Printer unavailable'}. Retry or choose another printer.`, true);
       return false;
     } finally {
       setIsPrinting(false);
     }
-  }, [printers]);
+  }, [printers, printerAssignments]);
 
   // App-Wide Background Auto-Print: Listen for incoming orders across POS, KDS, and tables
   useEffect(() => {
@@ -365,15 +417,18 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const unsubOrder = socketService.subscribeToOrders(async (order: any) => {
       if (!order || !order.id) return;
+      if (order.print_agent_managed) return;
       if (order.status === 'CANCELLED' || order.status === 'COMPLETED' || order.settled) return;
 
       const currentMode = kdsPrintMode || (user?.business?.kds_print_mode as KdsPrintMode);
       if (currentMode === 'DISPLAY_ONLY') return;
 
       // Check if this device has any enabled printers that can print KOT, BAR, or BOTH
-      const hasEligiblePrinter = printers.some(
-        (p) => p.enabled && p.autoPrintKds !== false && (p.role === 'KOT' || p.role === 'BAR' || p.role === 'BOTH')
-      );
+      const hasEligiblePrinter = printers.some((printer) => printer.enabled && printer.autoPrintKds !== false && (
+        printerAssignments.KOT === printer.id || printerAssignments.BOT === printer.id ||
+        printerAssignments.defaultPrinterId === printer.id ||
+        printer.role === 'KOT' || printer.role === 'BAR' || printer.role === 'BOTH'
+      ));
       if (!hasEligiblePrinter) return;
 
       const orderRound = order.round_number || 1;
@@ -415,7 +470,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     return () => unsubOrder();
-  }, [businessId, kdsPrintMode, user?.business?.kds_print_mode, printers, dispatchPrint]);
+  }, [businessId, kdsPrintMode, user?.business?.kds_print_mode, printers, printerAssignments, dispatchPrint]);
 
   const probeNetworkPrinter = useCallback(async (host: string, port: number = 9100) => {
     try {
@@ -463,6 +518,8 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <PrinterContext.Provider
       value={{
         printers,
+        printerAssignments,
+        setPrinterAssignment,
         kdsPrintMode,
         savePrinter,
         deletePrinter,
@@ -498,6 +555,47 @@ function mapConnectionToDriver(conn: string): DriverType {
   if (c === 'BLUETOOTH') return 'bluetooth';
   if (c === 'NETWORK' || c === 'LAN') return 'lan';
   return 'browser';
+}
+
+function profileToConfig(profile: PrinterProfile, assignments?: PrinterSettings['assignments'], roleOverride?: DocumentRole): PrinterConfig {
+  const role: PrinterRole = roleOverride === 'BOT' ? 'BAR' : roleOverride ||
+    (assignments?.BILL === profile.id ? 'BILL' : assignments?.BOT === profile.id ? 'BAR' : assignments?.KOT === profile.id ? 'KOT' : 'KOT');
+  const connectionType = profile.connection === 'LAN' ? 'NETWORK'
+    : profile.connection === 'BROWSER' ? 'SYSTEM' : profile.connection;
+  return {
+    ...profile,
+    role,
+    connectionType,
+    targetAddress: profile.address.lan?.host || profile.address.bluetooth?.deviceName || profile.name,
+    port: profile.address.lan?.port || profile.port || 9100,
+    paperWidth: profile.paperWidthMm === 58 ? '58mm' : profile.paperWidth || '80mm',
+    usbVendorId: profile.address.usb?.vendorId ?? profile.usbVendorId,
+    usbProductId: profile.address.usb?.productId ?? profile.usbProductId,
+    bluetoothDeviceId: profile.address.bluetooth?.deviceId || profile.bluetoothDeviceId,
+  };
+}
+
+function configToProfile(config: PrinterConfig): PrinterProfile {
+  const connection = config.connectionType === 'NETWORK' ? 'LAN'
+    : config.connectionType === 'SYSTEM' ? 'BROWSER' : config.connectionType;
+  return {
+    ...config,
+    connection,
+    address: {
+      ...(config.usbVendorId !== undefined && config.usbProductId !== undefined
+        ? { usb: { vendorId: config.usbVendorId, productId: config.usbProductId } } : {}),
+      ...(config.bluetoothDeviceId ? { bluetooth: { deviceId: config.bluetoothDeviceId, deviceName: config.targetAddress } } : {}),
+      ...(connection === 'LAN' && config.targetAddress && config.targetAddress !== 'Default'
+        ? { lan: { host: config.targetAddress, port: config.port || 9100 } } : {}),
+    },
+    paperWidthMm: config.paperWidth === '58mm' ? 58 : 80,
+  };
+}
+
+function bluetoothRestoreAvailable(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const bluetooth = (navigator as Navigator & { bluetooth?: { getDevices?: () => Promise<unknown[]> } }).bluetooth;
+  return typeof bluetooth?.getDevices === 'function';
 }
 
 /**

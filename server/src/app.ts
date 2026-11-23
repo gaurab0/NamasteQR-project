@@ -8,6 +8,7 @@ import menuRoutes from './routes/menu.routes';
 import imageRoutes from './routes/image.routes';
 import contactRoutes from './routes/contact.routes';
 import printRoutes from './routes/print.routes';
+import printAgentRoutes from './routes/print-agent.routes';
 import { errorHandler } from './middleware/errorHandler';
 import { sanitizeInput } from './middleware/sanitize.middleware';
 import { generalApiLimiter } from './middleware/rateLimit.middleware';
@@ -191,6 +192,7 @@ export function createApp() {
   app.use('/api/menus', menuRoutes);
   app.use('/api/images', imageRoutes);
   app.use('/api/contact', contactRoutes);
+  app.use('/api/print-agent', printAgentRoutes);
   app.use('/api/print', printRoutes);
 
   // 8. Centralized error handler

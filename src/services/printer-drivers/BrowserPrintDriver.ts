@@ -140,7 +140,7 @@ export class BrowserPrintDriver implements ThermalPrinterDriver {
       if ('srcdoc' in iframe) {
         iframe.srcdoc = htmlContent;
       } else {
-        const win = iframe.contentWindow;
+        const win = (iframe as HTMLIFrameElement).contentWindow;
         if (win) {
           win.document.open();
           win.document.write(htmlContent);

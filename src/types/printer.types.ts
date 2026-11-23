@@ -1,5 +1,7 @@
 export type PrinterRole = 'KOT' | 'BILL' | 'BAR' | 'BOTH';
 export type ConnectionType = 'SYSTEM' | 'NETWORK' | 'USB' | 'BLUETOOTH';
+export type DocumentRole = 'KOT' | 'BOT' | 'BILL';
+export type PrinterConnection = 'USB' | 'BLUETOOTH' | 'LAN' | 'BROWSER';
 export type KdsPrintMode = 'DISPLAY_ONLY' | 'PRINT_ONLY' | 'BOTH';
 export type DriverType = 'usb' | 'bluetooth' | 'lan' | 'browser';
 
@@ -22,6 +24,40 @@ export interface PrinterConfig {
   bluetoothDeviceId?: string;
   lastConnected?: string;
   status?: 'connected' | 'disconnected' | 'testing' | 'error';
+}
+
+export interface PrinterProfile extends Omit<PrinterConfig, 'role' | 'connectionType' | 'targetAddress'> {
+  connection: PrinterConnection;
+  address: {
+    usb?: { vendorId: number; productId: number; serialNumber?: string };
+    bluetooth?: { deviceId: string; deviceName?: string };
+    lan?: { host: string; port: number };
+  };
+  paperWidthMm: 58 | 80;
+  status?: 'connected' | 'disconnected' | 'testing' | 'error';
+}
+
+export interface PrinterAssignments {
+  KOT: string | null;
+  BOT: string | null;
+  BILL: string | null;
+  defaultPrinterId: string | null;
+}
+
+export interface PrinterSettings {
+  schemaVersion: 2;
+  printers: PrinterProfile[];
+  assignments: PrinterAssignments;
+}
+
+export interface PrintJob<TPayload = unknown> {
+  id: string;
+  role: DocumentRole;
+  documentId: string;
+  payload: TPayload;
+  printerId?: string;
+  createdAt: string;
+  bypassDuplicateGuard?: boolean;
 }
 
 export interface PrintTask {

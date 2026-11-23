@@ -7,9 +7,13 @@
     "dev": "node ./node_modules/tsx/dist/cli.mjs watch server.ts",
     "build": "node ./node_modules/vite/bin/vite.js build && node build-server.mjs",
     "start": "node dist/server.cjs",
+    "print-agent": "node ./node_modules/tsx/dist/cli.mjs print-agent/src/main.ts",
+    "print-agent:token": "node ./node_modules/tsx/dist/cli.mjs scripts/create-printer-agent-token.ts",
+    "test:print-agent": "node ./node_modules/tsx/dist/cli.mjs print-agent/test/agent.test.ts",
     "postinstall": "prisma generate",
     "test": "node ./node_modules/tsx/dist/cli.mjs server/test/auth.test.ts",
     "test:scenarios": "node ./node_modules/tsx/dist/cli.mjs server/test/e2e_scenarios.test.ts",
+    "test:printing": "node ./node_modules/tsx/dist/cli.mjs server/test/printer_routing.test.ts && node ./node_modules/tsx/dist/cli.mjs server/test/print_security.test.ts",
     "lint": "node ./node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {

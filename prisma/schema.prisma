@@ -57,6 +57,8 @@ model Business {
   check_ins        CheckIn[]
   cashier_sessions CashierRegisterSession[]
   comp_records     CompRecord[]
+  print_agents     PrinterAgent[]
+  print_jobs       PrintJob[]
 
   @@index([parent_business_id])
   @@map("businesses")
@@ -282,11 +284,59 @@ model TableOrder {
 
   business Business         @relation(fields: [business_id], references: [id], onDelete: Cascade)
   table    RestaurantTable? @relation(fields: [table_id], references: [id], onDelete: SetNull)
+  print_jobs PrintJob[]
 
   @@index([business_id])
   @@index([table_id])
   @@index([status])
   @@map("table_orders")
+}
+
+// Durable print outbox polled by an authenticated on-premise print agent.
+model PrinterAgent {
+  id            String    @id @default(cuid())
+  business_id   String
+  name          String
+  token_hash    String    @unique
+  created_at    DateTime  @default(now())
+  last_seen_at  DateTime?
+  revoked_at    DateTime?
+
+  business Business  @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  jobs     PrintJob[]
+
+  @@index([business_id, revoked_at])
+  @@map("printer_agents")
+}
+
+model PrintJob {
+  id                  String    @id @default(cuid())
+  business_id         String
+  order_id            String?
+  claimed_by_agent_id String?
+  printer_role        String
+  payload_type        String
+  payload             Json
+  status              String    @default("PENDING") // PENDING, CLAIMED, PRINTED, FAILED
+  dedupe_key          String    @unique
+  attempt_count       Int       @default(0)
+  max_attempts        Int       @default(5)
+  available_at        DateTime  @default(now())
+  claimed_at          DateTime?
+  lease_expires_at    DateTime?
+  last_error          String?   @db.Text
+  printed_at          DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  business Business      @relation(fields: [business_id], references: [id], onDelete: Cascade)
+  order    TableOrder?    @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  agent    PrinterAgent?  @relation(fields: [claimed_by_agent_id], references: [id], onDelete: SetNull)
+
+  @@index([business_id, status, available_at, created_at])
+  @@index([status, lease_expires_at])
+  @@index([order_id])
+  @@map("print_jobs")
 }
 
 // -------------------------------------------------------------

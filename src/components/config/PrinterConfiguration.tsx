@@ -16,10 +16,6 @@ import {
   AlertCircle,
   RefreshCw,
   Edit3,
-  UtensilsCrossed,
-  Receipt,
-  Wine,
-  Layers,
   HelpCircle,
   Radio,
   Sliders,
@@ -37,6 +33,8 @@ import { PrinterConfig, PrinterRole, ConnectionType } from '../../types/printer.
 export const PrinterConfiguration: React.FC = () => {
   const {
     printers,
+    printerAssignments,
+    setPrinterAssignment,
     kdsPrintMode,
     savePrinter,
     deletePrinter,
@@ -47,8 +45,6 @@ export const PrinterConfiguration: React.FC = () => {
     isWebBluetoothSupported,
     pairUsbDevice,
     pairBluetoothDevice,
-    activeDriver,
-    isConnected,
   } = usePrinter();
 
   // State for adding/editing a printer
@@ -170,7 +166,9 @@ exit
       setEditingPrinter({ ...printer });
     } else {
       setEditingPrinter({
-        id: `prn_${Date.now()}`,
+        id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `prn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
         name: printers.length === 0 ? 'Main Cashier Receipt' : `Station Printer ${printers.length + 1}`,
         role: printers.length === 0 ? 'BILL' : 'KOT',
         connectionType: 'SYSTEM',
@@ -530,6 +528,28 @@ exit
 
         {/* Printers List Container */}
         <div className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+            {([
+              ['KOT', 'Kitchen ticket'],
+              ['BOT', 'Bar ticket'],
+              ['BILL', 'Bill / receipt'],
+              ['defaultPrinterId', 'Default printer'],
+            ] as const).map(([role, label]) => (
+              <label key={role} className="block text-xs font-bold text-zinc-600">
+                {label}
+                <select
+                  value={printerAssignments[role] || ''}
+                  onChange={(event) => setPrinterAssignment(role, event.target.value || null)}
+                  className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-800 outline-none focus:border-indigo-400"
+                >
+                  <option value="">{role === 'defaultPrinterId' ? 'Browser print fallback' : 'Use default printer'}</option>
+                  {printers.filter((printer) => printer.enabled).map((printer) => (
+                    <option key={printer.id} value={printer.id}>{printer.name} ({printer.connectionType})</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
           {printers.length === 0 ? (
             /* Empty state matching the reference mockup */
             <div className="text-center py-12 px-4">
@@ -554,6 +574,8 @@ exit
             <div className="space-y-4">
               {printers.map((p) => {
                 const isTestingThis = testingId === p.id;
+                const assignedRoles = (['KOT', 'BOT', 'BILL'] as const).filter((role) => printerAssignments[role] === p.id);
+                const isDefaultPrinter = printerAssignments.defaultPrinterId === p.id;
                 return (
                   <div
                     key={p.id}
@@ -595,23 +617,11 @@ exit
                             {p.name}
                           </h4>
 
-                          {/* Task Role Badge */}
+                          {/* Current routing assignments */}
                           <span
-                            className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 ${
-                              p.role === 'BILL'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : p.role === 'BAR'
-                                ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                : p.role === 'BOTH'
-                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
+                            className="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200"
                           >
-                            {p.role === 'BILL' && <Receipt className="w-3 h-3" />}
-                            {p.role === 'BAR' && <Wine className="w-3 h-3" />}
-                            {p.role === 'KOT' && <UtensilsCrossed className="w-3 h-3" />}
-                            {p.role === 'BOTH' && <Layers className="w-3 h-3" />}
-                            {p.role === 'BILL' ? 'Cashier Receipt' : p.role === 'BAR' ? 'Bar Ticket' : p.role === 'BOTH' ? 'Both (KOT/BOT)' : 'Kitchen KOT'}
+                            {assignedRoles.length ? assignedRoles.join(' / ') : 'Not assigned'}{isDefaultPrinter ? ' / Default' : ''}
                           </span>
 
                           {/* Connection Badge */}
@@ -636,39 +646,29 @@ exit
                               <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
                               Disconnected
                             </span>
+                          ) : p.status === 'disconnected' || p.status === 'error' ? (
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                              Reconnect required
+                            </span>
                           ) : p.connectionType === 'SYSTEM' ? (
                             <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                               Connected
                             </span>
-                          ) : p.connectionType === 'USB' ? (
-                            activeDriver === 'usb' && isConnected ? (
-                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                Connected
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                {p.usbVendorId ? 'Paired (Ready)' : 'Standby'}
-                              </span>
-                            )
-                          ) : p.connectionType === 'BLUETOOTH' ? (
-                            activeDriver === 'bluetooth' && isConnected ? (
-                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                Connected
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                {p.bluetoothDeviceId ? 'Paired (Ready)' : 'Standby'}
-                              </span>
-                            )
+                          ) : p.status === 'connected' ? (
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              Connected
+                            </span>
                           ) : (
-                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                              Connected (TCP)
+                            <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-zinc-100 text-zinc-600 border border-zinc-200 flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              {p.connectionType === 'USB'
+                                ? (p.usbVendorId ? 'Reconnect to USB' : 'Pair USB')
+                                : p.connectionType === 'BLUETOOTH'
+                                ? (p.bluetoothDeviceId ? 'Reconnect to Bluetooth' : 'Pair Bluetooth')
+                                : 'Not checked'}
                             </span>
                           )}
                         </div>
@@ -881,7 +881,7 @@ exit
               {/* SECTION 1: IDENTITY & ROLE */}
               <div className="space-y-3">
                 <label className="block text-xs font-bold text-zinc-800 uppercase tracking-wider">
-                  1. Profile Name & Assigned Task Role
+                  1. Profile Name & Initial Role
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -896,7 +896,7 @@ exit
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Task Routing Role</label>
+                    <label className="block text-xs font-semibold text-zinc-600 mb-1">Initial role (change any assignment above)</label>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                       <button
                         type="button"

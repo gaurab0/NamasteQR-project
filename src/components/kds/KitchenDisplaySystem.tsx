@@ -91,7 +91,7 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
   onRequestRoleSignIn,
   defaultStation = 'KITCHEN',
 }) => {
-  const { dispatchPrint, kdsPrintMode } = usePrinter();
+  const { dispatchPrint, kdsPrintMode, printers } = usePrinter();
   const { user } = useAuth();
   const effectiveKdsPrintMode: KdsPrintMode = (kdsPrintMode || (user?.business?.kds_print_mode as KdsPrintMode) || 'DISPLAY_ONLY');
   const billingFormat: DateFormatMode = (user?.business?.date_format_billing as DateFormatMode) || 'ENGLISH';
@@ -1818,6 +1818,23 @@ export const KitchenDisplaySystem: React.FC<KitchenDisplaySystemProps> = ({
                       >
                         <Printer className="w-3.5 h-3.5" />
                       </button>
+                      {printers.filter((printer) => printer.enabled).length > 0 && (
+                        <select
+                          aria-label="Print this ticket to another printer"
+                          defaultValue=""
+                          onChange={(event) => {
+                            const printerId = event.target.value;
+                            event.target.value = '';
+                            if (printerId) dispatchPrint(activeStation === 'BAR' ? 'BAR' : 'KOT', { ...order, date_format_billing: billingFormat }, printerId, true);
+                          }}
+                          className="max-w-24 rounded-lg border border-zinc-200 bg-white px-1.5 py-1.5 text-[10px] font-semibold text-zinc-600"
+                        >
+                          <option value="">Print to…</option>
+                          {printers.filter((printer) => printer.enabled).map((printer) => (
+                            <option key={printer.id} value={printer.id}>{printer.name}</option>
+                          ))}
+                        </select>
+                      )}
                       <div
                         className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold font-mono shrink-0 ${
                           isLate

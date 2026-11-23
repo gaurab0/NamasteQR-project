@@ -6,11 +6,20 @@ function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
 export class NetworkLanDriver implements ThermalPrinterDriver {
   public readonly type: DriverType = 'lan';
   private host: string = '';
   private port: number = 9100;
-  private bridgeUrl: string = '/api/print/lan';
+  private role: string = 'KOT';
   private _isConnected: boolean = false;
 
   constructor(host: string = '', port: number = 9100) {
@@ -26,7 +35,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
     return this.host ? `Network Printer (${this.host}:${this.port})` : 'LAN Thermal Printer';
   }
 
-  public configure(host: string, port: number = 9100, bridgeUrl?: string) {
+  public configure(host: string, port: number = 9100, role: string = 'KOT') {
     let cleanHost = host.trim();
     let cleanPort = port || 9100;
     if (cleanHost.includes(':') && !cleanHost.includes('[')) {
@@ -36,7 +45,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
     }
     this.host = cleanHost;
     this.port = cleanPort;
-    if (bridgeUrl) this.bridgeUrl = bridgeUrl;
+    this.role = role.toUpperCase() === 'BAR' ? 'BOT' : role.toUpperCase();
   }
 
   /**
@@ -60,8 +69,20 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       throw new Error('Please specify an IP address or hostname for the Network/LAN printer.');
     }
 
-    // Ping test through backend socket endpoint
+    // A cloud deployment cannot probe a restaurant's private LAN. The local agent
+    // reports its presence; its local config owns the actual printer addresses.
     try {
+      const agentResponse = await fetch('/api/print/agent-status', {
+        headers: getAuthHeader(),
+        credentials: 'include',
+      });
+      if (agentResponse.ok) {
+        const status = await agentResponse.json();
+        if (status.available) {
+          this._isConnected = true;
+          return;
+        }
+      }
       const response = await fetch('/api/print/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
@@ -79,19 +100,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
 
       this._isConnected = true;
       console.log(`[NetworkLanDriver] Printer reachable at ${this.host}:${this.port}`);
-    } catch (err: any) {
-      // If backend test route fails, check if local bridge is running on 9100
-      try {
-        const bridgeRes = await fetch(`http://localhost:9100/ping?host=${this.host}&port=${this.port}`, {
-          method: 'GET',
-        });
-        if (bridgeRes.ok) {
-          this.bridgeUrl = 'http://localhost:9100/print';
-          this._isConnected = true;
-          return;
-        }
-      } catch {}
-
+    } catch {
       this._isConnected = false;
       throw new Error(
         `Unable to reach thermal printer at ${this.host}:${this.port}. Check printer power and local network connection.`
@@ -111,16 +120,33 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       throw new Error('Printer IP address is not configured. Please enter the LAN printer IP address.');
     }
 
-    const payloadArray = Array.from(data);
-
-    // 1. Try ServeFlow backend direct socket route with binary ArrayBuffer payload
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), 15000);
     try {
-      const queryParams = new URLSearchParams({
-        host: this.host,
-        port: String(this.port),
+      const response = await fetch('/api/print/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        credentials: 'include',
+        body: JSON.stringify({
+          role: this.role,
+          base64: bytesToBase64(data),
+          idempotencyKey: `web-${crypto.randomUUID()}`,
+        }),
+        signal: abortController.signal,
       });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && payload.queued) {
+        this._isConnected = true;
+        return;
+      }
+      if (response.status !== 409 || payload.code !== 'NO_PRINT_AGENT') {
+        const message = typeof payload.error === 'string' ? payload.error : `HTTP ${response.status} from print service`;
+        throw new Error(message);
+      }
 
-      const response = await fetch(`/api/print/lan?${queryParams.toString()}`, {
+      // Compatibility for self-hosted deployments without an on-site agent.
+      const queryParams = new URLSearchParams({ host: this.host, port: String(this.port) });
+      const localResponse = await fetch(`/api/print/lan?${queryParams.toString()}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -130,54 +156,20 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
         },
         credentials: 'include',
         body: data,
+        signal: abortController.signal,
       });
-
-      if (response.ok) {
-        this._isConnected = true;
-        return;
+      if (!localResponse.ok) {
+        const payload = await localResponse.json().catch(() => ({}));
+        const message = typeof payload.error === 'string' ? payload.error : `HTTP ${localResponse.status} from print service`;
+        throw new Error(message);
       }
-
-      // Fallback: try JSON array payload
-      const jsonRes = await fetch('/api/print/lan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        credentials: 'include',
-        body: JSON.stringify({
-          host: this.host,
-          port: this.port,
-          data: Array.from(data),
-        }),
-      });
-
-      if (jsonRes.ok) {
-        this._isConnected = true;
-        return;
-      }
-
-      const errJson = await jsonRes.json().catch(() => ({}));
-      const errMsg = typeof errJson.error === 'object' && errJson.error !== null
-        ? errJson.error.message || errJson.error.code
-        : (errJson.error || `HTTP ${jsonRes.status} from print service`);
-      throw new Error(errMsg);
-    } catch (backendErr: any) {
-      // 2. Fallback to local desktop bridge if running on localhost:9100
-      try {
-        const bridgeRes = await fetch(`http://localhost:9100/print?host=${this.host}&port=${this.port}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: data,
-        });
-
-        if (bridgeRes.ok) {
-          this._isConnected = true;
-          return;
-        }
-      } catch {}
-
+      this._isConnected = true;
+    } catch (error) {
       this._isConnected = false;
-      throw new Error(
-        `LAN print failed for ${this.host}:${this.port}: ${backendErr.message || backendErr}`
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`LAN print failed for ${this.host}:${this.port}: ${message}`);
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
