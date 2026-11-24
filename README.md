@@ -160,11 +160,11 @@ NamasteQR is a modern, hospitality-focused order management portal designed for 
 
 ---
 
-## 4. Local Setup Instructions
+## 4. Setup Instructions
 
 ### Prerequisites
 * Node.js v18+ or v20+
-* MySQL 8.0+ (or Prisma-supported relational database)
+* A Supabase project with PostgreSQL enabled
 
 ### Installation Steps
 
@@ -177,12 +177,12 @@ NamasteQR is a modern, hospitality-focused order management portal designed for 
    ```bash
    cp .env.example .env
    ```
+   Set `DATABASE_URL` and `DIRECT_URL` in `.env` to the connection strings from your Supabase project. Keep credentials out of source control.
 
-3. **Initialize Database with Prisma:**
+3. **Prepare the Supabase schema with Prisma:**
    ```bash
    npx prisma generate
-   npx prisma migrate dev --name init
-   npx tsx prisma/seed.ts
+   npx prisma db push
    ```
 
 4. **Start Development Server:**
@@ -204,7 +204,8 @@ NamasteQR is a modern, hospitality-focused order management portal designed for 
 | :--- | :--- | :--- |
 | `NODE_ENV` | Runtime environment (`development` or `production`) | `development` |
 | `PORT` | Web server port | `3000` |
-| `DATABASE_URL` | MySQL connection string | `mysql://root:password@localhost:3306/namasteqr` |
+| `DATABASE_URL` | Supabase PostgreSQL connection string used by the app | Set in `.env` |
+| `DIRECT_URL` | Supabase PostgreSQL connection string used by Prisma schema commands | Set in `.env` |
 | `JWT_SECRET` | Secret key for signing session tokens | Secure random string |
 | `OTP_EXPIRY_MINUTES` | Lifetime of OTP verification codes | `5` |
 | `OTP_LENGTH` | Number of digits for OTP | `6` |

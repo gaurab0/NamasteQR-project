@@ -40,15 +40,15 @@ Scroll down to the **"Environment Variables"** section. Click **"Add Environment
 | Key | Value | Purpose |
 | :--- | :--- | :--- |
 | `NODE_ENV` | `production` | Production optimizations & asset serving |
-| `DATABASE_URL` | `postgresql://postgres.qlfcpfljiofjwqleppfs:Pikapika%20123%21@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?connection_limit=10&pool_timeout=20` | Supabase PostgreSQL session pooler (port 5432) |
-| `DIRECT_URL` | `postgresql://postgres.qlfcpfljiofjwqleppfs:Pikapika%20123%21@aws-0-ap-south-1.pooler.supabase.com:5432/postgres` | Direct connection for schema migrations |
-| `JWT_SECRET` | `namasteqr_super_secure_jwt_secret_change_in_production_2026` | Cryptographic secret for user auth tokens |
+| `DATABASE_URL` | Supabase PostgreSQL connection string | App database connection; use the project connection details |
+| `DIRECT_URL` | Supabase PostgreSQL connection string | Direct connection for Prisma schema commands |
+| `JWT_SECRET` | A unique, randomly generated secret | Cryptographic secret for user auth tokens |
 | `EMAIL_PROVIDER` | `smtp` | Transactional email provider |
-| `EMAIL_HOST` | `smtp.gmail.com` | Gmail SMTP host |
-| `EMAIL_PORT` | `465` | SSL port |
-| `EMAIL_USER` | `juisch20220010936@gmail.com` | Sender account |
-| `EMAIL_PASSWORD` | `orkdrmdswcrgcuws` | Google App Password |
-| `EMAIL_FROM` | `NamasteQR Support <juisch20220010936@gmail.com>` | Outgoing sender display header |
+| `EMAIL_HOST` | Your SMTP host | SMTP server hostname |
+| `EMAIL_PORT` | Your SMTP port | SMTP server port |
+| `EMAIL_USER` | Your SMTP username | Sender account |
+| `EMAIL_PASSWORD` | Your SMTP password or app password | SMTP authentication |
+| `EMAIL_FROM` | Your sender name and address | Outgoing sender display header |
 | `DEV_OTP_MODE` | `false` | Disables mock OTPs and enforces real dispatch |
 | `FRONTEND_URL` | `https://namasteqr.com` | App URL for password reset links & CORS origins |
 
