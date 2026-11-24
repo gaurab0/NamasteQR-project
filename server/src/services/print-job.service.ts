@@ -150,6 +150,7 @@ export async function claimNextPrintJob(agent: { id: string; business_id: string
         FROM print_jobs
         WHERE business_id = ${agent.business_id}
           AND attempt_count < max_attempts
+          AND (payload_type <> 'PRINTER_PROBE' OR payload->>'targetAgentId' = ${agent.id})
           AND (
             (status = 'PENDING' AND available_at <= NOW())
             OR (status = 'CLAIMED' AND lease_expires_at <= NOW())
@@ -184,6 +185,7 @@ export async function acknowledgePrintJob(args: {
   jobId: string;
   success: boolean;
   error?: string;
+  latencyMs?: number;
 }): Promise<'PRINTED' | 'PENDING' | 'FAILED' | null> {
   const job = await prisma.printJob.findFirst({
     where: {
@@ -201,6 +203,29 @@ export async function acknowledgePrintJob(args: {
     claimed_by_agent_id: args.agentId,
     status: 'CLAIMED',
   };
+
+  if (job.payload_type === 'PRINTER_PROBE') {
+    const payload = job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload)
+      ? job.payload as Record<string, unknown>
+      : {};
+    const error = args.success ? null : (args.error || 'The local agent could not reach the printer.').slice(0, 2000);
+    const result = await prisma.printJob.updateMany({
+      where: ownership,
+      data: {
+        status: args.success ? 'PRINTED' : 'FAILED',
+        printed_at: args.success ? new Date() : null,
+        claimed_by_agent_id: null,
+        lease_expires_at: null,
+        last_error: error,
+        payload: {
+          ...payload,
+          result: { reachable: args.success, latencyMs: args.latencyMs ?? null, error },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    if (result.count !== 1) return null;
+    return args.success ? 'PRINTED' : 'FAILED';
+  }
 
   if (args.success) {
     const result = await prisma.printJob.updateMany({

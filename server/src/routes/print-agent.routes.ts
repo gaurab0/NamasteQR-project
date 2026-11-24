@@ -22,7 +22,7 @@ router.post('/jobs/claim', async (req: PrintAgentRequest, res: Response) => {
 });
 
 router.post('/jobs/:jobId/ack', async (req: PrintAgentRequest, res: Response) => {
-  const { success, error } = req.body || {};
+  const { success, error, latencyMs } = req.body || {};
   if (typeof success !== 'boolean') {
     return res.status(400).json({ success: false, error: 'A boolean "success" result is required.' });
   }
@@ -34,6 +34,7 @@ router.post('/jobs/:jobId/ack', async (req: PrintAgentRequest, res: Response) =>
       jobId: req.params.jobId,
       success,
       error: typeof error === 'string' ? error : undefined,
+      latencyMs: Number.isFinite(latencyMs) ? latencyMs : undefined,
     });
     if (!status) return res.status(404).json({ success: false, error: 'Claimed job not found for this agent.' });
     return res.json({ success: true, status });

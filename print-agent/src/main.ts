@@ -23,7 +23,7 @@ export type PrintJob = {
   id: string;
   printer_role: string;
   payload_type: string;
-  payload: { order?: Record<string, any>; base64?: string };
+  payload: { order?: Record<string, any>; base64?: string; host?: string; port?: number };
   attempt_count: number;
 };
 
@@ -136,6 +136,25 @@ export function sendToPrinter(printer: PrinterConfig, bytes: Buffer): Promise<vo
   });
 }
 
+export function probePrinter(printer: PrinterConfig, timeoutMs = 3_500): Promise<number> {
+  const port = printer.port ?? 9100;
+  return new Promise((resolve, reject) => {
+    const socket = new net.Socket();
+    const startedAt = Date.now();
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      error ? reject(error) : resolve(Date.now() - startedAt);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('error', (error) => finish(new Error(`Could not reach printer at ${printer.host}:${port}: ${error.message}`)));
+    socket.once('timeout', () => finish(new Error(`Connection timed out after ${timeoutMs}ms while contacting ${printer.host}:${port}.`)));
+    socket.connect(port, printer.host, () => finish());
+  });
+}
+
 async function apiRequest(config: AgentConfig, route: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${config.token}`);
@@ -147,20 +166,29 @@ async function apiRequest(config: AgentConfig, route: string, init: RequestInit 
   });
 }
 
-async function acknowledge(config: AgentConfig, jobId: string, success: boolean, error?: string) {
+async function acknowledge(config: AgentConfig, jobId: string, success: boolean, error?: string, latencyMs?: number) {
   const response = await apiRequest(config, `/api/print-agent/jobs/${encodeURIComponent(jobId)}/ack`, {
     method: 'POST',
-    body: JSON.stringify({ success, error }),
+    body: JSON.stringify({ success, error, latencyMs }),
   });
   if (!response.ok) throw new Error(`Job acknowledgement returned HTTP ${response.status}.`);
 }
 
-async function processJob(config: AgentConfig, job: PrintJob): Promise<void> {
+async function processJob(config: AgentConfig, job: PrintJob): Promise<{ latencyMs?: number }> {
+  if (job.payload_type === 'PRINTER_PROBE') {
+    const host = job.payload?.host;
+    const port = job.payload?.port ?? 9100;
+    if (!host || port !== 9100) throw new Error('The printer check has an invalid host or port.');
+    const printer = Object.values(config.printers).find((candidate) => candidate?.host === host && (candidate.port ?? 9100) === port);
+    if (!printer) throw new Error(`Printer ${host}:${port} is not configured in this local print agent. Update print-agent/agent.config.json.`);
+    return { latencyMs: await probePrinter(printer) };
+  }
   const role = (job.printer_role === 'BAR' ? 'BOT' : job.printer_role) as PrinterRole;
   const printer = config.printers[role];
   if (!printer) throw new Error(`No local printer is configured for role ${role}.`);
   const bytes = toPrintBytes(job, printer);
   await sendToPrinter(printer, bytes);
+  return {};
 }
 
 async function run() {
@@ -189,8 +217,9 @@ async function run() {
         continue;
       }
 
+      let result: { latencyMs?: number };
       try {
-        await processJob(config, body.job);
+        result = await processJob(config, body.job);
       } catch (jobError) {
         const message = jobError instanceof Error ? jobError.message : String(jobError);
         console.error(`[PrintAgent] Job ${body.job.id} failed: ${message}`);
@@ -203,11 +232,10 @@ async function run() {
       }
 
       try {
-        await acknowledge(config, body.job.id, true);
-        console.log(`[PrintAgent] Sent ${body.job.id} to printer role ${body.job.printer_role}.`);
+        await acknowledge(config, body.job.id, true, undefined, result.latencyMs);
+        console.log(`[PrintAgent] Completed ${body.job.payload_type === 'PRINTER_PROBE' ? 'printer check' : 'print job'} ${body.job.id}.`);
       } catch (ackError) {
-        // Avoid an immediate retry after data reached the printer if the success ACK was lost.
-        console.error(`[PrintAgent] Print data was sent for ${body.job.id}, but its success acknowledgement failed. The job will be reclaimed after its lease expires.`, ackError);
+        console.error(`[PrintAgent] The success acknowledgement failed for ${body.job.id}. The job will be reclaimed after its lease expires.`, ackError);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

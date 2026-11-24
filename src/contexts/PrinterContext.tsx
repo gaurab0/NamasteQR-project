@@ -481,7 +481,7 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      const res = await fetch('/api/print/test-connection', {
+      const res = await fetch('/api/print/probe', {
         method: 'POST',
         headers,
         credentials: 'include',
@@ -494,10 +494,35 @@ export const PrinterProvider: React.FC<{ children: React.ReactNode }> = ({ child
           : (data.error || `HTTP ${res.status}: Connection test failed`);
         return { success: false, reachable: false, error: errMsg };
       }
-      const finalError = typeof data.error === 'object' && data.error !== null
-        ? data.error.message || data.error.code
-        : data.error;
-      return { ...data, error: finalError };
+
+      const jobId = data.jobId;
+      if (typeof jobId !== 'string' || !jobId) {
+        return { success: false, reachable: false, error: 'The local print agent did not accept the printer check.' };
+      }
+
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 600));
+        const resultRes = await fetch(`/api/print/probe/${encodeURIComponent(jobId)}`, {
+          method: 'GET',
+          headers,
+          credentials: 'include',
+        });
+        const result = await resultRes.json().catch(() => ({}));
+        if (!resultRes.ok && resultRes.status !== 202) {
+          const errMsg = typeof result.error === 'object' && result.error !== null
+            ? result.error.message || result.error.code || 'Could not read the printer check result'
+            : (result.error || `HTTP ${resultRes.status}: Could not read the printer check result`);
+          return { success: false, reachable: false, error: errMsg };
+        }
+        if (result.complete) return result;
+      }
+
+      return {
+        success: false,
+        reachable: false,
+        error: 'The local print agent did not respond. Check that it is running and connected to this business.',
+      };
     } catch (err: any) {
       return { success: false, reachable: false, error: err.message || 'Network error' };
     }

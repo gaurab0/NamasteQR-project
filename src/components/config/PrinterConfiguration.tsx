@@ -1009,7 +1009,7 @@ exit
                       </span>
                     </div>
                     <p className="text-[11px] text-zinc-500 leading-snug">
-                      Direct raw ESC/POS over TCP port 9100. Silent background printing with zero browser popups.
+                      The on-site print agent sends raw ESC/POS over TCP 9100 and checks reachability from the restaurant network.
                     </p>
                   </div>
 
@@ -1113,7 +1113,7 @@ exit
                         ) : (
                           <>
                             <Radio className="w-3.5 h-3.5 text-blue-600" />
-                            <span>Ping & Test IP Reachability</span>
+                            <span>Test via Local Print Agent</span>
                           </>
                         )}
                       </button>

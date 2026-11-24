@@ -48,9 +48,7 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
     this.role = role.toUpperCase() === 'BAR' ? 'BOT' : role.toUpperCase();
   }
 
-  /**
-   * Validates and verifies connectivity to target printer IP over TCP port 9100
-   */
+  /** Verifies target connectivity through the on-site print agent over TCP port 9100. */
   public async connect(config?: Partial<PrinterConfig>): Promise<void> {
     if (config?.targetAddress) {
       let addr = config.targetAddress.trim();
@@ -69,41 +67,44 @@ export class NetworkLanDriver implements ThermalPrinterDriver {
       throw new Error('Please specify an IP address or hostname for the Network/LAN printer.');
     }
 
-    // A cloud deployment cannot probe a restaurant's private LAN. The local agent
-    // reports its presence; its local config owns the actual printer addresses.
     try {
-      const agentResponse = await fetch('/api/print/agent-status', {
-        headers: getAuthHeader(),
-        credentials: 'include',
-      });
-      if (agentResponse.ok) {
-        const status = await agentResponse.json();
-        if (status.available) {
-          this._isConnected = true;
-          return;
-        }
-      }
-      const response = await fetch('/api/print/test-connection', {
+      const response = await fetch('/api/print/probe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
         credentials: 'include',
-        body: JSON.stringify({ host: this.host, port: this.port, timeout: 3500 }),
+        body: JSON.stringify({ host: this.host, port: this.port }),
       });
-
+      const queued = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errMsg = typeof errorData.error === 'object' && errorData.error !== null
-          ? errorData.error.message || errorData.error.code
-          : (errorData.error || `Failed to reach printer at ${this.host}:${this.port}`);
+        const errMsg = typeof queued.error === 'object' && queued.error !== null
+          ? queued.error.message || queued.error.code
+          : (queued.error || `Failed to queue printer check (HTTP ${response.status})`);
         throw new Error(errMsg);
       }
 
-      this._isConnected = true;
-      console.log(`[NetworkLanDriver] Printer reachable at ${this.host}:${this.port}`);
-    } catch {
+      const jobId = queued.jobId;
+      if (typeof jobId !== 'string' || !jobId) throw new Error('The local print agent did not accept the printer check.');
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 600));
+        const resultResponse = await fetch(`/api/print/probe/${encodeURIComponent(jobId)}`, {
+          headers: getAuthHeader(),
+          credentials: 'include',
+        });
+        const result = await resultResponse.json().catch(() => ({}));
+        if (!resultResponse.ok && resultResponse.status !== 202) {
+          throw new Error(result.error || `Could not read printer check (HTTP ${resultResponse.status})`);
+        }
+        if (!result.complete) continue;
+        if (!result.reachable) throw new Error(result.error || `Could not reach printer at ${this.host}:${this.port}`);
+        this._isConnected = true;
+        return;
+      }
+      throw new Error('The local print agent did not respond. Check that it is running and connected to this business.');
+    } catch (error) {
       this._isConnected = false;
       throw new Error(
-        `Unable to reach thermal printer at ${this.host}:${this.port}. Check printer power and local network connection.`
+        `Unable to reach thermal printer at ${this.host}:${this.port}. ${error instanceof Error ? error.message : String(error)}`
       );
     }
   }

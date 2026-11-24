@@ -2,6 +2,8 @@
 
 The agent runs on a Windows PC inside the restaurant LAN. It polls the deployed NamasteQR API over HTTPS, then writes ESC/POS to the configured private printer IPs on TCP/9100. Printer addresses and paper settings stay in this machine's local config.
 
+The dashboard's printer reachability check is also handled by this agent. It only probes an address that exactly matches a printer in `agent.config.json`; keep the dashboard's saved IP and the agent config in sync.
+
 ## Configure
 
 1. Apply the Prisma schema to the hosted PostgreSQL database with `npx prisma db push`.

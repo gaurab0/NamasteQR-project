@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import net from 'net';
 import { isIP } from 'net';
+import { randomUUID } from 'crypto';
 import { printerLimiter } from '../middleware/rateLimit.middleware';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.middleware';
 import { enqueueRawPrintJob } from '../services/print-job.service';
@@ -259,6 +260,85 @@ router.post('/test-connection', authenticate, validateTestConnectionInput, (req:
       error: `Connection timed out after ${timeout}ms while contacting ${host}:${port}`,
     });
   });
+});
+
+/** Queues a non-printing TCP probe for the on-site agent, which can reach the restaurant LAN. */
+router.post('/probe', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  const businessId = req.user?.business?.id;
+  if (!businessId) return res.status(401).json({ success: false, error: 'Business session is required.' });
+
+  const host = String(req.body?.host || '').trim();
+  const port = Number(req.body?.port) || 9100;
+  if (isIP(host) !== 4 || isRestrictedHost(host)) {
+    return res.status(400).json({ success: false, error: 'Enter a private IPv4 address configured on the local print agent.' });
+  }
+  if (port !== 9100) {
+    return res.status(400).json({ success: false, error: 'The local print agent supports raw printer connections on port 9100.' });
+  }
+
+  try {
+    const agent = await prisma.printerAgent.findFirst({
+      where: {
+        business_id: businessId,
+        revoked_at: null,
+        last_seen_at: { gte: new Date(Date.now() - 60_000) },
+      },
+      select: { id: true },
+      orderBy: { last_seen_at: 'desc' },
+    });
+    if (!agent) {
+      return res.status(409).json({ success: false, code: 'NO_ACTIVE_PRINT_AGENT', error: 'No print agent is online. Start the print agent on a computer connected to the printer network.' });
+    }
+
+    const job = await prisma.printJob.create({
+      data: {
+        business_id: businessId,
+        printer_role: 'KOT',
+        payload_type: 'PRINTER_PROBE',
+        payload: { host, port, targetAgentId: agent.id },
+        dedupe_key: `probe:${randomUUID()}`,
+      },
+      select: { id: true },
+    });
+    return res.status(202).json({ success: true, queued: true, jobId: job.id });
+  } catch (error) {
+    console.error('[PrintRoute] Could not queue printer probe:', error);
+    return res.status(503).json({ success: false, error: 'Could not queue the printer check. Retry shortly.' });
+  }
+});
+
+/** Returns the result of a probe without exposing jobs from another business. */
+router.get('/probe/:jobId', authenticate, async (req: AuthenticatedRequest, res: Response) => {
+  const businessId = req.user?.business?.id;
+  if (!businessId) return res.status(401).json({ success: false, error: 'Business session is required.' });
+
+  try {
+    const job = await prisma.printJob.findFirst({
+      where: { id: req.params.jobId, business_id: businessId, payload_type: 'PRINTER_PROBE' },
+      select: { status: true, payload: true, last_error: true },
+    });
+    if (!job) return res.status(404).json({ success: false, error: 'Printer check not found.' });
+
+    const payload = job.payload && typeof job.payload === 'object' && !Array.isArray(job.payload)
+      ? job.payload as Record<string, any>
+      : {};
+    if (job.status === 'PRINTED' || job.status === 'FAILED') {
+      const result = payload.result || {};
+      return res.json({
+        success: true,
+        complete: true,
+        reachable: result.reachable === true,
+        host: payload.host,
+        port: payload.port,
+        latencyMs: result.latencyMs,
+        error: result.error || job.last_error || undefined,
+      });
+    }
+    return res.status(202).json({ success: true, complete: false, status: job.status });
+  } catch (error) {
+    console.error('[PrintRoute] Could not read printer probe result:', error);
+    return res.status(503).json({ success: false, error: 'Could not read the printer check result. Retry shortly.' });
+  }
 });
 
 /**
