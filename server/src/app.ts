@@ -13,6 +13,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { sanitizeInput } from './middleware/sanitize.middleware';
 import { generalApiLimiter } from './middleware/rateLimit.middleware';
 import { config } from './config/env';
+import { checkPrinter } from './services/printer.service';
 
 export function createApp() {
   const app = express();
@@ -110,6 +111,10 @@ export function createApp() {
     });
   };
   app.get('/health', healthHandler);
+  app.get('/health/printer', async (_req, res) => {
+    const result = await checkPrinter();
+    return res.status(result.ok ? 200 : 503).json(result);
+  });
 
   // 6. General API Rate Limiting for all /api endpoints
   app.use('/api', generalApiLimiter);

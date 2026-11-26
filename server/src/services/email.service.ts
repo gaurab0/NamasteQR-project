@@ -22,6 +22,21 @@ class EmailService {
     this.initTransporter();
   }
 
+  private fromAddress(label = 'NamasteQR'): string {
+    if (config.email.from.trim()) return config.email.from.trim();
+    if (config.email.user.includes('@')) return `"${label}" <${config.email.user}>`;
+    return config.email.user;
+  }
+
+  private deliveryError(cause?: unknown): Error & { code: string; statusCode: number } {
+    const error = new Error('Email delivery is temporarily unavailable. Please request a new verification code shortly.') as Error & { code: string; statusCode: number; cause?: unknown };
+    error.name = 'EmailDeliveryError';
+    error.code = 'EMAIL_DELIVERY_FAILED';
+    error.statusCode = 503;
+    error.cause = cause;
+    return error;
+  }
+
   private initTransporter() {
     try {
       if (config.email.user && config.email.password) {
@@ -29,6 +44,9 @@ class EmailService {
           host: config.email.host,
           port: config.email.port,
           secure: config.email.port === 465,
+          connectionTimeout: 10_000,
+          greetingTimeout: 10_000,
+          socketTimeout: 20_000,
           auth: {
             user: config.email.user,
             pass: config.email.password,
@@ -49,7 +67,7 @@ class EmailService {
    */
   async sendVerificationOTP(email: string, otp: string, businessName?: string): Promise<{ success: boolean; messageId?: string }> {
     const formattedEmail = email.toLowerCase().trim();
-    const subject = `Your NamasteQR Verification Code: ${otp}`;
+    const subject = 'Your NamasteQR verification code';
     const htmlBody = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 28px 24px; background-color: #ffffff; border: 1px solid #e4e4e7; border-radius: 12px;">
         <div style="margin-bottom: 24px; border-bottom: 1px solid #f4f4f5; padding-bottom: 16px;">
@@ -58,7 +76,7 @@ class EmailService {
         </div>
         
         <p style="color: #3f3f46; font-size: 15px; line-height: 1.5; margin: 0 0 16px 0;">
-          Hello ${businessName ? `<strong>${businessName}</strong>,` : ''}
+          Hello ${businessName ? `<strong>${escapeHtml(businessName)}</strong>,` : ''}
         </p>
         <p style="color: #3f3f46; font-size: 14px; line-height: 1.5; margin: 0 0 20px 0;">
           Use the following 6-digit verification code to complete your business registration and activate your portal:
@@ -83,18 +101,14 @@ class EmailService {
       </div>
     `;
 
-    console.log(`\n========================================`);
-    console.log(`📧 [EMAIL OTP DISPATCHED]`);
-    console.log(`   To: ${formattedEmail}`);
-    console.log(`   Code: ${otp}`);
-    console.log(`   Expires in: ${config.otpExpiryMinutes} minutes`);
-    console.log(`========================================\n`);
+    if (config.devOtpMode && !config.isProduction) {
+      console.log(`[Email:OTP] Development code created for ${formattedEmail}; expires in ${config.otpExpiryMinutes} minutes.`);
+    }
 
     if (this.transporter && this.isTransporterReady) {
       try {
-        const fromAddress = config.email.from || `"NamasteQR" <${config.email.user}>`;
         const info = await this.transporter.sendMail({
-          from: fromAddress,
+          from: this.fromAddress(),
           to: formattedEmail,
           replyTo: config.email.user,
           subject,
@@ -109,13 +123,14 @@ class EmailService {
         console.log(`✅ [SMTP SUCCESS] Message accepted by Gmail server. MessageId: ${info.messageId} | Response: ${info.response}`);
         return { success: true, messageId: info.messageId };
       } catch (err: any) {
-        console.error('❌ [SMTP ERROR] Failed to send email via SMTP:', err.message);
-        if (!config.devOtpMode) {
-          throw new Error(`Email delivery failed: ${err.message}`);
-        }
+        console.error('[SMTP ERROR] Verification email delivery failed:', err.code || err.responseCode || 'SMTP_ERROR');
+        if (config.isProduction || !config.devOtpMode) throw this.deliveryError(err);
       }
+    } else if (config.isProduction || !config.devOtpMode) {
+      throw this.deliveryError(new Error('SMTP credentials are not configured.'));
     }
 
+    // In local development, the API can return the code through the dev-only response field.
     return { success: true, messageId: `dev-email-${Date.now()}` };
   }
 
@@ -150,7 +165,7 @@ class EmailService {
     if (this.transporter && this.isTransporterReady) {
       try {
         await this.transporter.sendMail({
-          from: config.email.from,
+          from: this.fromAddress(),
           to: email,
           subject: 'Reset your NamasteQR account password',
           text: `Please use the following link to reset your password: ${resetUrl}`,
@@ -281,7 +296,7 @@ Routed Directly To: ${targetEmail}
     if (this.transporter && this.isTransporterReady) {
       try {
         const info = await this.transporter.sendMail({
-          from: config.email.from || `"NamasteQR Leads" <no-reply@namasteqr.com>`,
+          from: this.fromAddress('NamasteQR Leads'),
           to: targetEmail,
           replyTo: `"${data.name}" <${data.email}>`,
           subject,
@@ -384,7 +399,7 @@ Routed Directly To: ${targetEmail}
     if (this.transporter && this.isTransporterReady) {
       try {
         const info = await this.transporter.sendMail({
-          from: config.email.from || `"NamasteQR Inquiries" <no-reply@namasteqr.com>`,
+          from: this.fromAddress('NamasteQR Inquiries'),
           to: targetEmail,
           replyTo: `"${data.name}" <${data.email}>`,
           subject,

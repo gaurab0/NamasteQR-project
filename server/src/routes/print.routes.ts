@@ -1,13 +1,23 @@
 import { Router, Request, Response } from 'express';
-import net from 'net';
 import { isIP } from 'net';
 import { randomUUID } from 'crypto';
 import { printerLimiter } from '../middleware/rateLimit.middleware';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { authenticate, AuthenticatedRequest, requireRole } from '../middleware/auth.middleware';
 import { enqueueRawPrintJob } from '../services/print-job.service';
 import { prisma } from '../lib/prisma';
+import { checkPrinter, printRaw, PrinterError, testReceipt } from '../services/printer.service';
 
 const router = Router();
+
+async function getBusinessPrinterHost(businessId?: string): Promise<string | null> {
+  if (!businessId) return null;
+  try {
+    const business = await prisma.business.findUnique({ where: { id: businessId }, select: { printer_relay_host: true } });
+    return business?.printer_relay_host || null;
+  } catch {
+    return null;
+  }
+}
 
 // Apply dedicated hardware & LAN printer bridge rate limiting
 router.use(printerLimiter);
@@ -31,6 +41,8 @@ export function isRestrictedHost(host: string): boolean {
   if (explicitHosts.includes(normalized)) return false;
   if (isIP(normalized) === 4) {
     const octets = normalized.split('.').map(Number);
+    if (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127) return false;
+    if (process.env.NODE_ENV !== 'production' && octets[0] === 127) return false;
     return !(octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
       (octets[0] === 192 && octets[1] === 168));
   }
@@ -45,7 +57,7 @@ export function isRestrictedHost(host: string): boolean {
 
 export function validateTestConnectionInput(req: Request, res: Response, next: () => void) {
   let host = (req.body?.host || req.query?.host || '').toString().trim();
-  let port = Number(req.body?.port || req.query?.port) || 9100;
+  let port = Number(req.body?.port || req.query?.port) || Number(process.env.PRINTER_RELAY_PORT) || 9100;
 
   if (host.includes(':') && !host.includes('[')) {
     const parts = host.split(':');
@@ -53,6 +65,7 @@ export function validateTestConnectionInput(req: Request, res: Response, next: (
     if (parts[1]) port = Number(parts[1]) || port;
   }
 
+  if (!host) host = process.env.PRINTER_RELAY_HOST || '';
   if (!host) {
     return res.status(400).json({
       success: false,
@@ -60,7 +73,7 @@ export function validateTestConnectionInput(req: Request, res: Response, next: (
     });
   }
 
-  if (isRestrictedHost(host)) {
+  if (host && isRestrictedHost(host)) {
     return res.status(400).json({
       success: false,
     error: 'Invalid host: only private LAN addresses or explicitly allowlisted hosts are permitted.',
@@ -86,16 +99,16 @@ export function validateTestConnectionInput(req: Request, res: Response, next: (
 
 export function validateLanPrintInput(req: Request, res: Response, next: () => void) {
   let host = '';
-  let port = 9100;
+  let port = Number(process.env.PRINTER_RELAY_PORT) || 9100;
   let buffer: Buffer | null = null;
 
   if (Buffer.isBuffer(req.body)) {
     buffer = req.body;
     host = (req.query.host as string) || (req.headers['x-printer-host'] as string) || '';
-    port = Number(req.query.port || req.headers['x-printer-port']) || 9100;
+    port = Number(req.query.port || req.headers['x-printer-port']) || Number(process.env.PRINTER_RELAY_PORT) || 9100;
   } else if (req.body && typeof req.body === 'object') {
     host = (req.body.host || req.query.host || '').toString().trim();
-    port = Number(req.body.port || req.query.port) || 9100;
+    port = Number(req.body.port || req.query.port) || Number(process.env.PRINTER_RELAY_PORT) || 9100;
 
     if (Array.isArray(req.body.data)) {
       buffer = Buffer.from(req.body.data);
@@ -110,14 +123,8 @@ export function validateLanPrintInput(req: Request, res: Response, next: () => v
     if (parts[1]) port = Number(parts[1]) || port;
   }
 
-  if (!host) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing printer IP address (host parameter). Please provide printer IP.',
-    });
-  }
-
-  if (isRestrictedHost(host)) {
+  if (!host) host = process.env.PRINTER_RELAY_HOST || '';
+  if (host && isRestrictedHost(host)) {
     return res.status(400).json({
       success: false,
     error: 'Invalid host: only private LAN addresses or explicitly allowlisted hosts are permitted.',
@@ -171,7 +178,7 @@ router.get('/status', (_req: Request, res: Response) => {
 /**
  * Quick socket test to verify IP/port reachability
  */
-router.post('/test-connection', authenticate, validateTestConnectionInput, (req: Request, res: Response) => {
+router.post('/test-connection', authenticate, validateTestConnectionInput, async (req: AuthenticatedRequest, res: Response) => {
   let host = (req.body?.host || req.query?.host || '').toString().trim();
   let port = Number(req.body?.port || req.query?.port) || 9100;
   const timeout = Math.min(Math.max(Number(req.body?.timeout) || 4000, 100), 30000);
@@ -210,56 +217,25 @@ router.post('/test-connection', authenticate, validateTestConnectionInput, (req:
     });
   }
 
-  const startTime = Date.now();
-  const socket = new net.Socket();
-  socket.setTimeout(timeout);
-  let finished = false;
+  try {
+    const result = await checkPrinter({ host, port }, { holdMs: Math.min(timeout, 15_000) });
+    return res.status(result.ok ? 200 : 503).json({ success: result.ok, reachable: result.ok, ...result });
+  } catch (error) {
+    const printerError = error instanceof PrinterError ? error : new PrinterError(`Printing failed: ${(error as Error).message}`);
+    return res.status(503).json({ success: false, reachable: false, error: printerError.message, code: printerError.code });
+  }
+});
 
-  const cleanup = () => {
-    socket.removeAllListeners();
-    socket.destroy();
-  };
-
-  socket.connect(port, host, () => {
-    if (finished) return;
-    finished = true;
-    const latencyMs = Date.now() - startTime;
-    cleanup();
-    return res.json({
-      success: true,
-      reachable: true,
-      host,
-      port,
-      latencyMs,
-      message: `Successfully connected to printer at ${host}:${port} (${latencyMs}ms)`,
-    });
-  });
-
-  socket.on('error', (err: Error) => {
-    if (finished) return;
-    finished = true;
-    cleanup();
-    return res.status(502).json({
-      success: false,
-      reachable: false,
-      host,
-      port,
-      error: `Could not reach printer at ${host}:${port}: ${err.message}`,
-    });
-  });
-
-  socket.on('timeout', () => {
-    if (finished) return;
-    finished = true;
-    cleanup();
-    return res.status(504).json({
-      success: false,
-      reachable: false,
-      host,
-      port,
-      error: `Connection timed out after ${timeout}ms while contacting ${host}:${port}`,
-    });
-  });
+/** Admin-only physical test slip for the configured restaurant relay. */
+router.post('/test-print', authenticate, requireRole('ADMIN'), async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const businessHost = await getBusinessPrinterHost(req.user?.business?.id);
+    await printRaw(testReceipt(), { host: businessHost || process.env.PRINTER_RELAY_HOST || undefined });
+    return res.json({ success: true, message: 'Test receipt printed.' });
+  } catch (error) {
+    const printerError = error instanceof PrinterError ? error : new PrinterError(`Printing failed: ${(error as Error).message}`);
+    return res.status(503).json({ success: false, error: printerError.message, code: printerError.code });
+  }
 });
 
 /** Queues a non-printing TCP probe for the on-site agent, which can reach the restaurant LAN. */
@@ -404,9 +380,9 @@ router.get('/agent-status', authenticate, async (req: AuthenticatedRequest, res:
  * Direct LAN printer endpoint: pipes raw ESC/POS binary buffer directly
  * to printer's static IP over TCP port 9100 (Raw 9100 / JetDirect protocol)
  */
-router.post('/lan', authenticate, validateLanPrintInput, (req: Request, res: Response) => {
+router.post('/lan', authenticate, validateLanPrintInput, async (req: AuthenticatedRequest, res: Response) => {
   let host = '';
-  let port = 9100;
+  let port = Number(process.env.PRINTER_RELAY_PORT) || 9100;
   let timeout = 6000;
   let buffer: Buffer | null = null;
 
@@ -414,10 +390,10 @@ router.post('/lan', authenticate, validateLanPrintInput, (req: Request, res: Res
   if (Buffer.isBuffer(req.body)) {
     buffer = req.body;
     host = (req.query.host as string) || (req.headers['x-printer-host'] as string) || '';
-    port = Number(req.query.port || req.headers['x-printer-port']) || 9100;
+    port = Number(req.query.port || req.headers['x-printer-port']) || Number(process.env.PRINTER_RELAY_PORT) || 9100;
   } else if (req.body && typeof req.body === 'object') {
     host = (req.body.host || req.query.host || '').toString().trim();
-    port = Number(req.body.port || req.query.port) || 9100;
+    port = Number(req.body.port || req.query.port) || Number(process.env.PRINTER_RELAY_PORT) || 9100;
     timeout = Math.min(Math.max(Number(req.body.timeout) || 6000, 100), 30000);
 
     if (Array.isArray(req.body.data)) {
@@ -476,53 +452,20 @@ router.post('/lan', authenticate, validateLanPrintInput, (req: Request, res: Res
     });
   }
 
-  const socket = new net.Socket();
-  socket.setTimeout(timeout);
-  let completed = false;
-
-  const cleanup = () => {
-    socket.removeAllListeners();
-    socket.destroy();
-  };
-
-  socket.connect(port, host, () => {
-    socket.write(buffer as Buffer, () => {
-      socket.end();
-    });
-  });
-
-  socket.on('close', () => {
-    if (completed) return;
-    completed = true;
-    cleanup();
+  try {
+    const businessHost = await getBusinessPrinterHost(req.user?.business?.id);
+    const effectiveHost = businessHost || process.env.PRINTER_RELAY_HOST || host;
+    await printRaw(buffer, { host: effectiveHost, port });
     return res.json({
       success: true,
-      message: `Transmitted ${buffer!.length} bytes to thermal printer at ${host}:${port}`,
-      bytes: buffer!.length,
+      message: `Transmitted ${buffer.length} bytes to thermal printer at ${effectiveHost}:${port}`,
+      bytes: buffer.length,
     });
-  });
-
-  socket.on('error', (err: Error) => {
-    if (completed) return;
-    completed = true;
-    cleanup();
-    console.error(`[LAN Printer Error] Failed sending to ${host}:${port}:`, err.message);
-    return res.status(502).json({
-      success: false,
-      error: `Failed to print to ${host}:${port}: ${err.message}`,
-    });
-  });
-
-  socket.on('timeout', () => {
-    if (completed) return;
-    completed = true;
-    cleanup();
-    console.error(`[LAN Printer Timeout] Timeout printing to ${host}:${port}`);
-    return res.status(504).json({
-      success: false,
-      error: `Printer socket timed out after ${timeout}ms connecting to ${host}:${port}`,
-    });
-  });
+  } catch (error) {
+    const printerError = error instanceof PrinterError ? error : new PrinterError(`Printing failed: ${(error as Error).message}`);
+    console.error(`[LAN Printer Error] Failed sending print data: ${printerError.code} ${printerError.message}`);
+    return res.status(503).json({ success: false, error: printerError.message, code: printerError.code });
+  }
 });
 
 export default router;

@@ -63,6 +63,7 @@ export interface Business {
   default_language?: string;
   comp_password?: string | null;
   comp_password_hash?: string | null;
+  printer_relay_host?: string | null;
   created_at: Date;
   updated_at: Date;
 }

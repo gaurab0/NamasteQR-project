@@ -24,6 +24,7 @@ export class AuthController {
   async signup(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = signupSchema.parse(req.body);
+      await db.assertAuthStorageReady();
       const email = validated.email.toLowerCase().trim();
       const phoneE164 = `${validated.countryCode}${validated.phoneNumber}`;
 
@@ -123,6 +124,7 @@ export class AuthController {
   async verifyEmail(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = verifyOtpSchema.parse(req.body);
+      await db.assertAuthStorageReady();
       const email = validated.email?.trim().toLowerCase() || undefined;
       const phoneE164 = validated.phone_e164?.trim() || undefined;
       
@@ -150,15 +152,15 @@ export class AuthController {
       }
 
       // Verify OTP
-      await otpService.verifyOtp({
+      const verification = await otpService.verifyOtp({
         userId: user.id,
         otp: validated.otp,
         purpose: 'SIGNUP_VERIFICATION',
+        consume: false,
       });
 
-      // Mark email verified & activate account
-      await db.updateUserStatus(user.id, 'ACTIVE');
-      await db.updateBusinessStatus(user.business_id, 'ACTIVE');
+      // Consume the code and activate both account rows atomically in PostgreSQL.
+      await db.completeEmailVerification(user.id, user.business_id, verification.otpId);
       const business = user.business_id ? await db.findBusinessById(user.business_id) : null;
       // Single-row Account Activity Tracker
       const accountName = business?.name || user.email;
@@ -191,6 +193,7 @@ export class AuthController {
   async resendOtp(req: Request, res: Response, next: NextFunction) {
     try {
       const validated = resendOtpSchema.parse(req.body);
+      await db.assertAuthStorageReady();
       const email = validated.email?.trim().toLowerCase() || undefined;
       const phoneE164 = validated.phone_e164?.trim() || undefined;
 

@@ -122,6 +122,39 @@ async function runTests() {
     if (!verifyRes.success) throw new Error('Correct OTP verification failed');
   });
 
+  await test('Signup verification consumes the OTP and activates the user and business together', async () => {
+    const business = await db.createBusiness('Atomic Verify Bistro', 'RESTAURANT');
+    const user = await db.createUser({
+      business_id: business.id,
+      email: `verify-${Date.now()}@example.com`,
+      password_hash: await bcrypt.hash('Secure123!', 10),
+      role: 'RESTAURANT_OWNER',
+    });
+    const rawOtp = '123456';
+    const otp = await db.createOtpVerification({
+      user_id: user.id,
+      phone_e164: `+1555${Date.now().toString().slice(-7)}`,
+      email: user.email,
+      otp_hash: await bcrypt.hash(rawOtp, 10),
+      purpose: 'SIGNUP_VERIFICATION',
+      expires_at: new Date(Date.now() + 60_000),
+    });
+    const checked = await otpService.verifyOtp({
+      userId: user.id,
+      otp: rawOtp,
+      purpose: 'SIGNUP_VERIFICATION',
+      consume: false,
+    });
+    await db.completeEmailVerification(user.id, business.id, checked.otpId);
+    const activeUser = await db.findUserById(user.id);
+    const activeBusiness = await db.findBusinessById(business.id);
+    const consumed = await db.getLatestOtp(user.id, 'SIGNUP_VERIFICATION');
+    if (activeUser?.status !== 'ACTIVE' || activeBusiness?.status !== 'ACTIVE' || !consumed?.verified_at) {
+      throw new Error('User, business, and OTP were not completed together.');
+    }
+    if (consumed.id !== otp.id) throw new Error('Verification consumed a different OTP record.');
+  });
+
   console.log('\n🚪 Testing 3: Authentication & Session Token');
 
   await test('Generates and verifies JWT token for authenticated user', async () => {

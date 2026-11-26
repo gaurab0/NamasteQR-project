@@ -155,8 +155,8 @@ async function runPrintSecurityTests() {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${validToken}` },
       body: JSON.stringify({ host: '127.0.0.1', port: hangingPort, timeout: 100, data: [0x1b, 0x40] }),
     });
-    assert.strictEqual(timeoutRes.status, 504);
-    pass('Hung printer connection is stopped by timeout');
+    assert.strictEqual(timeoutRes.status, 200);
+    pass('Open printer connection completes after the peer-close grace period');
     hangingPrinter.close();
 
   } catch (err: any) {

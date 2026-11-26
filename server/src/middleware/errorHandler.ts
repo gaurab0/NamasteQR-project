@@ -45,8 +45,16 @@ export function errorHandler(err: any, req: Request, res: Response, next: NextFu
   // Suppress database internals, raw SQL queries, Prisma traces, and internal 500 details
   if (config.isProduction) {
     if (status >= 500 || isPrismaOrDbError) {
-      code = 'INTERNAL_SERVER_ERROR';
-      message = 'An unexpected internal server error occurred. Please contact support if the issue persists.';
+      if (err.code === 'EMAIL_DELIVERY_FAILED') {
+        code = 'EMAIL_DELIVERY_FAILED';
+        message = 'Email delivery is temporarily unavailable. Please request a new verification code shortly.';
+      } else if (err.code === 'AUTH_STORAGE_UNAVAILABLE') {
+        code = 'AUTH_STORAGE_UNAVAILABLE';
+        message = 'Account verification storage is temporarily unavailable. Please try again shortly.';
+      } else {
+        code = 'INTERNAL_SERVER_ERROR';
+        message = 'An unexpected internal server error occurred. Please contact support if the issue persists.';
+      }
     }
   } else {
     // In development mode, log the full error for debugging

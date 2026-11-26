@@ -73,7 +73,7 @@ export class OtpService {
     const expiresAt = new Date(Date.now() + config.otpExpiryMinutes * 60 * 1000);
 
     // Save to DB (hashed only!)
-    await db.createOtpVerification({
+    const savedOtp = await db.createOtpVerification({
       user_id: data.userId,
       phone_e164: data.phone_e164,
       email: data.email,
@@ -88,7 +88,12 @@ export class OtpService {
       try {
         await emailService.sendVerificationOTP(data.email, rawOtp, data.businessName);
       } catch (err: any) {
-        console.warn('Email OTP delivery notice:', err.message);
+        if (config.isProduction || !config.devOtpMode) {
+          try { await db.deleteOtpVerification(savedOtp.id); }
+          catch { console.error('Could not remove unsent verification code record.'); }
+          throw err;
+        }
+        console.warn('Email OTP delivery failed in development; use the development-only code response.', err.code || 'SMTP_ERROR');
       }
     }
 
@@ -117,7 +122,8 @@ export class OtpService {
     userId: string;
     otp: string;
     purpose: OtpPurpose;
-  }): Promise<{ success: boolean; message: string }> {
+    consume?: boolean;
+  }): Promise<{ success: boolean; message: string; otpId: string }> {
     const latestOtp = await db.getLatestOtp(data.userId, data.purpose);
 
     if (!latestOtp) {
@@ -162,12 +168,14 @@ export class OtpService {
       throw error;
     }
 
-    // Mark as verified and invalidate
-    await db.markOtpVerified(latestOtp.id);
+    // Account activation consumes signup codes in the same DB transaction as
+    // activating the user and business. Other OTP flows consume immediately.
+    if (data.consume !== false) await db.markOtpVerified(latestOtp.id);
 
     return {
       success: true,
       message: 'Phone number verified successfully.',
+      otpId: latestOtp.id,
     };
   }
 }

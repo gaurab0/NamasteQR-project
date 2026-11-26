@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import net from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { EscPosEncoder } from '../../src/utils/escpos';
+import { checkPrinter, printRaw } from '../../server/src/services/printer.service';
 
 export type PrinterRole = 'KOT' | 'BOT' | 'BILL';
 export type PrinterConfig = {
@@ -108,50 +108,14 @@ export function toPrintBytes(job: PrintJob, printer: PrinterConfig): Buffer {
 export function sendToPrinter(printer: PrinterConfig, bytes: Buffer): Promise<void> {
   if (bytes.length === 0 || bytes.length > 4_000_000) return Promise.reject(new Error('Print payload is empty or exceeds 4 MB.'));
   const port = printer.port ?? 9100;
-  return new Promise((resolve, reject) => {
-    const socket = new net.Socket();
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      error ? reject(error) : resolve();
-    };
-    socket.setTimeout(12_000);
-    socket.once('error', (error) => finish(error));
-    socket.once('timeout', () => finish(new Error(`Timed out connecting to ${printer.host}:${port}.`)));
-    socket.once('finish', () => finish());
-    socket.connect(port, printer.host, () => {
-      socket.write(bytes, (error) => {
-        if (error) return finish(error);
-        socket.end();
-      });
-    });
-    socket.once('close', (hadError) => {
-      if (settled) return;
-      finish(hadError || !socket.writableFinished
-        ? new Error(`Printer ${printer.host}:${port} closed before the print data was fully sent.`)
-        : undefined);
-    });
-  });
+  return printRaw(bytes, { host: printer.host, port });
 }
 
 export function probePrinter(printer: PrinterConfig, timeoutMs = 3_500): Promise<number> {
   const port = printer.port ?? 9100;
-  return new Promise((resolve, reject) => {
-    const socket = new net.Socket();
-    const startedAt = Date.now();
-    let settled = false;
-    const finish = (error?: Error) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      error ? reject(error) : resolve(Date.now() - startedAt);
-    };
-    socket.setTimeout(timeoutMs);
-    socket.once('error', (error) => finish(new Error(`Could not reach printer at ${printer.host}:${port}: ${error.message}`)));
-    socket.once('timeout', () => finish(new Error(`Connection timed out after ${timeoutMs}ms while contacting ${printer.host}:${port}.`)));
-    socket.connect(port, printer.host, () => finish());
+  return checkPrinter({ host: printer.host, port }, { holdMs: timeoutMs }).then((result) => {
+    if (!result.ok) throw new Error(result.error || `Could not reach printer at ${printer.host}:${port}.`);
+    return result.ms;
   });
 }
 

@@ -14,6 +14,7 @@ import {
 import { slugify, sanitizePhoneId, generateUserDocId } from '../utils/id.utils';
 import { sanitizeTabs, deriveAllowedTabs, isBusinessOwnerRole, normalizeLegacyRole, normalizeLegacyBusinessType } from './tabAccess';
 import type { TabPermissionId } from '../types/rbac.types';
+import { config } from '../config/env';
 
 class PostgresDatabaseStore {
   private isPostgresConnected = false;
@@ -33,6 +34,19 @@ class PostgresDatabaseStore {
 
   constructor() {
     this.initPostgres();
+  }
+
+  async assertAuthStorageReady(): Promise<void> {
+    if (!config.isProduction) return;
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch (cause) {
+      const error: any = new Error('Account verification storage is temporarily unavailable. Please try again shortly.');
+      error.code = 'AUTH_STORAGE_UNAVAILABLE';
+      error.statusCode = 503;
+      error.cause = cause;
+      throw error;
+    }
   }
 
   // --- Entity Mapping Helpers (Single source of truth for DB -> In-Memory) ---
@@ -58,6 +72,7 @@ class PostgresDatabaseStore {
       date_format_billing: (d.date_format_billing as any) || 'BOTH',
       kds_print_mode: (d as any).kds_print_mode || 'DISPLAY_ONLY',
       default_language: (d as any).default_language || ((d.operations_config as any)?.default_language) || 'en',
+      printer_relay_host: d.printer_relay_host || null,
       created_at: d.created_at,
       updated_at: d.updated_at,
     };
@@ -139,6 +154,7 @@ class PostgresDatabaseStore {
 
   private async initPostgres() {
     try {
+      await prisma.$connect();
       await this.syncFromPostgres();
       this.isPostgresConnected = true;
       this.isInitialized = true;
@@ -149,40 +165,36 @@ class PostgresDatabaseStore {
   }
 
   private async syncFromPostgres() {
-    try {
-      // 1. Sync Businesses
-      const dbBusinesses = await prisma.business.findMany();
-      for (const d of dbBusinesses) {
-        this.businesses.set(d.id, this.mapBusiness(d));
-      }
+    // 1. Sync Businesses
+    const dbBusinesses = await prisma.business.findMany();
+    for (const d of dbBusinesses) {
+      this.businesses.set(d.id, this.mapBusiness(d));
+    }
 
-      // If database has 0 businesses, initialize default
-      if (this.businesses.size === 0) {
-        await this.ensureBusiness('namaste-bistro', 'Namaste Bistro', 'RESTAURANT');
-      }
+    // If database has 0 businesses, initialize default
+    if (this.businesses.size === 0) {
+      await this.ensureBusiness('namaste-bistro', 'Namaste Bistro', 'RESTAURANT');
+    }
 
-      // 2. Sync Users
-      const dbUsers = await prisma.user.findMany();
-      for (const d of dbUsers) {
-        this.users.set(d.id, this.mapUser(d));
-      }
+    // 2. Sync Users
+    const dbUsers = await prisma.user.findMany();
+    for (const d of dbUsers) {
+      this.users.set(d.id, this.mapUser(d));
+    }
 
-      // 3. Sync Phone Verifications
-      const dbPhones = await prisma.phoneVerification.findMany();
-      for (const d of dbPhones) {
-        this.phoneVerifications.set(d.id, this.mapPhoneVerification(d));
-      }
+    // 3. Sync Phone Verifications
+    const dbPhones = await prisma.phoneVerification.findMany();
+    for (const d of dbPhones) {
+      this.phoneVerifications.set(d.id, this.mapPhoneVerification(d));
+    }
 
-      // 4. Sync Audit Logs
-      const dbAudits = await prisma.auditLog.findMany({
-        take: 500,
-        orderBy: { created_at: 'desc' },
-      });
-      for (const d of dbAudits) {
-        this.auditLogs.set(d.id, this.mapAuditLog(d));
-      }
-    } catch (e: any) {
-      console.warn('PostgreSQL initial sync notice:', e.message);
+    // 4. Sync Audit Logs
+    const dbAudits = await prisma.auditLog.findMany({
+      take: 500,
+      orderBy: { created_at: 'desc' },
+    });
+    for (const d of dbAudits) {
+      this.auditLogs.set(d.id, this.mapAuditLog(d));
     }
   }
 
@@ -215,6 +227,7 @@ class PostgresDatabaseStore {
       date_format_billing: extra?.date_format_billing || 'BOTH',
       kds_print_mode: (extra as any)?.kds_print_mode || 'DISPLAY_ONLY',
       default_language: (extra as any)?.default_language || 'en',
+      printer_relay_host: extra?.printer_relay_host || null,
       created_at: new Date(),
       updated_at: new Date(),
     };
@@ -244,6 +257,7 @@ class PostgresDatabaseStore {
           date_format_billing: business.date_format_billing || 'BOTH',
           kds_print_mode: business.kds_print_mode || 'DISPLAY_ONLY',
           default_language: business.default_language || 'en',
+          printer_relay_host: business.printer_relay_host || null,
           created_at: business.created_at,
           updated_at: business.updated_at,
         },
@@ -933,9 +947,10 @@ class PostgresDatabaseStore {
     expires_at: Date;
     rawOtpDev?: string;
   }): Promise<OtpVerification> {
-    const docId = sanitizePhoneId(data.phone_e164);
     const otp: OtpVerification = {
-      id: docId,
+      // Every request gets its own durable row so latest-code lookup and resend
+      // cooldowns work across process restarts and horizontally scaled instances.
+      id: crypto.randomUUID(),
       user_id: data.user_id,
       phone_e164: data.phone_e164,
       otp_hash: data.otp_hash,
@@ -956,78 +971,141 @@ class PostgresDatabaseStore {
     }
 
     try {
-      await prisma.otpVerification.upsert({
-        where: { id: otp.id },
-        create: {
-          id: otp.id,
-          user_id: otp.user_id,
-          phone_e164: otp.phone_e164,
-          otp_hash: otp.otp_hash,
-          purpose: otp.purpose,
-          expires_at: otp.expires_at,
-          attempt_count: otp.attempt_count,
-          verified_at: null,
-          created_at: otp.created_at,
-        },
-        update: {
-          otp_hash: otp.otp_hash,
-          expires_at: otp.expires_at,
-          attempt_count: otp.attempt_count,
-        },
-      });
-    } catch (e) {}
+      await prisma.otpVerification.create({ data: otp });
+    } catch (error) {
+      if (config.isProduction) {
+        this.otpVerifications.delete(otp.id);
+        throw error;
+      }
+      console.warn('OTP persistence notice (using in-memory development store):', (error as Error).message);
+    }
 
     return otp;
   }
 
   async getLatestOtp(userId: string, purpose: OtpVerification['purpose']): Promise<OtpVerification | null> {
+    try {
+      const stored = await prisma.otpVerification.findFirst({
+        where: { user_id: userId, purpose },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      });
+      if (stored) {
+        const otp = stored as OtpVerification;
+        this.otpVerifications.set(otp.id, otp);
+        return otp;
+      }
+      if (config.isProduction) return null;
+    } catch (error) {
+      if (config.isProduction) throw error;
+      console.warn('OTP lookup notice (using in-memory development store):', (error as Error).message);
+    }
+
     let latest: OtpVerification | null = null;
     for (const otp of this.otpVerifications.values()) {
-      if (otp.user_id === userId && otp.purpose === purpose) {
-        if (!latest || otp.created_at > latest.created_at) {
-          latest = otp;
-        }
-      }
+      if (otp.user_id === userId && otp.purpose === purpose && (
+        !latest || otp.created_at > latest.created_at ||
+        (otp.created_at.getTime() === latest.created_at.getTime() && otp.id > latest.id)
+      )) latest = otp;
     }
     return latest;
   }
 
   async incrementOtpAttempt(id: string): Promise<number> {
-    const otp = this.otpVerifications.get(id);
-    if (otp) {
+    try {
+      const updated = await prisma.otpVerification.update({
+        where: { id },
+        data: { attempt_count: { increment: 1 } },
+      });
+      this.otpVerifications.set(updated.id, updated as OtpVerification);
+      return updated.attempt_count;
+    } catch (error) {
+      if (config.isProduction) throw error;
+      const otp = this.otpVerifications.get(id);
+      if (!otp) return 0;
       otp.attempt_count += 1;
       this.otpVerifications.set(id, otp);
-      try {
-        await prisma.otpVerification.update({
-          where: { id },
-          data: { attempt_count: otp.attempt_count },
-        });
-      } catch (e) {}
       return otp.attempt_count;
     }
-    return 0;
   }
 
   async markOtpVerified(id: string): Promise<void> {
-    const otp = this.otpVerifications.get(id);
     const now = new Date();
-    if (otp) {
-      otp.verified_at = now;
-      this.otpVerifications.set(id, otp);
-      try {
-        await prisma.otpVerification.update({
-          where: { id },
+    try {
+      const updated = await prisma.otpVerification.update({ where: { id }, data: { verified_at: now } });
+      this.otpVerifications.set(updated.id, updated as OtpVerification);
+    } catch (error) {
+      if (config.isProduction) throw error;
+      const otp = this.otpVerifications.get(id);
+      if (otp) {
+        otp.verified_at = now;
+        this.otpVerifications.set(id, otp);
+      }
+    }
+  }
+
+  async deleteOtpVerification(id: string): Promise<void> {
+    this.otpVerifications.delete(id);
+    try {
+      await prisma.otpVerification.delete({ where: { id } });
+    } catch (error) {
+      if (config.isProduction) throw error;
+    }
+  }
+
+  async completeEmailVerification(userId: string, businessId: string, otpId: string): Promise<void> {
+    const now = new Date();
+    try {
+      await prisma.$transaction(async (tx) => {
+        const consumed = await tx.otpVerification.updateMany({
+          where: {
+            id: otpId,
+            user_id: userId,
+            purpose: 'SIGNUP_VERIFICATION',
+            verified_at: null,
+            expires_at: { gt: now },
+            attempt_count: { lt: config.otpMaxAttempts },
+          },
           data: { verified_at: now },
         });
-      } catch (e) {}
+        if (consumed.count !== 1) {
+          const error: any = new Error('This verification code is no longer active. Please request a new code.');
+          error.code = 'INVALID_OTP';
+          error.statusCode = 400;
+          throw error;
+        }
+        await tx.user.update({ where: { id: userId }, data: { status: 'ACTIVE', updated_at: now } });
+        await tx.business.update({ where: { id: businessId }, data: { status: 'ACTIVE', updated_at: now } });
+      });
+      const otp = this.otpVerifications.get(otpId);
+      if (otp) { otp.verified_at = now; this.otpVerifications.set(otpId, otp); }
+      const user = this.users.get(userId);
+      if (user) { user.status = 'ACTIVE'; user.updated_at = now; }
+      const business = this.businesses.get(businessId);
+      if (business) { business.status = 'ACTIVE'; business.updated_at = now; }
+    } catch (error) {
+      if (config.isProduction) throw error;
+      const otp = this.otpVerifications.get(otpId);
+      const user = this.users.get(userId);
+      const business = this.businesses.get(businessId);
+      if (!otp || !user || !business || otp.verified_at || otp.expires_at <= now || otp.attempt_count >= config.otpMaxAttempts) throw error;
+      otp.verified_at = now;
+      user.status = 'ACTIVE';
+      user.updated_at = now;
+      business.status = 'ACTIVE';
+      business.updated_at = now;
     }
   }
 
   async getRecentOtpRequestsCount(phone_e164: string, windowMs: number): Promise<number> {
     const cutoff = Date.now() - windowMs;
-    return Array.from(this.otpVerifications.values())
-      .filter(otp => otp.phone_e164 === phone_e164 && otp.created_at.getTime() > cutoff)
-      .length;
+    try {
+      return await prisma.otpVerification.count({ where: { phone_e164, created_at: { gt: new Date(cutoff) } } });
+    } catch (error) {
+      if (config.isProduction) throw error;
+      return Array.from(this.otpVerifications.values())
+        .filter(otp => otp.phone_e164 === phone_e164 && otp.created_at.getTime() > cutoff)
+        .length;
+    }
   }
 
   // --- Password Reset Tokens ---

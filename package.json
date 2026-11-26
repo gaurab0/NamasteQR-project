@@ -17,6 +17,7 @@
     "test": "node ./node_modules/tsx/dist/cli.mjs server/test/auth.test.ts",
     "test:scenarios": "node ./node_modules/tsx/dist/cli.mjs server/test/e2e_scenarios.test.ts",
     "test:printing": "node ./node_modules/tsx/dist/cli.mjs server/test/printer_routing.test.ts && node ./node_modules/tsx/dist/cli.mjs server/test/print_security.test.ts",
+    "test:printer-service": "node ./node_modules/tsx/dist/cli.mjs server/test/printer_service.test.ts",
     "lint": "node ./node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
@@ -50,6 +51,7 @@
     "react-dom": "^19.0.1",
     "socket.io": "^4.8.4",
     "socket.io-client": "^4.8.4",
+    "socks": "^2.8.11",
     "three": "^0.186.1",
     "three-stdlib": "^2.36.1",
     "vite": "^6.2.3",

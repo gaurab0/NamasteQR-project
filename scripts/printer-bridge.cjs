@@ -2,8 +2,8 @@
  * ServeFlow Local Thermal Printer Hardware Bridge
  * 
  * Lightweight standalone Node.js bridge service that accepts raw binary
- * ESC/POS commands via HTTP POST from browser apps and streams them over
- * direct TCP sockets (net.Socket) to thermal receipt printers on port 9100.
+ * ESC/POS commands via HTTP POST from browser apps and sends them through the
+ * shared printer service to thermal receipt printers on port 9100.
  * 
  * Usage:
  *   node scripts/printer-bridge.cjs
@@ -13,7 +13,8 @@
 
 const express = require('express');
 const cors = require('cors');
-const net = require('net');
+require('tsx/cjs/api').register();
+const { checkPrinter, printRaw, PrinterError } = require('../server/src/services/printer.service.ts');
 
 const app = express();
 const PORT = process.env.BRIDGE_PORT || process.env.PORT || 9100;
@@ -42,7 +43,7 @@ app.get('/health', (_req, res) => {
 });
 
 // Ping / probe printer reachability
-app.get('/ping', (req, res) => {
+app.get('/ping', async (req, res) => {
   let host = req.query.host || DEFAULT_PRINTER_HOST;
   let port = Number(req.query.port) || DEFAULT_PRINTER_PORT;
   const timeout = Number(req.query.timeout) || 3000;
@@ -53,37 +54,14 @@ app.get('/ping', (req, res) => {
     if (parts[1]) port = Number(parts[1]) || port;
   }
 
-  const socket = new net.Socket();
-  socket.setTimeout(timeout);
-
-  let done = false;
-  socket.connect(port, host, () => {
-    if (done) return;
-    done = true;
-    socket.destroy();
-    res.json({ success: true, reachable: true, host, port });
-  });
-
-  socket.on('error', (err) => {
-    if (done) return;
-    done = true;
-    socket.destroy();
-    res.status(502).json({ success: false, reachable: false, host, port, error: err.message });
-  });
-
-  socket.on('timeout', () => {
-    if (done) return;
-    done = true;
-    socket.destroy();
-    res.status(504).json({ success: false, reachable: false, host, port, error: 'Connection timed out' });
-  });
+  const result = await checkPrinter({ host, port }, { holdMs: timeout });
+  return res.status(result.ok ? 200 : 503).json({ success: result.ok, reachable: result.ok, host, port, ...result });
 });
 
 // Print raw binary buffer to target printer
-app.post('/print', (req, res) => {
+app.post('/print', async (req, res) => {
   let host = req.query.host || req.headers['x-printer-host'] || DEFAULT_PRINTER_HOST;
   let port = Number(req.query.port || req.headers['x-printer-port']) || DEFAULT_PRINTER_PORT;
-  const timeout = Number(req.query.timeout) || 6000;
 
   if (typeof host === 'string' && host.includes(':') && !host.includes('[')) {
     const parts = host.split(':');
@@ -104,46 +82,15 @@ app.post('/print', (req, res) => {
     return res.status(400).json({ success: false, error: 'No print payload received in request body.' });
   }
 
-  console.log(`[Bridge] Relaying ${buffer.length} bytes to printer at ${host}:${port}...`);
-
-  const socket = new net.Socket();
-  socket.setTimeout(timeout);
-  let completed = false;
-
-  const cleanup = () => {
-    socket.removeAllListeners();
-    socket.destroy();
-  };
-
-  socket.connect(port, host, () => {
-    socket.write(buffer, () => {
-      socket.end();
-    });
-  });
-
-  socket.on('close', () => {
-    if (completed) return;
-    completed = true;
-    cleanup();
+  try {
+    await printRaw(buffer, { host, port });
     console.log(`[Bridge] Done: Sent ${buffer.length} bytes to ${host}:${port}`);
     return res.json({ success: true, bytesSent: buffer.length, host, port });
-  });
-
-  socket.on('error', (err) => {
-    if (completed) return;
-    completed = true;
-    cleanup();
-    console.error(`[Bridge Error] Socket error for ${host}:${port}:`, err.message);
-    return res.status(502).json({ success: false, error: `Printer socket error: ${err.message}` });
-  });
-
-  socket.on('timeout', () => {
-    if (completed) return;
-    completed = true;
-    cleanup();
-    console.error(`[Bridge Timeout] Timeout connecting to ${host}:${port}`);
-    return res.status(504).json({ success: false, error: `Socket timeout after ${timeout}ms connecting to ${host}:${port}` });
-  });
+  } catch (error) {
+    const printerError = error instanceof PrinterError ? error : new PrinterError(`Printing failed: ${error.message || error}`);
+    console.error(`[Bridge Error] Printer service failed for ${host}:${port}: ${printerError.message}`);
+    return res.status(503).json({ success: false, error: printerError.message, code: printerError.code });
+  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {

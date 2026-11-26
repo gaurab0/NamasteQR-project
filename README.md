@@ -200,6 +200,26 @@ NamasteQR is a modern, hospitality-focused order management portal designed for 
 
 ## 5. Environment Variables Documentation
 
+### Render printing over Tailscale
+
+The Docker service starts Tailscale in userspace networking mode and exposes its SOCKS5 proxy only to the printer module. Configure these variables in Render and store the auth key as a secret:
+
+| Variable | Render value or purpose |
+| :--- | :--- |
+| `PRINTER_RELAY_HOST` | Restaurant PC's Tailscale `100.x.y.z` address; used when the business has no `printer_relay_host` value. |
+| `PRINTER_RELAY_PORT` | `9100` |
+| `PRINTER_PROXY` | `127.0.0.1:1055` |
+| `TAILSCALE_AUTHKEY` | Tailscale auth key stored as a Render secret. |
+| `PRINTER_TIMEOUT_MS` | Connection timeout in milliseconds; defaults to `5000`. |
+| `PRINTER_LINGER_MS` | Post-send dropped-connection check in milliseconds; defaults to `500`. |
+| `PRINTER_ATTEMPTS` | Retry count; defaults to `3`. |
+
+For local development, leave `PRINTER_PROXY` empty or unset to connect directly. Set `PRINTER_RELAY_HOST` to a reachable printer relay (or configure the restaurant-specific `businesses.printer_relay_host`) and keep port `9100`. `TAILSCALE_AUTHKEY` is only needed by the container startup script. Never commit its value.
+
+`POST /api/print/test-print` requires the existing `ADMIN` role. `GET /health/printer` reports relay connectivity and does not print. Set a restaurant relay with `UPDATE businesses SET printer_relay_host = '100.x.y.z' WHERE id = '<business-id>';`.
+
+The `prisma/migrations/20261125000000_add_printer_relay_host/migration.sql` migration adds the nullable restaurant relay field.
+
 | Variable | Description | Default |
 | :--- | :--- | :--- |
 | `NODE_ENV` | Runtime environment (`development` or `production`) | `development` |
